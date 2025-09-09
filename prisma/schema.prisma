@@ -1,0 +1,103 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql" // ou "postgresql" se preferir
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            Int       @id @default(autoincrement())
+  name          String
+  cpf           String    @unique // armazenar normalizado: só dígitos
+  email         String    @unique
+  passwordHash  String
+  cep           String?
+  address       String?
+  plate         String?   // placa do veículo
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  consents      Consent[]
+  sessions      Session[]
+}
+
+model Consent {
+  id           Int       @id @default(autoincrement())
+  userId       Int
+  kind         ConsentKind
+  granted      Boolean
+  version      Int       @default(1)
+  source       String?   // ex.: "web", "app", "import"
+  createdAt    DateTime  @default(now())
+
+  user         User      @relation(fields: [userId], references: [id])
+  @@index([userId, kind])
+}
+
+enum ConsentKind {
+  EMAIL_MARKETING
+  WHATSAPP_MARKETING
+}
+
+model Session {
+  id             Int       @id @default(autoincrement())
+  userId         Int
+  refreshToken   String    @unique
+  ip             String?
+  userAgent      String?
+  createdAt      DateTime  @default(now())
+  expiresAt      DateTime
+
+  user           User      @relation(fields: [userId], references: [id])
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model Offer {
+  id          Int       @id @default(autoincrement())
+  title       String
+  slug        String    @unique
+  summary     String?
+  description String?
+  imageUrl    String?
+  status      PublishStatus @default(DRAFT)
+  startsAt    DateTime?     // para agendar
+  endsAt      DateTime?
+  priority    Int        @default(0) // ordenação no frontend
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+}
+
+model ServiceItem {
+  id          Int       @id @default(autoincrement())
+  title       String
+  slug        String    @unique
+  summary     String?
+  description String?
+  imageUrl    String?
+  status      PublishStatus @default(DRAFT)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+}
+
+model Partner {
+  id          Int       @id @default(autoincrement())
+  name        String
+  slug        String    @unique
+  description String?
+  logoUrl     String?
+  siteUrl     String?
+  status      PublishStatus @default(DRAFT)
+  priority    Int        @default(0)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+}
+
+enum PublishStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
