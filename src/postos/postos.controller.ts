@@ -1,4 +1,4 @@
-import { Controller, Post, Body, UseGuards, Req } from '@nestjs/common';
+import { Controller, Post, Body, UseGuards, Req, Query } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PostosService } from './postos.service';
 import { PostosRequestDto } from './dto/postos-request.dto';
@@ -9,8 +9,13 @@ export class PostosController {
   constructor(private readonly postosService: PostosService) {}
 
   @Post('buscar')
-  async buscarPostos(@Body() body: PostosRequestDto, @Req() req) {
+  async buscarPostos(
+    @Body() body: PostosRequestDto,
+    @Req() req,
+    @Query('page') page: string
+  ) {
     const userId = req.user.userId;
-    return this.postosService.buscarPostos(body.latitude, body.longitude, userId);
+    const pageNumber = page ? parseInt(page, 10) : 1;
+    return this.postosService.buscarPostos(body.latitude, body.longitude, userId, pageNumber);
   }
 }

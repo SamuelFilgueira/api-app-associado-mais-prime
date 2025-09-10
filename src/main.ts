@@ -12,6 +12,7 @@ async function bootstrap() {
   const config = new DocumentBuilder().setTitle('Benefícios API').setVersion('1.0').build();
   const doc = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('docs', app, doc);
-  await app.listen(3000);
+  const port = process.env.PORT || 3000;
+  await app.listen(port);
 }
 bootstrap();
