@@ -18,7 +18,13 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @Get('me')
   async getMe(@Request() req) {
-    return req.user;
+    // Busca o usuário completo no banco para garantir que a placa está presente
+  console.log('req.user:', req.user);
+  const user = await this.authService.getUserWithPlate(req.user.userId);
+    return {
+      ...req.user,
+      plate: user?.plate || null
+    };
   }
 
   @Post('register')

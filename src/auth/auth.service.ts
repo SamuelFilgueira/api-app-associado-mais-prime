@@ -11,6 +11,13 @@ export class AuthService {
     private jwtService: JwtService,
   ) {}
 
+  async getUserWithPlate(userId: number) {
+    return this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { plate: true }
+    });
+  }
+
   async validateUser(email: string, password: string) {
     const user = await this.prisma.user.findUnique({ where: { email } });
     if (user && await bcrypt.compare(password, user.passwordHash)) {
