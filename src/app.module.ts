@@ -1,6 +1,7 @@
 import { BoletoController } from './sga/boleto/boleto.controller';
 import { BoletoService } from './sga/boleto/boleto.service';
 import { Module } from '@nestjs/common';
+import { RastreamentoModule } from './rastreamento/rastreamento.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
@@ -15,7 +16,7 @@ import { SgaController } from './sga/sga.controller';
 import { SgaService } from './sga/sga.service';
 
 @Module({
-  imports: [AuthModule],
+  imports: [AuthModule, RastreamentoModule],
   controllers: [AppController, PostosController, CartaoController, EconomiaController, SgaController, BoletoController],
   providers: [AppService, PostosService, PrismaService, CartaoService, EconomiaService, SgaService, BoletoService],
 })
