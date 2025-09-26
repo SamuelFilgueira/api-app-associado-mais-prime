@@ -20,7 +20,7 @@ export class RastreamentoService {
     }
     try {
       const response = await axios.post(
-        'https://api.gps.tec.br/apiv3_homologacao/api/veiculos/ultima-posicao',
+        'https://api.gps.tec.br/apiv3/api/veiculos/ultima-posicao',
         { cnpj, chassi },
         {
           headers: {
@@ -32,7 +32,7 @@ export class RastreamentoService {
       if (response.status === 401 || (response.data && typeof response.data === 'object' && response.data.mensagem && response.data.mensagem.toLowerCase().includes('token'))) {
         await this.renovarToken();
         const retry = await axios.post(
-          'https://api.gps.tec.br/apiv3_homologacao/api/veiculos/ultima-posicao',
+          'https://api.gps.tec.br/apiv3/api/veiculos/ultima-posicao',
           { cnpj, chassi },
           {
             headers: {
@@ -50,8 +50,8 @@ export class RastreamentoService {
 
   async renovarToken() {
     try {
-      const response = await axios.post('https://api.gps.tec.br/apiv3_homologacao/login', {
-        codigo: '1',
+      const response = await axios.post('https://api.gps.tec.br/apiv3/login', {
+        codigo: '208',
         api_m7_token: process.env.MO7_TOKEN,
       });
       if (response.data && response.data.sucesso) {
