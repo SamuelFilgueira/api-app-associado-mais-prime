@@ -1,4 +1,10 @@
-import { IsEmail, IsString, MinLength } from 'class-validator';
+import {
+  IsBoolean,
+  IsEmail,
+  IsOptional,
+  IsString,
+  MinLength,
+} from 'class-validator';
 
 export class RegisterDto {
   @IsString()
@@ -22,4 +28,8 @@ export class RegisterDto {
 
   @IsString()
   plate?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  primeiroLogin?: boolean;
 }

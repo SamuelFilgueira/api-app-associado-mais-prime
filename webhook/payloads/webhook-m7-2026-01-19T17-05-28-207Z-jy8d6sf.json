@@ -1,0 +1,15 @@
+{
+  "receivedAt": "2026-01-19T17:05:28.207Z",
+  "type": "M7_WEBHOOK",
+  "payload": {
+    "codigo": "288956",
+    "tipo": 5,
+    "titulo": "Data: 10/01/2026 08:34, Vídeo hospedado, Monitorado: TESTE OTAVIO",
+    "destinatario": "00 (00) 00000-0000",
+    "canal": {
+      "identificacao": "https://shawnta-ununionized-amateurishly.ngrok-free.dev/api/rastreamento/webhook-m7",
+      "nome": "TESTE GENERICO"
+    },
+    "enviado_em": "2026-01-19T17:05:28.708Z"
+  }
+}

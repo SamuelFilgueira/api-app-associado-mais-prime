@@ -1,103 +1,280 @@
+
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "mysql" // ou "postgresql" se preferir
+  provider = "mysql"
   url      = env("DATABASE_URL")
 }
 
-model User {
-  id            Int       @id @default(autoincrement())
-  name          String
-  cpf           String    @unique // armazenar normalizado: só dígitos
-  email         String    @unique
-  passwordHash  String
-  cep           String?
-  address       String?
-  plate         String?   // placa do veículo
-  isActive      Boolean   @default(true)
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+model consent {
+  id        Int          @id @default(autoincrement())
+  userId    Int
+  kind      consent_kind
+  granted   Boolean
+  version   Int          @default(1)
+  source    String?
+  createdAt DateTime     @default(now())
+  user      user         @relation(fields: [userId], references: [id], map: "Consent_userId_fkey")
 
-  consents      Consent[]
-  sessions      Session[]
+  @@index([userId, kind], map: "Consent_userId_kind_idx")
 }
 
-model Consent {
-  id           Int       @id @default(autoincrement())
+model offer {
+  id          Int          @id @default(autoincrement())
+  title       String
+  slug        String       @unique(map: "Offer_slug_key")
+  summary     String?
+  description String?
+  imageUrl    String?
+  status      offer_status @default(DRAFT)
+  startsAt    DateTime?
+  endsAt      DateTime?
+  priority    Int          @default(0)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime
+}
+
+model partner {
+  id          Int            @id @default(autoincrement())
+  name        String
+  slug        String         @unique(map: "Partner_slug_key")
+  description String?
+  logoUrl     String?
+  siteUrl     String?
+  status      partner_status @default(DRAFT)
+  priority    Int            @default(0)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime
+}
+
+model serviceitem {
+  id          Int                @id @default(autoincrement())
+  title       String
+  slug        String             @unique(map: "ServiceItem_slug_key")
+  summary     String?
+  description String?
+  imageUrl    String?
+  status      serviceitem_status @default(DRAFT)
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime
+}
+
+model session {
+  id           Int      @id @default(autoincrement())
   userId       Int
-  kind         ConsentKind
-  granted      Boolean
-  version      Int       @default(1)
-  source       String?   // ex.: "web", "app", "import"
-  createdAt    DateTime  @default(now())
+  refreshToken String   @unique(map: "Session_refreshToken_key")
+  ip           String?
+  userAgent    String?
+  createdAt    DateTime @default(now())
+  expiresAt    DateTime
+  user         user     @relation(fields: [userId], references: [id], map: "Session_userId_fkey")
 
-  user         User      @relation(fields: [userId], references: [id])
-  @@index([userId, kind])
+  @@index([expiresAt], map: "Session_expiresAt_idx")
+  @@index([userId], map: "Session_userId_idx")
 }
 
-enum ConsentKind {
+model user {
+  id               Int            @id @default(autoincrement())
+  name             String
+  cpf              String         @unique(map: "User_cpf_key")
+  email            String         @unique(map: "User_email_key")
+  passwordHash     String
+  cep              String?
+  address          String?
+  plate            String?
+  primeiroLogin    Boolean        @default(false)
+  latitude         Float?
+  longitude        Float?
+  profilePhotoUrl  String?
+  isActive         Boolean        @default(true)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime
+  consent          consent[]
+  session          session[]
+  notifications    Notification[]
+  userVehicles     UserVehicle[]
+}
+
+model UserVehicle {
+  id                 Int      @id @default(autoincrement())
+  userId             Int
+  chassi             String   @db.VarChar(100)
+  plate              String?  @db.VarChar(20)
+  externalVehicleCode String? @db.VarChar(50)
+  isActive           Boolean  @default(true)
+  lastSyncAt         DateTime @default(now())
+  user               user     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, chassi], map: "UserVehicle_userId_chassi_key")
+  @@index([chassi], map: "UserVehicle_chassi_idx")
+  @@index([userId], map: "UserVehicle_userId_idx")
+}
+
+model VehicleWebhookEvent {
+  id          Int      @id @default(autoincrement())
+  chassi      String   @db.VarChar(100)
+  evento      String?  @db.VarChar(255)
+  tipoevento  Int?
+  provider    String   @default("M7") @db.VarChar(32)
+  payload     Json
+  receivedAt  DateTime @default(now())
+  processed   Boolean  @default(false)
+
+  @@index([chassi], map: "VehicleWebhookEvent_chassi_idx")
+  @@index([tipoevento], map: "VehicleWebhookEvent_tipoevento_idx")
+  @@index([receivedAt], map: "VehicleWebhookEvent_receivedAt_idx")
+}
+
+enum consent_kind {
   EMAIL_MARKETING
   WHATSAPP_MARKETING
 }
 
-model Session {
-  id             Int       @id @default(autoincrement())
-  userId         Int
-  refreshToken   String    @unique
-  ip             String?
-  userAgent      String?
-  createdAt      DateTime  @default(now())
-  expiresAt      DateTime
-
-  user           User      @relation(fields: [userId], references: [id])
-  @@index([userId])
-  @@index([expiresAt])
-}
-
-model Offer {
-  id          Int       @id @default(autoincrement())
-  title       String
-  slug        String    @unique
-  summary     String?
-  description String?
-  imageUrl    String?
-  status      PublishStatus @default(DRAFT)
-  startsAt    DateTime?     // para agendar
-  endsAt      DateTime?
-  priority    Int        @default(0) // ordenação no frontend
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
-}
-
-model ServiceItem {
-  id          Int       @id @default(autoincrement())
-  title       String
-  slug        String    @unique
-  summary     String?
-  description String?
-  imageUrl    String?
-  status      PublishStatus @default(DRAFT)
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
-}
-
-model Partner {
-  id          Int       @id @default(autoincrement())
-  name        String
-  slug        String    @unique
-  description String?
-  logoUrl     String?
-  siteUrl     String?
-  status      PublishStatus @default(DRAFT)
-  priority    Int        @default(0)
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
-}
-
-enum PublishStatus {
+enum offer_status {
   DRAFT
   PUBLISHED
   ARCHIVED
+}
+
+enum partner_status {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum serviceitem_status {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+
+//
+// ======================================================
+// NOVO MODEL — WORKSHOP (OFICINA)
+// ======================================================
+//
+
+model Workshop {
+  id                Int       @id @default(autoincrement())
+
+  // Dados principais
+  name              String    @db.VarChar(150)
+  email             String?   @db.VarChar(150)
+  shortDescription  String   @db.VarChar(100)
+  phone             String
+  phoneSecondary    String?
+  whatsapp          String?
+  description       String   @db.VarChar(400)
+
+  // Flags
+  isActive          Boolean   @default(true)
+  featuredInApp     Boolean   @default(false)
+
+  // Coordenadas
+  latitude          Float?
+  longitude         Float?
+
+  // Endereço
+  cep               String
+  address           String
+  district          String     // bairro
+  number            String
+  complement        String?
+  city              String
+  state             State
+  mapFrameUrl       String?     // iframe embed
+
+  // Fotos
+  photoFrontUrl     String?
+  photoBackUrl      String?
+
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+}
+
+enum State {
+  AC
+  AL
+  AP
+  AM
+  BA
+  CE
+  DF
+  ES
+  GO
+  MA
+  MT
+  MS
+  MG
+  PA
+  PB
+  PR
+  PE
+  PI
+  RJ
+  RN
+  RS
+  RO
+  RR
+  SC
+  SP
+  SE
+  TO
+}
+
+// ======================================================
+// NOVO MODEL — DOCUMENTS
+// ======================================================
+
+model Document {
+  id                Int           @id @default(autoincrement())
+
+  description       String        @db.VarChar(255)   // descrição do documento
+  documentUrl       String        @db.VarChar(500)   // link do documento (PDF, imagem, etc.)
+  type              DocumentType  // tipo do documento
+
+  // Flags de visibilidade
+  visibleConsultor  Boolean       @default(false)    // visível no app do consultor
+  visibleAssociado  Boolean       @default(false)    // visível no app do associado
+  visibleBoth       Boolean       @default(false)    // visível em ambos
+
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+}
+
+enum DocumentType {
+  TERMO_EVENTO
+  TERMO_PAYMENTS
+  TERMO_REVISTORIA
+  TERMO_USO_REGULAMENTO
+}
+
+// ======================================================
+// NOVO MODEL — NOTIFICATIONS
+// ======================================================
+
+model Notification {
+  id              Int       @id @default(autoincrement())
+  userId          Int
+  expoPushToken   String    @db.VarChar(255)
+  title           String    @db.VarChar(255)
+  body            String    @db.Text
+  data            Json      // { plate: string, ignition: 'on' | 'off', ... }
+  read            Boolean   @default(false)
+  sentAt          DateTime  @default(now())
+  readAt          DateTime? 
+  deleted         Boolean   @default(false)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  // Relação com user
+  user            user      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Índices para performance
+  @@index([userId, read], map: "Notification_userId_read_idx")
+  @@index([sentAt], map: "Notification_sentAt_idx")
+  @@index([createdAt], map: "Notification_createdAt_idx")
 }

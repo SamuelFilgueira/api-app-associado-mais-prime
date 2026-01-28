@@ -6,13 +6,27 @@ import { PrismaService } from '../prisma.service';
 export class PostosService {
   constructor(private prisma: PrismaService) {}
 
-  async buscarPostos(latitude: number, longitude: number, userId: number, page: number = 1) {
+  async buscarPostos(
+    latitude: number,
+    longitude: number,
+    userId: number,
+    page: number = 1,
+  ) {
+    console.log('buscarPostos chamado com:', {
+      latitude,
+      longitude,
+      userId,
+      page,
+    });
+
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user || !user.plate) {
       throw new NotFoundException('Placa não encontrada para o usuário');
     }
+
     const url = `https://tst-clubgas-api.azurewebsites.net/api/v1/Posto/obter-map-app?Latitude=${latitude}&Longitude=${longitude}&Placa=${user.plate}`;
     const { data } = await axios.get(url);
+
     // Paginação local
     const pageSize = 5;
     const totalElements = data.result.length;

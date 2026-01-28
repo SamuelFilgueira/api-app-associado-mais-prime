@@ -1,0 +1,17 @@
+{
+  "receivedAt": "2026-01-28T18:07:15.233Z",
+  "type": "M7_WEBHOOK",
+  "payload": {
+    "codigo": "288997",
+    "chassi": "987123",
+    "monitorado": "TESTE",
+    "evento": "TESTE DE ENVIO WEBHOOKM7",
+    "tipoevento": 1,
+    "titulo": "Data: 19/01/2026 18:28, Violação de Bateria, Monitorado: OTAVIO 2",
+    "canal": {
+      "identificacao": "https://shawnta-ununionized-amateurishly.ngrok-free.dev/api/rastreamento/webhook-m7",
+      "nome": "TESTE GENERICO"
+    },
+    "enviado_em": "2026-01-19T21:00:53.058Z"
+  }
+}

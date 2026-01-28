@@ -1,0 +1,9 @@
+{
+  "receivedAt": "2025-12-29T17:14:22.740Z",
+  "type": "M7_WEBHOOK",
+  "payload": {
+    "veiculo": "ABC1234",
+    "evento": "ignicao_ligada",
+    "timestamp": "2025-01-01T10:00:00Z"
+  }
+}

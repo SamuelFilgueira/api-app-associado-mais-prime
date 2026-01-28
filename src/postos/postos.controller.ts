@@ -12,10 +12,17 @@ export class PostosController {
   async buscarPostos(
     @Body() body: PostosRequestDto,
     @Req() req,
-    @Query('page') page: string
+    @Query('page') page: string,
   ) {
+    console.log('Body recebido para buscarPostos:', body);
+    console.log('Query page recebido para buscarPostos:', page);
     const userId = req.user.userId;
     const pageNumber = page ? parseInt(page, 10) : 1;
-    return this.postosService.buscarPostos(body.latitude, body.longitude, userId, pageNumber);
+    return this.postosService.buscarPostos(
+      body.latitude,
+      body.longitude,
+      userId,
+      pageNumber,
+    );
   }
 }
