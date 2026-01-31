@@ -18,6 +18,8 @@ import { OficinaModule } from './oficina/oficina.module';
 import { DocumentosModule } from './documentos/documentos.module';
 import { AssociadoModule } from './associado/associado.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { AlloyalApiModule } from './beneficios/alloyal-api.module';
+import { AlloyalApiController } from './beneficios/alloyal-api.controller';
 
 @Module({
   imports: [
@@ -27,6 +29,7 @@ import { NotificationsModule } from './notifications/notifications.module';
     DocumentosModule,
     AssociadoModule,
     NotificationsModule,
+    AlloyalApiModule,
   ],
   controllers: [
     AppController,
@@ -35,6 +38,7 @@ import { NotificationsModule } from './notifications/notifications.module';
     EconomiaController,
     SgaController,
     BoletoController,
+    AlloyalApiController,
   ],
   providers: [
     AppService,
