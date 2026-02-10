@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsObject, IsEnum } from 'class-validator';
+import { IsString, IsNotEmpty, IsEnum, IsInt, IsOptional } from 'class-validator';
 
 export class TestNotificationDto {
   @IsString()
@@ -20,7 +20,7 @@ export class TestNotificationDto {
   @IsNotEmpty()
   body: string;
 
-  // Flags de preferência do usuário
-  ignitionOn: boolean;
-  ignitionOff: boolean;
+  @IsInt()
+  @IsOptional()
+  userId?: number;
 }

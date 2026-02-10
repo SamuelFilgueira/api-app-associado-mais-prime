@@ -13,14 +13,9 @@ import {
 } from './DTOs/get-notifications-response.dto';
 
 export type NotificationData = {
-  plate: string;
-  ignition: 'on' | 'off';
+  plate?: string;
+  ignition?: 'on' | 'off';
   [key: string]: any;
-};
-
-export type NotificationPreference = {
-  ignitionOn: boolean;
-  ignitionOff: boolean;
 };
 
 @Injectable()
@@ -66,10 +61,32 @@ export class NotificationsService {
     title: string,
     body: string,
     data: NotificationData,
-    preference: NotificationPreference,
   ): Promise<{ success: boolean; message: string; notificationId?: number }> {
     if (!Expo.isExpoPushToken(expoPushToken)) {
       return { success: false, message: 'Token Expo inválido.' };
+    }
+
+    // Verificar se o usuário existe no banco (importante para constraint FK)
+    const userExists = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { notificacaoIgnicao: true },
+    });
+
+    if (!userExists) {
+      return {
+        success: false,
+        message: `Usuario com ID ${userId} nao encontrado no banco.`,
+      };
+    }
+
+    // Validar preferências de ignição se aplicável
+    if (data?.ignition) {
+      if (!userExists.notificacaoIgnicao) {
+        return {
+          success: false,
+          message: 'Preferencia de notificacao de ignicao desativada.',
+        };
+      }
     }
 
     // Salvar no banco ANTES de enviar
@@ -312,5 +329,87 @@ export class NotificationsService {
       `🧹 [Cleanup] ${result.count} notificações antigas removidas (>${daysOld} dias)`,
     );
     return { deletedCount: result.count };
+  }
+
+  /**
+   * Envia notificacoes de marketing para usuarios opt-in
+   * Apenas ADMIN pode chamar este método
+   */
+  async sendMarketingNotification(
+    payload: {
+      title: string;
+      body: string;
+      data?: Record<string, any>;
+    },
+    adminUserId?: number,
+  ): Promise<{ sentCount: number; skippedCount: number }> {
+    // Validar que quem está chamando é ADMIN
+    if (adminUserId) {
+      const admin = await this.prisma.user.findUnique({
+        where: { id: adminUserId },
+        select: { role: true },
+      });
+
+      if (!admin || admin.role !== 'ADMIN') {
+        throw new ForbiddenException(
+          'Apenas usuarios com role ADMIN podem enviar notificacoes de marketing.',
+        );
+      }
+    }
+
+    const dataPayload = payload.data ?? { type: 'marketing' };
+
+    const recipients = await this.prisma.notification.findMany({
+      where: {
+        deleted: false,
+        user: {
+          acceptsMarketingNotifications: true,
+          isActive: true,
+        },
+      },
+      orderBy: { sentAt: 'desc' },
+      distinct: ['userId'],
+      select: {
+        userId: true,
+        expoPushToken: true,
+      },
+    });
+
+    const validRecipients = recipients.filter((recipient) =>
+      Expo.isExpoPushToken(recipient.expoPushToken),
+    );
+
+    if (validRecipients.length === 0) {
+      return { sentCount: 0, skippedCount: recipients.length };
+    }
+
+    const messages = validRecipients.map((recipient) => ({
+      to: recipient.expoPushToken,
+      sound: 'default' as const,
+      title: payload.title,
+      body: payload.body,
+      data: dataPayload,
+    }));
+
+    const chunks = this.expo.chunkPushNotifications(messages);
+    for (const chunk of chunks) {
+      await this.expo.sendPushNotificationsAsync(chunk);
+    }
+
+    await this.prisma.notification.createMany({
+      data: validRecipients.map((recipient) => ({
+        userId: recipient.userId,
+        expoPushToken: recipient.expoPushToken,
+        title: payload.title,
+        body: payload.body,
+        data: dataPayload as any,
+        sentAt: new Date(),
+      })),
+    });
+
+    return {
+      sentCount: validRecipients.length,
+      skippedCount: recipients.length - validRecipients.length,
+    };
   }
 }

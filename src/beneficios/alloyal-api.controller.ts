@@ -1,3 +1,10 @@
+import { AlloyalPromotionDto } from './DTOs/alloyal-promotion.dto';
+import {
+  AlloyalCouponRedeemRequestDto,
+  AlloyalCouponRedeemResponseDto,
+  AlloyalCouponOrderResponseDto,
+} from './DTOs/alloyal-coupon-redeem.dto';
+import { AlloyalCouponGenericRedeemRequestDto } from './DTOs/alloyal-coupon-generic-redeem-request.dto';
 import {
   Controller,
   Get,
@@ -243,6 +250,49 @@ export class AlloyalApiController {
   }
   /* #endregion */
 
+  /**
+   * Lista promoções disponíveis
+   * @param page Página para paginação (opcional)
+   * @param lat Latitude (opcional)
+   * @param lng Longitude (opcional)
+   * @param redeem_type Tipo do resgate: "physical" ou "online" (opcional)
+   * @param category_id ID da categoria (opcional)
+   * @param organization_id ID da marca (opcional)
+   * @param distance_km Distância máxima em km (opcional, padrão 30, máximo 30)
+   * @param term Termo de busca (opcional)
+   * @returns Lista de promoções
+   */
+  @Get('promotions')
+  async getPromotions(
+    @Query('page') page?: string,
+    @Query('lat') lat?: string,
+    @Query('lng') lng?: string,
+    @Query('redeem_type') redeem_type?: string,
+    @Query('category_id') category_id?: string,
+    @Query('organization_id') organization_id?: string,
+    @Query('distance_km') distance_km?: string,
+    @Query('term') term?: string,
+  ): Promise<AlloyalPromotionDto[]> {
+    try {
+      return await this.alloyalApiService.getPromotions(
+        page ? Number(page) : undefined,
+        lat,
+        lng,
+        redeem_type,
+        category_id ? Number(category_id) : undefined,
+        organization_id ? Number(organization_id) : undefined,
+        distance_km ? Number(distance_km) : undefined,
+        term,
+      );
+    } catch (error) {
+      this.logger.error('Erro ao buscar promoções', error.stack);
+      throw new HttpException(
+        'Erro ao buscar promoções',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
   /* #region Métodos para cupons de desconto */
 
   /**
@@ -305,7 +355,7 @@ export class AlloyalApiController {
   }
 
   /**
-   * Busca detalhes completos de um cupom específico
+   * Busca detalhes completos de um cupom específico - Esse endpoint por padrão retorna cupons de ativação com url para uso em lojas online no parâmetro activation_url. Caso esse parâmetro esteja vazio, o cupom é para uso em lojas físicas e o código do cupom estará disponível no parâmetro code.
    * @param organization_id ID da organização
    * @param coupon_id ID do cupom
    * @returns Detalhes completos do cupom
@@ -332,4 +382,65 @@ export class AlloyalApiController {
     }
   }
   /* #endregion */
+
+  /**
+   * Resgatar cupom com código (coupon_code)
+   * GET /organizations/:organization_id/orders
+   */
+  @Get('organizations/:organization_id/orders')
+  async redeemCouponWithCode(
+    @Param('organization_id') organization_id: string,
+    @Query('coupon_id') coupon_id: string,
+  ): Promise<AlloyalCouponRedeemResponseDto> {
+    try {
+      return await this.alloyalApiService.redeemCouponWithCode(
+        Number(organization_id),
+        { coupon_id: Number(coupon_id) },
+      );
+    } catch (error) {
+      this.logger.error('Erro ao resgatar cupom com código', error.stack);
+      throw new HttpException(
+        'Erro ao resgatar cupom com código',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  /**
+   * Listar todos os resgates de cupom
+   * GET /orders
+   */
+  @Get('orders')
+  async listAllCouponOrders(): Promise<AlloyalCouponOrderResponseDto[]> {
+    try {
+      return await this.alloyalApiService.listAllCouponOrders();
+    } catch (error) {
+      this.logger.error('Erro ao listar resgates de cupons', error.stack);
+      throw new HttpException(
+        'Erro ao listar resgates de cupons',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  /**
+   * Resgatar cupom genérico
+   * POST /orders
+   */
+  @Get('orders/redeem')
+  async redeemCouponGeneric(
+    @Query('coupon_id') coupon_id: string,
+  ): Promise<AlloyalCouponRedeemResponseDto> {
+    try {
+      return await this.alloyalApiService.redeemCouponGeneric({
+        coupon_id: Number(coupon_id),
+      });
+    } catch (error) {
+      this.logger.error('Erro ao resgatar cupom genérico', error.stack);
+      throw new HttpException(
+        'Erro ao resgatar cupom genérico',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
 }

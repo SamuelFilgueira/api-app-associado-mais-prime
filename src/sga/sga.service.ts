@@ -58,7 +58,6 @@ export class SgaService {
         },
         validateStatus: () => true,
       });
-      console.log('Resposta da API de veículos:', response.data);
       if (response.status >= 400) {
         return (
           response.data || {

@@ -12,10 +12,13 @@ import {
   Request,
   HttpCode,
   HttpStatus,
+  ForbiddenException,
 } from '@nestjs/common';
 import { NotificationsService } from './notifications.service';
 import { TestNotificationDto } from './DTOs/test-notification.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { AdminTokenGuard } from './admin-token.guard';
+import { SendMarketingNotificationDto } from './DTOs/send-marketing-notification.dto';
 
 @Controller('notifications')
 export class NotificationsController {
@@ -23,25 +26,19 @@ export class NotificationsController {
 
   @Post('test')
   async testNotification(@Body() dto: TestNotificationDto) {
-    // Simula consulta de preferências do usuário (normalmente viria do banco)
-    const preference = {
-      ignitionOn: dto.ignitionOn,
-      ignitionOff: dto.ignitionOff,
-    };
     const data = {
       plate: dto.plate,
       ignition: dto.ignition,
     };
-
-    // Nota: Para teste, usando um userId fictício (1)
+    console.log('📱 Enviando notificação de teste com dados:', data);
+    // Nota: Para teste, usando um userId padrão (1)
     // Em produção, isso viria do token JWT
     return this.notificationsService.sendPushNotification(
-      1, // userId fictício para teste
+      dto.userId ?? 1,
       dto.expoPushToken,
       dto.title,
       dto.body,
       data,
-      preference,
     );
   }
 
@@ -59,8 +56,8 @@ export class NotificationsController {
   ) {
     // Validar que o userId do token corresponde ao userId do params
     if (req.user && req.user.userId !== userId) {
-      throw new Error(
-        'Acesso negado: você só pode ver suas próprias notificações',
+      throw new ForbiddenException(
+        'Acesso negado: voce so pode ver suas proprias notificacoes',
       );
     }
 
@@ -88,8 +85,8 @@ export class NotificationsController {
   ) {
     // Validar que o userId do token corresponde ao userId do params
     if (req.user && req.user.userId !== userId) {
-      throw new Error(
-        'Acesso negado: você só pode ver suas próprias notificações',
+      throw new ForbiddenException(
+        'Acesso negado: voce so pode ver suas proprias notificacoes',
       );
     }
 
@@ -129,8 +126,8 @@ export class NotificationsController {
   ) {
     // Validar que o userId do token corresponde ao userId do params
     if (req.user.userId !== userId) {
-      throw new Error(
-        'Acesso negado: você só pode marcar suas próprias notificações',
+      throw new ForbiddenException(
+        'Acesso negado: voce so pode marcar suas proprias notificacoes',
       );
     }
 
@@ -150,8 +147,8 @@ export class NotificationsController {
   ) {
     // Validar que o userId do token corresponde ao userId do params
     if (req.user.userId !== userId) {
-      throw new Error(
-        'Acesso negado: você só pode deletar suas próprias notificações',
+      throw new ForbiddenException(
+        'Acesso negado: voce so pode deletar suas proprias notificacoes',
       );
     }
 
@@ -178,5 +175,16 @@ export class NotificationsController {
     const userId = req.user.userId;
     await this.notificationsService.deleteNotification(userId, notificationId);
     return { success: true, message: 'Notificação deletada com sucesso' };
+  }
+
+  /**
+   * POST /notifications/admin/marketing
+   * Envia notificacoes de marketing em massa (painel administrativo)
+   */
+  @UseGuards(JwtAuthGuard)
+  @Post('admin/marketing')
+  @HttpCode(HttpStatus.OK)
+  async sendMarketingNotification(@Body() dto: SendMarketingNotificationDto) {
+    return this.notificationsService.sendMarketingNotification(dto);
   }
 }

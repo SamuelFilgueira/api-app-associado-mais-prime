@@ -1,3 +1,9 @@
+import {
+  AlloyalCouponRedeemRequestDto,
+  AlloyalCouponRedeemResponseDto,
+  AlloyalCouponOrderResponseDto,
+} from './DTOs/alloyal-coupon-redeem.dto';
+import { AlloyalCouponGenericRedeemRequestDto } from './DTOs/alloyal-coupon-generic-redeem-request.dto';
 import { Injectable, Logger } from '@nestjs/common';
 import axios, { AxiosInstance, AxiosResponse } from 'axios';
 import { AlloyalOrganizationCouponDto } from './DTOs/alloyal-organization-coupon.dto';
@@ -9,6 +15,7 @@ import { AlloyalOrganizationCategoryDto } from './DTOs/alloyal-organization.dto'
 import { AlloyalOrganizationListDto } from './DTOs/alloyal-organization-list.dto';
 import { AlloyalOrganizationNearestDto } from './DTOs/alloyal-organization-nearest.dto';
 import { AlloyalOrganizationHighlightDto } from './DTOs/alloyal-organization-highlight.dto';
+import { AlloyalPromotionDto } from './DTOs/alloyal-promotion.dto';
 
 /**
  * Interface para armazenar os headers de autenticação da API Alloyal
@@ -34,6 +41,56 @@ export class AlloyalApiService {
     this.axiosInstance = axios.create({
       baseURL: process.env.BASE_URL_ALLOYAL,
     });
+  }
+
+  /**
+   * Executa uma requisição HTTP com retry automático em caso de erro 401
+   * A função recebe os headers atualizados como parâmetro para evitar closure com headers antigos
+   * @param requestFn Função que recebe headers atualizados e executa a requisição
+   * @param maxRetries Número máximo de tentativas (padrão: 1)
+   * @returns Resposta da requisição
+   */
+  private async makeAuthenticatedRequest<T>(
+    requestFn: (headers: AuthHeaders) => Promise<AxiosResponse<T>>,
+    maxRetries: number = 1,
+  ): Promise<AxiosResponse<T>> {
+    let attempts = 0;
+
+    while (attempts <= maxRetries) {
+      try {
+        // Garante que estamos autenticados
+        if (!this.authHeaders) {
+          await this.login();
+        }
+
+        // Executa a requisição passando os headers atualizados
+        return await requestFn(this.authHeaders!);
+      } catch (error) {
+        // Verifica se é um erro 401 (não autorizado)
+        if (axios.isAxiosError(error) && error.response?.status === 401) {
+          attempts++;
+
+          if (attempts <= maxRetries) {
+            this.logger.warn(
+              `Erro 401 detectado. Renovando autenticação e tentando novamente (tentativa ${attempts}/${maxRetries})...`,
+            );
+
+            // Limpa os headers antigos e força novo login
+            this.authHeaders = null;
+            await this.login();
+
+            // Continua o loop para tentar novamente com os novos headers
+            continue;
+          }
+        }
+
+        // Se não é 401 ou excedeu tentativas, propaga o erro
+        throw error;
+      }
+    }
+
+    // Não deveria chegar aqui, mas TypeScript exige
+    throw new Error('Failed to complete authenticated request');
   }
 
   /**
@@ -121,14 +178,11 @@ export class AlloyalApiService {
    */
   async getCategories(): Promise<any[]> {
     try {
-      if (!this.authHeaders) {
-        await this.login();
-      }
-      const response = await this.axiosInstance.get('/categories', {
-        headers: {
-          ...this.authHeaders,
-        },
-      });
+      const response = await this.makeAuthenticatedRequest((headers) =>
+        this.axiosInstance.get('/categories', {
+          headers: { ...headers },
+        }),
+      );
       return response.data;
     } catch (error) {
       this.logger.error('Erro ao buscar categorias', error.stack);
@@ -151,23 +205,16 @@ export class AlloyalApiService {
     lng?: string,
   ): Promise<AlloyalOrganizationCategoryDto[]> {
     try {
-      if (!this.authHeaders) {
-        await this.login();
-      }
       const params: any = { page };
       if (lat) params.lat = lat;
       if (lng) params.lng = lng;
 
-      const response = await this.axiosInstance.get(
-        `/categories/${id}/organizations`,
-        {
-          headers: {
-            ...this.authHeaders,
-          },
+      const response = await this.makeAuthenticatedRequest((headers) =>
+        this.axiosInstance.get(`/categories/${id}/organizations`, {
+          headers: { ...headers },
           params,
-        },
+        }),
       );
-
       // Remove campos desnecessários e formata distância
       return response.data.map((org: any) => {
         const {
@@ -215,10 +262,6 @@ export class AlloyalApiService {
     category_id?: number,
   ): Promise<AlloyalOrganizationListDto[]> {
     try {
-      if (!this.authHeaders) {
-        await this.login();
-      }
-
       // Monta parâmetros da requisição
       const params: any = { page };
       if (lat) params.lat = lat;
@@ -227,12 +270,12 @@ export class AlloyalApiService {
       if (search) params.search = search;
       if (category_id) params.category_id = category_id;
 
-      const response = await this.axiosInstance.get('/organizations', {
-        headers: {
-          ...this.authHeaders,
-        },
-        params,
-      });
+      const response = await this.makeAuthenticatedRequest((headers) =>
+        this.axiosInstance.get('/organizations', {
+          headers: { ...headers },
+          params,
+        }),
+      );
 
       // Mapeia dados e formata distância
       return response.data.map((org: any) => ({
@@ -270,20 +313,16 @@ export class AlloyalApiService {
     lng?: string,
   ): Promise<AlloyalOrganizationNearestDto[]> {
     try {
-      if (!this.authHeaders) {
-        await this.login();
-      }
-
       const params: any = {};
       if (lat) params.lat = lat;
       if (lng) params.lng = lng;
 
-      const response = await this.axiosInstance.get('/organizations/nearest', {
-        headers: {
-          ...this.authHeaders,
-        },
-        params,
-      });
+      const response = await this.makeAuthenticatedRequest((headers) =>
+        this.axiosInstance.get('/organizations/nearest', {
+          headers: { ...headers },
+          params,
+        }),
+      );
 
       return response.data.map((org: any) => ({
         id: org.id,
@@ -313,6 +352,82 @@ export class AlloyalApiService {
   }
 
   /**
+   * Lista promoções disponíveis
+   * @param page Página para paginação (opcional)
+   * @param lat Latitude (opcional)
+   * @param lng Longitude (opcional)
+   * @param redeem_type Tipo do resgate: "physical" ou "online" (opcional)
+   * @param category_id ID da categoria (opcional)
+   * @param organization_id ID da marca (opcional)
+   * @param distance_km Distância máxima em km (opcional, padrão 30, máximo 30)
+   * @param term Termo de busca (opcional)
+   * @returns Lista de promoções
+   */
+  async getPromotions(
+    page?: number,
+    lat?: string,
+    lng?: string,
+    redeem_type?: string,
+    category_id?: number,
+    organization_id?: number,
+    distance_km?: number,
+    term?: string,
+  ): Promise<AlloyalPromotionDto[]> {
+    try {
+      const params: any = {};
+      if (lat) params.lat = lat;
+      if (lng) params.lng = lng;
+      if (page) params.page = page;
+      if (redeem_type) params.redeem_type = redeem_type;
+      if (category_id) params.category_id = category_id;
+      if (organization_id) params.organization_id = organization_id;
+      if (distance_km) params.distance_km = Math.min(distance_km, 30);
+      if (term) params.term = term;
+
+      const response = await this.makeAuthenticatedRequest((headers) =>
+        this.axiosInstance.get('/promotions', {
+          headers: { ...headers },
+          params,
+        }),
+      );
+
+      return response.data.map((promo: any) => ({
+        id: promo.id,
+        title: promo.title,
+        rules: promo.rules,
+        description: promo.description,
+        url: promo.url,
+        discount: promo.discount,
+        start_date: promo.start_date
+          ? new Date(promo.start_date).toLocaleString('pt-BR')
+          : '',
+        end_date: promo.end_date
+          ? new Date(promo.end_date).toLocaleString('pt-BR')
+          : '',
+        working_days: Array.isArray(promo.working_days)
+          ? promo.working_days.map((wd: any) => ({
+              week_day: wd.week_day,
+              is_available: wd.is_available,
+              start_hour: wd.start_hour,
+              end_hour: wd.end_hour,
+            }))
+          : [],
+        quantity: promo.quantity,
+        redeemed_count: promo.redeemed_count,
+        infinity: promo.infinity,
+        organization_id: promo.organization_id,
+        dynamic_voucher: promo.dynamic_voucher,
+        branch_id: promo.branch_id,
+        coupon_id: promo.coupon_id,
+        tags: Array.isArray(promo.tags) ? promo.tags : [],
+      }));
+    } catch (error) {
+      this.logger.error('Erro ao buscar promoções', error.stack);
+      throw error;
+    }
+  }
+
+  /**
    * Busca organizações em destaque próximas baseado em coordenadas
    * @param lat Latitude de referência (opcional)
    * @param lng Longitude de referência (opcional)
@@ -323,22 +438,15 @@ export class AlloyalApiService {
     lng?: string,
   ): Promise<AlloyalOrganizationHighlightDto[]> {
     try {
-      if (!this.authHeaders) {
-        await this.login();
-      }
-
       const params: any = {};
       if (lat) params.lat = lat;
       if (lng) params.lng = lng;
 
-      const response = await this.axiosInstance.get(
-        '/organizations/highlights_nearby',
-        {
-          headers: {
-            ...this.authHeaders,
-          },
+      const response = await this.makeAuthenticatedRequest((headers) =>
+        this.axiosInstance.get('/organizations/highlights_nearby', {
+          headers: { ...headers },
           params,
-        },
+        }),
       );
 
       return response.data.map((org: any) => ({
@@ -381,22 +489,15 @@ export class AlloyalApiService {
     lng?: string,
   ): Promise<AlloyalBranchDto[]> {
     try {
-      if (!this.authHeaders) {
-        await this.login();
-      }
-
       const params: any = {};
       if (lat) params.lat = lat;
       if (lng) params.lng = lng;
 
-      const response = await this.axiosInstance.get(
-        `/organizations/${organization_id}/branches`,
-        {
-          headers: {
-            ...this.authHeaders,
-          },
+      const response = await this.makeAuthenticatedRequest((headers) =>
+        this.axiosInstance.get(`/organizations/${organization_id}/branches`, {
+          headers: { ...headers },
           params,
-        },
+        }),
       );
 
       // Formata horários e distância
@@ -442,17 +543,10 @@ export class AlloyalApiService {
     AlloyalOrganizationHighlightOnlineDto[]
   > {
     try {
-      if (!this.authHeaders) {
-        await this.login();
-      }
-
-      const response = await this.axiosInstance.get(
-        '/organizations/highlights_online',
-        {
-          headers: {
-            ...this.authHeaders,
-          },
-        },
+      const response = await this.makeAuthenticatedRequest((headers) =>
+        this.axiosInstance.get('/organizations/highlights_online', {
+          headers: { ...headers },
+        }),
       );
 
       return response.data.map((org: any) => ({
@@ -490,19 +584,12 @@ export class AlloyalApiService {
     usage_type: string = 'online',
   ): Promise<AlloyalOrganizationCouponDto[]> {
     try {
-      if (!this.authHeaders) {
-        await this.login();
-      }
-
       const params: any = { usage_type };
-      const response = await this.axiosInstance.get(
-        `/organizations/${organization_id}/coupons`,
-        {
-          headers: {
-            ...this.authHeaders,
-          },
+      const response = await this.makeAuthenticatedRequest((headers) =>
+        this.axiosInstance.get(`/organizations/${organization_id}/coupons`, {
+          headers: { ...headers },
           params,
-        },
+        }),
       );
 
       // Formata datas para padrão brasileiro
@@ -543,19 +630,15 @@ export class AlloyalApiService {
     page: number = 1,
   ): Promise<AlloyalBranchCouponDto[]> {
     try {
-      if (!this.authHeaders) {
-        await this.login();
-      }
-
       const params: any = { page };
-      const response = await this.axiosInstance.get(
-        `/organizations/${organization_id}/branches/${branch_id}/coupons`,
-        {
-          headers: {
-            ...this.authHeaders,
+      const response = await this.makeAuthenticatedRequest((headers) =>
+        this.axiosInstance.get(
+          `/organizations/${organization_id}/branches/${branch_id}/coupons`,
+          {
+            headers: { ...headers },
+            params,
           },
-          params,
-        },
+        ),
       );
 
       // Formata datas para padrão brasileiro
@@ -599,17 +682,13 @@ export class AlloyalApiService {
     coupon_id: number,
   ): Promise<AlloyalCouponDetailDto> {
     try {
-      if (!this.authHeaders) {
-        await this.login();
-      }
-
-      const response = await this.axiosInstance.get(
-        `/organizations/${organization_id}/coupons/${coupon_id}`,
-        {
-          headers: {
-            ...this.authHeaders,
+      const response = await this.makeAuthenticatedRequest((headers) =>
+        this.axiosInstance.get(
+          `/organizations/${organization_id}/coupons/${coupon_id}`,
+          {
+            headers: { ...headers },
           },
-        },
+        ),
       );
 
       const c = response.data;
@@ -644,5 +723,50 @@ export class AlloyalApiService {
       );
       throw error;
     }
+  }
+
+  /**
+   * Resgatar cupom com código (coupon_code)
+   * GET /organizations/{organization_id}/orders
+   */
+  async redeemCouponWithCode(
+    organization_id: number,
+    dto: AlloyalCouponRedeemRequestDto,
+  ): Promise<AlloyalCouponRedeemResponseDto> {
+    const response = await this.makeAuthenticatedRequest((headers) =>
+      this.axiosInstance.get(`/organizations/${organization_id}/orders`, {
+        headers: { ...headers },
+        params: dto,
+      }),
+    );
+    return response.data;
+  }
+
+  /**
+   * Listar todos os resgates de cupom
+   * GET /orders
+   */
+  async listAllCouponOrders(): Promise<AlloyalCouponOrderResponseDto[]> {
+    const response = await this.makeAuthenticatedRequest((headers) =>
+      this.axiosInstance.get('/orders', {
+        headers: { ...headers },
+      }),
+    );
+    return response.data;
+  }
+
+  /**
+   * Resgatar cupom genérico
+   * POST /orders
+   */
+  async redeemCouponGeneric(
+    dto: AlloyalCouponGenericRedeemRequestDto,
+  ): Promise<AlloyalCouponRedeemResponseDto> {
+    const response = await this.makeAuthenticatedRequest((headers) =>
+      this.axiosInstance.post('/orders', dto, {
+        headers: { ...headers },
+      }),
+    );
+    return response.data;
   }
 }
