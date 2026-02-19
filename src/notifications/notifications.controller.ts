@@ -15,17 +15,51 @@ import {
   ForbiddenException,
   Logger,
 } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
 import { NotificationsService } from './notifications.service';
 import { TestNotificationDto } from './DTOs/test-notification.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AdminTokenGuard } from './admin-token.guard';
 import { SendMarketingNotificationDto } from './DTOs/send-marketing-notification.dto';
+import { NOTIFICATION_QUEUE } from '../queue/queue.module';
 
 @Controller('notifications')
 export class NotificationsController {
   private readonly logger = new Logger(NotificationsController.name);
 
-  constructor(private readonly notificationsService: NotificationsService) {}
+  constructor(
+    private readonly notificationsService: NotificationsService,
+    @InjectQueue(NOTIFICATION_QUEUE) private readonly notificationQueue: Queue,
+  ) {}
+
+  /**
+   * POST /notifications/queue-test
+   * Enfileira a notificação no BullMQ em vez de enviar diretamente.
+   * Use este endpoint para verificar se a fila está operacional.
+   */
+  @Post('queue-test')
+  async queueTestNotification(@Body() dto: TestNotificationDto) {
+    const data = { plate: dto.plate, ignition: dto.ignition };
+    const job = await this.notificationQueue.add(
+      'push-test',
+      {
+        userId: dto.userId ?? 1,
+        expoPushToken: dto.expoPushToken,
+        title: dto.title,
+        body: dto.body,
+        data,
+      },
+      { attempts: 3, backoff: { type: 'exponential', delay: 2000 } },
+    );
+    this.logger.log(`[QUEUE] Job #${job.id} enfileirado para user ${dto.userId}`);
+    return {
+      queued: true,
+      jobId: job.id,
+      queue: NOTIFICATION_QUEUE,
+      enqueuedAt: new Date().toISOString(),
+    };
+  }
 
   @Post('test')
   async testNotification(@Body() dto: TestNotificationDto) {

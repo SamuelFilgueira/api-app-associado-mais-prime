@@ -20,9 +20,11 @@ import { AssociadoModule } from './associado/associado.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { AlloyalApiModule } from './beneficios/alloyal-api.module';
 import { AlloyalApiController } from './beneficios/alloyal-api.controller';
+import { QueueModule } from './queue/queue.module';
 
 @Module({
   imports: [
+    QueueModule,
     AuthModule,
     RastreamentoModule,
     OficinaModule,

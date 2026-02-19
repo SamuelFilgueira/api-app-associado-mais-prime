@@ -1,0 +1,16 @@
+node_modules
+dist
+.git
+.gitignore
+*.md
+.env
+.env.*
+uploads/profile-photos/*
+uploads/workshop-photos/*
+webhook/payloads/*
+test
+coverage
+.vscode
+.idea
+docker-compose.yml
+Dockerfile

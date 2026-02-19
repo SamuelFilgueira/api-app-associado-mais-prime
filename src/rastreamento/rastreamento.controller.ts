@@ -1,12 +1,18 @@
 import { Controller, Post, Body, UseGuards, Logger } from '@nestjs/common';
 import { RastreamentoService } from './rastreamento.service';
 import { M7WebhookGuard } from './guards/m7.guard';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
+import { WEBHOOK_QUEUE } from '../queue/queue.module';
 
 @Controller('rastreamento')
 export class RastreamentoController {
   private readonly logger = new Logger(RastreamentoController.name);
 
-  constructor(private readonly rastreamentoService: RastreamentoService) {}
+  constructor(
+    private readonly rastreamentoService: RastreamentoService,
+    @InjectQueue(WEBHOOK_QUEUE) private readonly webhookQueue: Queue,
+  ) {}
 
   // ROTAS REFERENTES AO RASTREAMENTO M7
   @Post('renovar-token')
@@ -51,7 +57,11 @@ export class RastreamentoController {
   @UseGuards(M7WebhookGuard)
   @Post('webhook-m7')
   async webhookM7(@Body() payload: unknown) {
-    this.logger.log('Webhook M7 recebido');
-    return this.rastreamentoService.processarWebhookM7(payload);
+    this.logger.log('Webhook M7 recebido — enfileirando para processamento');
+    const job = await this.webhookQueue.add('m7-event', { payload }, {
+      attempts: 3,
+      backoff: { type: 'exponential', delay: 5000 },
+    });
+    return { queued: true, jobId: job.id };
   }
 }
