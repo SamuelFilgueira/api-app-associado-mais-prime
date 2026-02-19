@@ -1,4 +1,4 @@
-import { Controller, Post, Body, UseGuards, Req, Query } from '@nestjs/common';
+import { Controller, Post, Body, UseGuards, Req, Query, Logger } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PostosService } from './postos.service';
 import { PostosRequestDto } from './dto/postos-request.dto';
@@ -6,6 +6,8 @@ import { PostosRequestDto } from './dto/postos-request.dto';
 @UseGuards(JwtAuthGuard)
 @Controller('postos')
 export class PostosController {
+  private readonly logger = new Logger(PostosController.name);
+
   constructor(private readonly postosService: PostosService) {}
 
   @Post('buscar')
@@ -14,8 +16,8 @@ export class PostosController {
     @Req() req,
     @Query('page') page: string,
   ) {
-    console.log('Body recebido para buscarPostos:', body);
-    console.log('Query page recebido para buscarPostos:', page);
+    this.logger.log(`Body recebido para buscarPostos: ${JSON.stringify(body)}`);
+    this.logger.log(`Query page recebido para buscarPostos: ${page}`);
     const userId = req.user.userId;
     const pageNumber = page ? parseInt(page, 10) : 1;
     return this.postosService.buscarPostos(

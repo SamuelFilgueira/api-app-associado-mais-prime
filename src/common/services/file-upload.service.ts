@@ -1,10 +1,12 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { promises as fs } from 'fs';
 import { join } from 'path';
 import sharp from 'sharp';
 
 @Injectable()
 export class FileUploadService {
+  private readonly logger = new Logger(FileUploadService.name);
+
   private readonly uploadPath = join(
     process.cwd(),
     'uploads',
@@ -71,7 +73,7 @@ export class FileUploadService {
       await fs.unlink(filepath);
     } catch (error) {
       // Ignora erros se o arquivo não existir
-      console.warn(`Erro ao deletar foto: ${error.message}`);
+      this.logger.warn(`Erro ao deletar foto: ${error.message}`);
     }
   }
 
@@ -82,7 +84,7 @@ export class FileUploadService {
       const filepath = join(process.cwd(), photoUrl);
       await fs.unlink(filepath);
     } catch (error) {
-      console.warn(`Erro ao deletar foto: ${error.message}`);
+      this.logger.warn(`Erro ao deletar foto: ${error.message}`);
     }
   }
 

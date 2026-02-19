@@ -98,9 +98,8 @@ export class RastreamentoService {
   async ultimaPosicaoSoftruck(
     chassi: string,
   ): Promise<UltimaPosicaoSoftruckResponse> {
-    console.log(
-      '[Rastreamento Service] Consultando última posição Softruck para chassi:',
-      chassi,
+    this.logger.log(
+      `Consultando última posição Softruck para chassi: ${chassi}`,
     );
     return this.softruck.ultimaPosicaoSoftruck(chassi);
   }
@@ -147,10 +146,10 @@ export class RastreamentoService {
         'utf-8',
       );
 
-      console.log(`[Webhook M7] Payload salvo em: ${filename}`);
+      this.logger.log(`[Webhook M7] Payload salvo em: ${filename}`);
     } catch (error) {
       // Não lança erro para não quebrar o fluxo do webhook
-      console.error('[Webhook M7] Erro ao salvar payload:', error);
+      this.logger.error('[Webhook M7] Erro ao salvar payload:', error);
     }
   }
 }

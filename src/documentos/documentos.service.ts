@@ -5,46 +5,46 @@ import { UpdateDocumentDto } from './DTOs/update-document.dto';
 
 @Injectable()
 export class DocumentosService {
-	constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) {}
 
-	async create(data: CreateDocumentDto) {
-		return this.prisma.document.create({ data });
-	}
+  async create(data: CreateDocumentDto) {
+    return this.prisma.document.create({ data });
+  }
 
-	async findAll() {
-		return this.prisma.document.findMany({
-			orderBy: { createdAt: 'desc' },
-		});
-	}
+  async findAll() {
+    return this.prisma.document.findMany({
+      orderBy: { createdAt: 'desc' },
+    });
+  }
 
-	async findOne(id: number) {
-		const document = await this.prisma.document.findUnique({
-			where: { id },
-		});
+  async findOne(id: number) {
+    const document = await this.prisma.document.findUnique({
+      where: { id },
+    });
 
-		if (!document) {
-			throw new NotFoundException('Documento nao encontrado');
-		}
+    if (!document) {
+      throw new NotFoundException('Documento nao encontrado');
+    }
 
-		return document;
-	}
+    return document;
+  }
 
-	async update(id: number, data: UpdateDocumentDto) {
-		await this.findOne(id);
+  async update(id: number, data: UpdateDocumentDto) {
+    await this.findOne(id);
 
-		return this.prisma.document.update({
-			where: { id },
-			data,
-		});
-	}
+    return this.prisma.document.update({
+      where: { id },
+      data,
+    });
+  }
 
-	async remove(id: number) {
-		await this.findOne(id);
+  async remove(id: number) {
+    await this.findOne(id);
 
-		await this.prisma.document.delete({
-			where: { id },
-		});
+    await this.prisma.document.delete({
+      where: { id },
+    });
 
-		return { deleted: true };
-	}
+    return { deleted: true };
+  }
 }

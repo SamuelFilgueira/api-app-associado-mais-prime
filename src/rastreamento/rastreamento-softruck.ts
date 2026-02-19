@@ -1,4 +1,4 @@
-import { InternalServerErrorException } from '@nestjs/common';
+import { InternalServerErrorException, Logger } from '@nestjs/common';
 import axios from 'axios';
 
 export interface UltimaPosicaoSoftruckResponse {
@@ -54,8 +54,10 @@ interface SoftruckTrackingResponse {
 }
 
 export class RastreamentoSoftruck {
+  private readonly logger = new Logger(RastreamentoSoftruck.name);
+
   constructor() {
-    console.log('[Softruck] Módulo de rastreamento Softruck inicializado');
+    this.logger.log('Módulo de rastreamento Softruck inicializado');
   }
 
   // Consultar a última posição do veículo via Softruck
@@ -81,7 +83,7 @@ export class RastreamentoSoftruck {
       if (error instanceof InternalServerErrorException) {
         throw error;
       }
-      console.error('[Softruck] Erro ao consultar última posição:', error);
+      this.logger.error('Erro ao consultar última posição:', error);
       throw new InternalServerErrorException(
         'Erro ao consultar última posição do veículo',
       );
@@ -125,9 +127,7 @@ export class RastreamentoSoftruck {
       const brandName = vehicleData.attributes.brand_name;
       const modelName = vehicleData.attributes.model_name;
 
-      console.log(
-        `[Softruck] Vehicle ID obtido: ${vehicleId} para chassi: ${chassi}`,
-      );
+      this.logger.log(`Vehicle ID obtido: ${vehicleId} para chassi: ${chassi}`);
       return {
         id: vehicleId,
         plate,
@@ -138,7 +138,7 @@ export class RastreamentoSoftruck {
       if (error instanceof InternalServerErrorException) {
         throw error;
       }
-      console.error('[Softruck] Erro ao obter vehicle_id:', error);
+      this.logger.error('Erro ao obter vehicle_id:', error);
       throw new InternalServerErrorException(
         'Erro ao buscar veículo pelo chassi',
       );
@@ -169,15 +169,15 @@ export class RastreamentoSoftruck {
       }
 
       const deviceId = response.data.data[0].relationships.devices.id;
-      console.log(
-        `[Softruck] Device ID obtido: ${deviceId} para vehicle: ${vehicleId}`,
+      this.logger.log(
+        `Device ID obtido: ${deviceId} para vehicle: ${vehicleId}`,
       );
       return deviceId;
     } catch (error) {
       if (error instanceof InternalServerErrorException) {
         throw error;
       }
-      console.error('[Softruck] Erro ao obter device_id:', error);
+      this.logger.error('Erro ao obter device_id:', error);
       throw new InternalServerErrorException(
         'Erro ao buscar dispositivo associado ao veículo',
       );
@@ -206,15 +206,15 @@ export class RastreamentoSoftruck {
         );
       }
 
-      console.log(
-        `[Softruck] Dados de rastreamento obtidos para vehicle: ${vehicleId}`,
+      this.logger.log(
+        `Dados de rastreamento obtidos para vehicle: ${vehicleId}`,
       );
       return response.data;
     } catch (error) {
       if (error instanceof InternalServerErrorException) {
         throw error;
       }
-      console.error('[Softruck] Erro ao obter dados de rastreamento:', error);
+      this.logger.error('Erro ao obter dados de rastreamento:', error);
       throw new InternalServerErrorException(
         'Erro ao buscar dados de rastreamento',
       );

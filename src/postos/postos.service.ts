@@ -1,9 +1,11 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import axios from 'axios';
 import { PrismaService } from '../prisma.service';
 
 @Injectable()
 export class PostosService {
+  private readonly logger = new Logger(PostosService.name);
+
   constructor(private prisma: PrismaService) {}
 
   async buscarPostos(
@@ -12,12 +14,7 @@ export class PostosService {
     userId: number,
     page: number = 1,
   ) {
-    console.log('buscarPostos chamado com:', {
-      latitude,
-      longitude,
-      userId,
-      page,
-    });
+    this.logger.log(`buscarPostos chamado com: ${JSON.stringify({ latitude, longitude, userId, page })}`);
 
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user || !user.plate) {

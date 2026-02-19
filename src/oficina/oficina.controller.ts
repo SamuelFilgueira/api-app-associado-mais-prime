@@ -14,7 +14,6 @@ import {
   UploadedFiles,
 } from '@nestjs/common';
 import { OficinaService } from './oficina.service';
-import { PrismaService } from 'src/prisma.service';
 import { CreateWorkshopDto } from './DTOs/create-workshop.dto';
 import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
 import { UpdateWorkshopDto } from './DTOs/update-workshop.dto';
@@ -23,10 +22,7 @@ import { FileFieldsInterceptor } from '@nestjs/platform-express';
 @UseGuards(JwtAuthGuard)
 @Controller('oficina')
 export class OficinaController {
-  constructor(
-    private readonly oficinaService: OficinaService,
-    private readonly prisma: PrismaService,
-  ) {}
+  constructor(private readonly oficinaService: OficinaService) {}
 
   @Get('nearby')
   findNearby(

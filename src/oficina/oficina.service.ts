@@ -60,24 +60,11 @@ export class OficinaService {
       longitude?: number;
     } = { ...data };
 
-    // Adicionar +55 aos telefones se não tiver
-    if (payload.phone && !payload.phone.startsWith('+55')) {
-      payload.phone = `+55${payload.phone.replace(/^\+?55/, '')}`;
-    }
-
-    if (payload.phoneSecondary && !payload.phoneSecondary.startsWith('+55')) {
-      payload.phoneSecondary = `+55${payload.phoneSecondary.replace(/^\+?55/, '')}`;
-    }
-
-    if (payload.whatsapp && !payload.whatsapp.startsWith('+55')) {
-      payload.whatsapp = `+55${payload.whatsapp.replace(/^\+?55/, '')}`;
-    }
+    // Normalizar telefones com prefixo +55
+    this.normalizePhoneNumbers(payload);
 
     if (Array.isArray(payload.services)) {
-      const normalized = payload.services
-        .map((service) => service.trim())
-        .filter((service) => service.length > 0);
-      payload.services = normalized;
+      payload.services = this.normalizeServices(payload.services);
     }
 
     if (files?.photoFront) {
@@ -98,37 +85,10 @@ export class OficinaService {
 
     // Se vier CEP → tentar buscar coordenadas
     if (payload.cep) {
-      try {
-        const token =
-          process.env.CEPABERTO_TOKEN || process.env.CEPABERTO_API_TOKEN;
-
-        const headers: Record<string, string> = {};
-        if (token) {
-          headers['Authorization'] = `Token token=${token}`;
-        }
-
-        const resp = await axios.get('https://www.cepaberto.com/api/v3/cep', {
-          params: { cep: payload.cep },
-          headers,
-          timeout: 5000,
-        });
-
-        const body = resp.data || {};
-
-        const lat = body.latitude ?? body.lat;
-        const lon = body.longitude ?? body.lng ?? body.lon;
-
-        if (lat != null && lon != null) {
-          payload.latitude = Number(lat);
-          payload.longitude = Number(lon);
-        }
-      } catch (err: unknown) {
-        const errorMessage = err instanceof Error ? err.message : String(err);
-
-        this.logger.warn(
-          `Erro ao buscar coordenadas no cepaberto para CEP ${payload.cep}: ${errorMessage}`,
-        );
-        // Continua mesmo se API falhar
+      const coords = await this.lookupCepCoordinates(payload.cep);
+      if (coords.latitude != null && coords.longitude != null) {
+        payload.latitude = coords.latitude;
+        payload.longitude = coords.longitude;
       }
     }
 
@@ -181,24 +141,11 @@ export class OficinaService {
       longitude?: number;
     } = { ...data };
 
-    // Adicionar +55 aos telefones se não tiver
-    if (payload.phone && !payload.phone.startsWith('+55')) {
-      payload.phone = `+55${payload.phone.replace(/^\+?55/, '')}`;
-    }
-
-    if (payload.phoneSecondary && !payload.phoneSecondary.startsWith('+55')) {
-      payload.phoneSecondary = `+55${payload.phoneSecondary.replace(/^\+?55/, '')}`;
-    }
-
-    if (payload.whatsapp && !payload.whatsapp.startsWith('+55')) {
-      payload.whatsapp = `+55${payload.whatsapp.replace(/^\+?55/, '')}`;
-    }
+    // Normalizar telefones com prefixo +55
+    this.normalizePhoneNumbers(payload);
 
     if (Array.isArray(payload.services)) {
-      const normalized = payload.services
-        .map((service) => service.trim())
-        .filter((service) => service.length > 0);
-      payload.services = normalized;
+      payload.services = this.normalizeServices(payload.services);
     }
 
     if (files?.photoFront) {
@@ -229,36 +176,10 @@ export class OficinaService {
 
     // Buscar coordenadas se CEP foi enviado
     if (payload.cep) {
-      try {
-        const token =
-          process.env.CEPABERTO_TOKEN || process.env.CEPABERTO_API_TOKEN;
-
-        const headers: Record<string, string> = {};
-        if (token) {
-          headers['Authorization'] = `Token token=${token}`;
-        }
-
-        const resp = await axios.get('https://www.cepaberto.com/api/v3/cep', {
-          params: { cep: payload.cep },
-          headers,
-          timeout: 5000,
-        });
-
-        const body = resp.data || {};
-
-        const lat = body.latitude ?? body.lat;
-        const lon = body.longitude ?? body.lng ?? body.lon;
-
-        if (lat != null && lon != null) {
-          payload.latitude = Number(lat);
-          payload.longitude = Number(lon);
-        }
-      } catch (err: unknown) {
-        const errorMessage = err instanceof Error ? err.message : String(err);
-
-        this.logger.warn(
-          `Erro ao buscar coordenadas no cepaberto para CEP ${payload.cep}: ${errorMessage}`,
-        );
+      const coords = await this.lookupCepCoordinates(payload.cep);
+      if (coords.latitude != null && coords.longitude != null) {
+        payload.latitude = coords.latitude;
+        payload.longitude = coords.longitude;
       }
     }
 
@@ -358,5 +279,61 @@ export class OficinaService {
       .filter((service): service is string => typeof service === 'string')
       .map((service) => service.trim())
       .filter((service) => service.length > 0);
+  }
+
+  /**
+   * Normaliza números de telefone adicionando prefixo +55 quando ausente
+   */
+  private normalizePhoneNumbers(payload: {
+    phone?: string;
+    phoneSecondary?: string;
+    whatsapp?: string;
+  }): void {
+    if (payload.phone && !payload.phone.startsWith('+55')) {
+      payload.phone = `+55${payload.phone.replace(/^\+?55/, '')}`;
+    }
+    if (payload.phoneSecondary && !payload.phoneSecondary.startsWith('+55')) {
+      payload.phoneSecondary = `+55${payload.phoneSecondary.replace(/^\+?55/, '')}`;
+    }
+    if (payload.whatsapp && !payload.whatsapp.startsWith('+55')) {
+      payload.whatsapp = `+55${payload.whatsapp.replace(/^\+?55/, '')}`;
+    }
+  }
+
+  /**
+   * Busca coordenadas geográficas a partir de um CEP via API CepAberto
+   */
+  private async lookupCepCoordinates(
+    cep: string,
+  ): Promise<{ latitude?: number; longitude?: number }> {
+    try {
+      const token =
+        process.env.CEPABERTO_TOKEN || process.env.CEPABERTO_API_TOKEN;
+
+      const headers: Record<string, string> = {};
+      if (token) {
+        headers['Authorization'] = `Token token=${token}`;
+      }
+
+      const resp = await axios.get('https://www.cepaberto.com/api/v3/cep', {
+        params: { cep },
+        headers,
+        timeout: 5000,
+      });
+
+      const body = resp.data || {};
+      const lat = body.latitude ?? body.lat;
+      const lon = body.longitude ?? body.lng ?? body.lon;
+
+      if (lat != null && lon != null) {
+        return { latitude: Number(lat), longitude: Number(lon) };
+      }
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      this.logger.warn(
+        `Erro ao buscar coordenadas no cepaberto para CEP ${cep}: ${errorMessage}`,
+      );
+    }
+    return {};
   }
 }

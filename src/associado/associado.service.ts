@@ -4,6 +4,7 @@ import {
   ConflictException,
   Injectable,
   InternalServerErrorException,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import axios from 'axios';
@@ -14,6 +15,8 @@ import { UpdateAssociadoDto } from './DTOs/update-associado.dto';
 
 @Injectable()
 export class AssociadoService {
+  private readonly logger = new Logger(AssociadoService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly authService: AuthService,
@@ -79,7 +82,7 @@ export class AssociadoService {
         validateStatus: () => true,
       });
 
-      console.log('Resposta da API SGA:', response.data);
+      this.logger.log(`Resposta da API SGA: ${JSON.stringify(response.data)}`);
     } catch {
       throw new InternalServerErrorException('Erro ao consultar SGA');
     }
@@ -153,8 +156,10 @@ export class AssociadoService {
     data: UpdateAssociadoDto,
     profilePhoto?: Express.Multer.File,
   ) {
-    console.log('Id recebido para atualização:', id);
-    console.log('Dados recebidos para atualização:', data);
+    this.logger.log(`Id recebido para atualização: ${id}`);
+    this.logger.log(
+      `Dados recebidos para atualização: ${JSON.stringify(data)}`,
+    );
     if (!id) throw new NotFoundException('ID do associado é obrigatório');
 
     const associado = await this.prisma.user.findUnique({

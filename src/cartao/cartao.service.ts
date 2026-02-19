@@ -1,9 +1,11 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import axios from 'axios';
 import { PrismaService } from '../prisma.service';
 
 @Injectable()
 export class CartaoService {
+  private readonly logger = new Logger(CartaoService.name);
+
   constructor(private prisma: PrismaService) {}
 
   async gerarCartaoVirtual(userId: number) {
@@ -15,7 +17,7 @@ export class CartaoService {
     }
     const url = `https://tst-clubgas-api.azurewebsites.net/api/v1/CartaoClub/obter-virtual?Placa=${user.plate}&Cpf=${user.cpf}`;
     const { data } = await axios.get(url);
-    console.log('Dados do cartão virtual:', data);
+    this.logger.log(`Dados do cartão virtual obtidos para usuário: ${userId}`);
     return data;
   }
 }

@@ -1,4 +1,4 @@
-import { UseGuards, Request } from '@nestjs/common';
+import { UseGuards, Request, Logger } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import {
   Body,
@@ -18,17 +18,21 @@ import { PrimeiroAcessoDto } from './DTOs/primeiro-acesso.dto';
 
 @Controller('associado')
 export class AssociadoController {
+  private readonly logger = new Logger(AssociadoController.name);
+
   constructor(private readonly associadoService: AssociadoService) {}
 
   @Post('primeiro-acesso')
   async primeiroAcesso(@Body() data: PrimeiroAcessoDto) {
-    console.log('dados recebido no primeiro acesso:', data);
+    this.logger.log(
+      `Dados recebido no primeiro acesso: ${JSON.stringify(data)}`,
+    );
     return this.associadoService.primeiroAcesso(data.cpf);
   }
 
   @Get(':id')
   async findById(@Param('id', ParseIntPipe) id: number) {
-    console.log('[Associado Controller] Buscando associado com ID:', id);
+    this.logger.log(`Buscando associado com ID: ${id}`);
     const resposta = await this.associadoService.findById(id);
     return resposta;
   }

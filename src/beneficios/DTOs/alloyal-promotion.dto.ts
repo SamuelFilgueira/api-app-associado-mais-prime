@@ -13,7 +13,7 @@ export class AlloyalPromotionDto {
   url: string | null;
   discount: number;
   start_date: string; // Normalizado pt-BR
-  end_date: string;   // Normalizado pt-BR
+  end_date: string; // Normalizado pt-BR
   working_days: AlloyalPromotionWorkingDayDto[];
   quantity: number;
   redeemed_count: number;

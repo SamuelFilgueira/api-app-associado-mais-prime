@@ -13,6 +13,7 @@ import {
   HttpCode,
   HttpStatus,
   ForbiddenException,
+  Logger,
 } from '@nestjs/common';
 import { NotificationsService } from './notifications.service';
 import { TestNotificationDto } from './DTOs/test-notification.dto';
@@ -22,6 +23,8 @@ import { SendMarketingNotificationDto } from './DTOs/send-marketing-notification
 
 @Controller('notifications')
 export class NotificationsController {
+  private readonly logger = new Logger(NotificationsController.name);
+
   constructor(private readonly notificationsService: NotificationsService) {}
 
   @Post('test')
@@ -30,7 +33,9 @@ export class NotificationsController {
       plate: dto.plate,
       ignition: dto.ignition,
     };
-    console.log('📱 Enviando notificação de teste com dados:', data);
+    this.logger.log(
+      `Enviando notificação de teste com dados: ${JSON.stringify(data)}`,
+    );
     // Nota: Para teste, usando um userId padrão (1)
     // Em produção, isso viria do token JWT
     return this.notificationsService.sendPushNotification(

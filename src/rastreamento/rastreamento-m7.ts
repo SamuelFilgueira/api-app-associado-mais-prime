@@ -1,4 +1,4 @@
-import { InternalServerErrorException } from '@nestjs/common';
+import { InternalServerErrorException, Logger } from '@nestjs/common';
 import axios from 'axios';
 
 export interface UltimaPosicaoM7Response {
@@ -29,6 +29,7 @@ export type AncoraM7Response =
     };
 
 export class RastreamentoM7 {
+  private readonly logger = new Logger(RastreamentoM7.name);
   private token: string | null = null;
   private tokenExpires: number | null = null;
 
@@ -192,7 +193,7 @@ export class RastreamentoM7 {
       if (response.data && response.data.sucesso) {
         this.token = response.data.token;
         this.tokenExpires = response.data.expires_in;
-        console.log('[M7] Token renovado com sucesso', this.token);
+        this.logger.log('Token M7 renovado com sucesso');
         return {
           token: this.token,
           expires_in: this.tokenExpires,
@@ -214,14 +215,12 @@ export class RastreamentoM7 {
 
     try {
       // Log inicial do recebimento do webhook
-      console.log(`[${timestamp}] [M7 Webhook] Webhook recebido`);
-      console.log(`[${timestamp}] [M7 Webhook] Payload tipo:`, typeof payload);
+      this.logger.log(`[M7 Webhook] Webhook recebido`);
+      this.logger.debug(`[M7 Webhook] Payload tipo: ${typeof payload}`);
 
-      // Validação básica do payload
+      // Validão básica do payload
       if (!payload) {
-        console.warn(
-          `[${timestamp}] [M7 Webhook] Payload vazio ou nulo recebido`,
-        );
+        this.logger.warn('[M7 Webhook] Payload vazio ou nulo recebido');
         return {
           sucesso: false,
           mensagem: 'Payload vazio ou inválido',
@@ -229,16 +228,13 @@ export class RastreamentoM7 {
       }
 
       // Log do payload completo (útil para desenvolvimento/debugging)
-      console.log(
-        `[${timestamp}] [M7 Webhook] Payload recebido:`,
-        JSON.stringify(payload, null, 2),
+      this.logger.debug(
+        `[M7 Webhook] Payload recebido: ${JSON.stringify(payload, null, 2)}`,
       );
 
       // Validação se é um objeto
       if (typeof payload !== 'object') {
-        console.warn(
-          `[${timestamp}] [M7 Webhook] Payload não é um objeto válido`,
-        );
+        this.logger.warn('[M7 Webhook] Payload não é um objeto válido');
         return {
           sucesso: false,
           mensagem: 'Payload deve ser um objeto JSON válido',
@@ -248,7 +244,7 @@ export class RastreamentoM7 {
       // Tipagem segura do payload
       const payloadData = payload as Record<string, unknown>;
       // Retorno de sucesso
-      console.log(`[${timestamp}] [M7 Webhook] Webhook processado com sucesso`);
+      this.logger.log('[M7 Webhook] Webhook processado com sucesso');
       return {
         sucesso: true,
         mensagem: 'Webhook processado com sucesso',
@@ -259,28 +255,20 @@ export class RastreamentoM7 {
       };
     } catch (error) {
       // Tratamento robusto de erros - não pausar a aplicação
-      console.error(
-        `[${timestamp}] [M7 Webhook] Erro ao processar webhook:`,
-        error,
-      );
+      this.logger.error('[M7 Webhook] Erro ao processar webhook:', error);
 
       // Log detalhado do erro
       if (error instanceof Error) {
-        console.error(`[${timestamp}] [M7 Webhook] Erro - Nome: ${error.name}`);
-        console.error(
-          `[${timestamp}] [M7 Webhook] Erro - Mensagem: ${error.message}`,
-        );
-        console.error(
-          `[${timestamp}] [M7 Webhook] Erro - Stack: ${error.stack}`,
-        );
+        this.logger.error(`[M7 Webhook] Erro - Nome: ${error.name}`);
+        this.logger.error(`[M7 Webhook] Erro - Mensagem: ${error.message}`);
+        this.logger.error(`[M7 Webhook] Erro - Stack: ${error.stack}`);
       } else {
-        console.error(`[${timestamp}] [M7 Webhook] Erro desconhecido:`, error);
+        this.logger.error('[M7 Webhook] Erro desconhecido:', error);
       }
 
       // Log do payload que causou o erro
-      console.error(
-        `[${timestamp}] [M7 Webhook] Payload que causou erro:`,
-        JSON.stringify(payload, null, 2),
+      this.logger.error(
+        `[M7 Webhook] Payload que causou erro: ${JSON.stringify(payload, null, 2)}`,
       );
 
       // Retornar resposta de erro sem lançar exceção

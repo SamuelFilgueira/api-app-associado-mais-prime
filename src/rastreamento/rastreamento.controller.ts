@@ -1,9 +1,11 @@
-import { Controller, Post, Body, UseGuards } from '@nestjs/common';
+import { Controller, Post, Body, UseGuards, Logger } from '@nestjs/common';
 import { RastreamentoService } from './rastreamento.service';
 import { M7WebhookGuard } from './guards/m7.guard';
 
 @Controller('rastreamento')
 export class RastreamentoController {
+  private readonly logger = new Logger(RastreamentoController.name);
+
   constructor(private readonly rastreamentoService: RastreamentoService) {}
 
   // ROTAS REFERENTES AO RASTREAMENTO M7
@@ -14,7 +16,7 @@ export class RastreamentoController {
 
   @Post('ultima-posicao')
   async ultimaPosicaoM7(@Body() body: { cnpj: string; chassi: string }) {
-    console.log('Body recebido para ultimaPosicao:', body);
+    this.logger.log(`Body recebido para ultimaPosicao: ${JSON.stringify(body)}`);
     return this.rastreamentoService.ultimaPosicaoM7(body.cnpj, body.chassi);
   }
 
@@ -49,7 +51,7 @@ export class RastreamentoController {
   @UseGuards(M7WebhookGuard)
   @Post('webhook-m7')
   async webhookM7(@Body() payload: unknown) {
-    console.log('[Rastreamento Controller] Webhook M7 recebido');
+    this.logger.log('Webhook M7 recebido');
     return this.rastreamentoService.processarWebhookM7(payload);
   }
 }

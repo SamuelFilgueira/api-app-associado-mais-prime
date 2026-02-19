@@ -154,25 +154,6 @@ export class AlloyalApiService {
   }
 
   /**
-   * Método genérico para requisições GET com autenticação automática
-   * @param url URL do endpoint
-   * @param config Configurações adicionais do axios
-   * @returns Resposta da requisição
-   */
-  async get<T = any>(url: string, config: any = {}): Promise<AxiosResponse<T>> {
-    if (!this.authHeaders) {
-      await this.login();
-    }
-    return this.axiosInstance.get<T>(url, {
-      ...config,
-      headers: {
-        ...config.headers,
-        ...this.authHeaders,
-      },
-    });
-  }
-
-  /**
    * Busca todas as categorias disponíveis na API Alloyal
    * @returns Lista de categorias
    */
@@ -278,24 +259,7 @@ export class AlloyalApiService {
       );
 
       // Mapeia dados e formata distância
-      return response.data.map((org: any) => ({
-        id: org.id,
-        name: org.name,
-        cover_picture: org.cover_picture,
-        background_picture: org.background_picture,
-        best_discount_percent: org.best_discount_percent,
-        category_name: org.category_name,
-        instagram_url: org.instagram_url,
-        facebook_url: org.facebook_url,
-        twitter_url: org.twitter_url,
-        cashback_percent: org.cashback_percent,
-        distance_km: org.distance_km
-          ? Math.round(org.distance_km * 100) / 100
-          : 0,
-        cashback_text: org.cashback_text,
-        discount_text: org.discount_text,
-        description: org.description,
-      }));
+      return response.data.map((org: any) => this.mapOrganization(org));
     } catch (error) {
       this.logger.error('Erro ao buscar organizações', error.stack);
       throw error;
@@ -324,24 +288,7 @@ export class AlloyalApiService {
         }),
       );
 
-      return response.data.map((org: any) => ({
-        id: org.id,
-        name: org.name,
-        cover_picture: org.cover_picture,
-        background_picture: org.background_picture,
-        best_discount_percent: org.best_discount_percent,
-        category_name: org.category_name,
-        instagram_url: org.instagram_url,
-        facebook_url: org.facebook_url,
-        twitter_url: org.twitter_url,
-        cashback_percent: org.cashback_percent,
-        distance_km: org.distance_km
-          ? Math.round(org.distance_km * 100) / 100
-          : 0,
-        cashback_text: org.cashback_text,
-        discount_text: org.discount_text,
-        description: org.description,
-      }));
+      return response.data.map((org: any) => this.mapOrganization(org));
     } catch (error) {
       this.logger.error(
         'Erro ao buscar organizações mais próximas',
@@ -449,24 +396,7 @@ export class AlloyalApiService {
         }),
       );
 
-      return response.data.map((org: any) => ({
-        id: org.id,
-        name: org.name,
-        cover_picture: org.cover_picture,
-        background_picture: org.background_picture,
-        best_discount_percent: org.best_discount_percent,
-        category_name: org.category_name,
-        instagram_url: org.instagram_url,
-        facebook_url: org.facebook_url,
-        twitter_url: org.twitter_url,
-        cashback_percent: org.cashback_percent,
-        distance_km: org.distance_km
-          ? Math.round(org.distance_km * 100) / 100
-          : 0,
-        cashback_text: org.cashback_text,
-        discount_text: org.discount_text,
-        description: org.description,
-      }));
+      return response.data.map((org: any) => this.mapOrganization(org));
     } catch (error) {
       this.logger.error(
         'Erro ao buscar organizações em destaque próximas',
@@ -549,21 +479,7 @@ export class AlloyalApiService {
         }),
       );
 
-      return response.data.map((org: any) => ({
-        id: org.id,
-        name: org.name,
-        cover_picture: org.cover_picture,
-        background_picture: org.background_picture,
-        best_discount_percent: org.best_discount_percent,
-        category_name: org.category_name,
-        instagram_url: org.instagram_url,
-        facebook_url: org.facebook_url,
-        twitter_url: org.twitter_url,
-        cashback_percent: org.cashback_percent,
-        cashback_text: org.cashback_text,
-        discount_text: org.discount_text,
-        description: org.description,
-      }));
+      return response.data.map((org: any) => this.mapOrganization(org, false));
     } catch (error) {
       this.logger.error(
         'Erro ao buscar organizações online em destaque',
@@ -768,5 +684,36 @@ export class AlloyalApiService {
       }),
     );
     return response.data;
+  }
+
+  /**
+   * Mapeia dados brutos de uma organização para o formato padronizado
+   * @param org Dados brutos da organização da API
+   * @param includeDistance Se deve incluir campo distance_km (padrão: true)
+   */
+  private mapOrganization(org: any, includeDistance = true): any {
+    const mapped: any = {
+      id: org.id,
+      name: org.name,
+      cover_picture: org.cover_picture,
+      background_picture: org.background_picture,
+      best_discount_percent: org.best_discount_percent,
+      category_name: org.category_name,
+      instagram_url: org.instagram_url,
+      facebook_url: org.facebook_url,
+      twitter_url: org.twitter_url,
+      cashback_percent: org.cashback_percent,
+      cashback_text: org.cashback_text,
+      discount_text: org.discount_text,
+      description: org.description,
+    };
+
+    if (includeDistance) {
+      mapped.distance_km = org.distance_km
+        ? Math.round(org.distance_km * 100) / 100
+        : 0;
+    }
+
+    return mapped;
   }
 }

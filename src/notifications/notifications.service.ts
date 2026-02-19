@@ -137,15 +137,12 @@ export class NotificationsService {
     limit: number = 50,
     offset: number = 0,
   ): Promise<GetNotificationsListResponseDto> {
-    const [notifications, total, unreadCount] = await Promise.all([
+    const [notifications, unreadCount] = await Promise.all([
       this.prisma.notification.findMany({
         where: { userId, read: false, deleted: false },
         orderBy: { sentAt: 'desc' },
         skip: offset,
         take: limit,
-      }),
-      this.prisma.notification.count({
-        where: { userId, read: false, deleted: false },
       }),
       this.prisma.notification.count({
         where: { userId, read: false, deleted: false },
@@ -160,7 +157,7 @@ export class NotificationsService {
 
     return new GetNotificationsListResponseDto(
       notificationDtos,
-      total,
+      unreadCount,
       unreadCount,
     );
   }
