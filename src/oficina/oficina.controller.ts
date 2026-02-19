@@ -10,12 +10,15 @@ import {
   ParseIntPipe,
   Get,
   Query,
+  UseInterceptors,
+  UploadedFiles,
 } from '@nestjs/common';
 import { OficinaService } from './oficina.service';
 import { PrismaService } from 'src/prisma.service';
 import { CreateWorkshopDto } from './DTOs/create-workshop.dto';
 import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
 import { UpdateWorkshopDto } from './DTOs/update-workshop.dto';
+import { FileFieldsInterceptor } from '@nestjs/platform-express';
 
 @UseGuards(JwtAuthGuard)
 @Controller('oficina')
@@ -51,16 +54,46 @@ export class OficinaController {
 
   @Put(':id')
   @HttpCode(HttpStatus.OK)
+  @UseInterceptors(
+    FileFieldsInterceptor([
+      { name: 'photoFront', maxCount: 1 },
+      { name: 'photoBack', maxCount: 1 },
+    ]),
+  )
   async updateWorkshop(
     @Param('id', ParseIntPipe) id: number,
     @Body() data: UpdateWorkshopDto,
+    @UploadedFiles()
+    files?: {
+      photoFront?: Express.Multer.File[];
+      photoBack?: Express.Multer.File[];
+    },
   ) {
-    return this.oficinaService.updateWorkshop(id, data);
+    return this.oficinaService.updateWorkshop(id, data, {
+      photoFront: files?.photoFront?.[0],
+      photoBack: files?.photoBack?.[0],
+    });
   }
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  async createWorkshop(@Body() data: CreateWorkshopDto) {
-    return this.oficinaService.createWorkshop(data);
+  @UseInterceptors(
+    FileFieldsInterceptor([
+      { name: 'photoFront', maxCount: 1 },
+      { name: 'photoBack', maxCount: 1 },
+    ]),
+  )
+  async createWorkshop(
+    @Body() data: CreateWorkshopDto,
+    @UploadedFiles()
+    files?: {
+      photoFront?: Express.Multer.File[];
+      photoBack?: Express.Multer.File[];
+    },
+  ) {
+    return this.oficinaService.createWorkshop(data, {
+      photoFront: files?.photoFront?.[0],
+      photoBack: files?.photoBack?.[0],
+    });
   }
 }

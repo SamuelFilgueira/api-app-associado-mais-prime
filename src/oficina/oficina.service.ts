@@ -5,18 +5,41 @@ import {
   Logger,
 } from '@nestjs/common';
 import axios from 'axios';
+import { Workshop } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
+import { FileUploadService } from '../common/services/file-upload.service';
 import { CreateWorkshopDto } from './DTOs/create-workshop.dto';
 import { UpdateWorkshopDto } from './DTOs/update-workshop.dto';
+
+type WorkshopImageFiles = {
+  photoFront?: Express.Multer.File;
+  photoBack?: Express.Multer.File;
+};
+
+type WorkshopResponse = Omit<Workshop, 'services'> & {
+  services: string[];
+  photoFrontUrl: string | null;
+  photoBackUrl: string | null;
+};
+
+type WorkshopWithDistance = Workshop & { distance: number };
+type WorkshopWithDistanceResponse = Omit<WorkshopWithDistance, 'services'> & {
+  services: string[];
+  photoFrontUrl: string | null;
+  photoBackUrl: string | null;
+};
 
 @Injectable()
 export class OficinaService {
   private readonly logger = new Logger(OficinaService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly fileUploadService: FileUploadService,
+  ) {}
 
   // Criação de oficina com busca opcional do CEP
-  async createWorkshop(data: CreateWorkshopDto) {
+  async createWorkshop(data: CreateWorkshopDto, files?: WorkshopImageFiles) {
     if (!data || typeof data !== 'object') {
       throw new BadRequestException('Dados da oficina são obrigatórios');
     }
@@ -36,6 +59,42 @@ export class OficinaService {
       latitude?: number;
       longitude?: number;
     } = { ...data };
+
+    // Adicionar +55 aos telefones se não tiver
+    if (payload.phone && !payload.phone.startsWith('+55')) {
+      payload.phone = `+55${payload.phone.replace(/^\+?55/, '')}`;
+    }
+
+    if (payload.phoneSecondary && !payload.phoneSecondary.startsWith('+55')) {
+      payload.phoneSecondary = `+55${payload.phoneSecondary.replace(/^\+?55/, '')}`;
+    }
+
+    if (payload.whatsapp && !payload.whatsapp.startsWith('+55')) {
+      payload.whatsapp = `+55${payload.whatsapp.replace(/^\+?55/, '')}`;
+    }
+
+    if (Array.isArray(payload.services)) {
+      const normalized = payload.services
+        .map((service) => service.trim())
+        .filter((service) => service.length > 0);
+      payload.services = normalized;
+    }
+
+    if (files?.photoFront) {
+      const photoUrl = await this.fileUploadService.uploadWorkshopPhoto(
+        files.photoFront,
+        'front',
+      );
+      payload.photoFrontUrl = photoUrl;
+    }
+
+    if (files?.photoBack) {
+      const photoUrl = await this.fileUploadService.uploadWorkshopPhoto(
+        files.photoBack,
+        'back',
+      );
+      payload.photoBackUrl = photoUrl;
+    }
 
     // Se vier CEP → tentar buscar coordenadas
     if (payload.cep) {
@@ -77,7 +136,11 @@ export class OficinaService {
   }
 
   // Atualização de oficina
-  async updateWorkshop(id: number, data: UpdateWorkshopDto) {
+  async updateWorkshop(
+    id: number,
+    data: UpdateWorkshopDto,
+    files?: WorkshopImageFiles,
+  ) {
     const workshopId = Number(id);
 
     // Validação de ID
@@ -117,6 +180,52 @@ export class OficinaService {
       latitude?: number;
       longitude?: number;
     } = { ...data };
+
+    // Adicionar +55 aos telefones se não tiver
+    if (payload.phone && !payload.phone.startsWith('+55')) {
+      payload.phone = `+55${payload.phone.replace(/^\+?55/, '')}`;
+    }
+
+    if (payload.phoneSecondary && !payload.phoneSecondary.startsWith('+55')) {
+      payload.phoneSecondary = `+55${payload.phoneSecondary.replace(/^\+?55/, '')}`;
+    }
+
+    if (payload.whatsapp && !payload.whatsapp.startsWith('+55')) {
+      payload.whatsapp = `+55${payload.whatsapp.replace(/^\+?55/, '')}`;
+    }
+
+    if (Array.isArray(payload.services)) {
+      const normalized = payload.services
+        .map((service) => service.trim())
+        .filter((service) => service.length > 0);
+      payload.services = normalized;
+    }
+
+    if (files?.photoFront) {
+      if (existing.photoFrontUrl) {
+        await this.fileUploadService.deleteWorkshopPhoto(
+          existing.photoFrontUrl,
+        );
+      }
+
+      const photoUrl = await this.fileUploadService.uploadWorkshopPhoto(
+        files.photoFront,
+        'front',
+      );
+      payload.photoFrontUrl = photoUrl;
+    }
+
+    if (files?.photoBack) {
+      if (existing.photoBackUrl) {
+        await this.fileUploadService.deleteWorkshopPhoto(existing.photoBackUrl);
+      }
+
+      const photoUrl = await this.fileUploadService.uploadWorkshopPhoto(
+        files.photoBack,
+        'back',
+      );
+      payload.photoBackUrl = photoUrl;
+    }
 
     // Buscar coordenadas se CEP foi enviado
     if (payload.cep) {
@@ -160,7 +269,16 @@ export class OficinaService {
   }
 
   //Retorna todas as oficinas com paginação
-  async findAllWorkshops(page = 1, limit = 10) {
+  async findAllWorkshops(
+    page = 1,
+    limit = 10,
+  ): Promise<{
+    data: WorkshopResponse[];
+    total: number;
+    page: number;
+    limit: number;
+    pageCount: number;
+  }> {
     const take = limit > 0 ? limit : 10;
     const skip = page > 1 ? (page - 1) * take : 0;
     const [data, total] = await Promise.all([
@@ -172,7 +290,7 @@ export class OficinaService {
       this.prisma.workshop.count(),
     ]);
     return {
-      data,
+      data: data.map((workshop) => this.formatWorkshop(workshop)),
       total,
       page,
       limit: take,
@@ -185,12 +303,12 @@ export class OficinaService {
     latitude: number,
     longitude: number,
     radiusKm = 10,
-  ) {
+  ): Promise<WorkshopWithDistanceResponse[]> {
     if (!latitude || !longitude) {
       throw new BadRequestException('Latitude e longitude são obrigatórias');
     }
 
-    const workshops = await this.prisma.$queryRaw`
+    const workshops = await this.prisma.$queryRaw<WorkshopWithDistance[]>`
     SELECT *, 
       (
         6371 * acos(
@@ -208,6 +326,37 @@ export class OficinaService {
     ORDER BY distance ASC;
   `;
 
-    return workshops;
+    return workshops.map((workshop) =>
+      this.formatWorkshopWithDistance(workshop),
+    );
+  }
+
+  private formatWorkshop(workshop: Workshop): WorkshopResponse {
+    return {
+      ...workshop,
+      services: this.normalizeServices(workshop.services),
+      photoFrontUrl: workshop.photoFrontUrl ?? null,
+      photoBackUrl: workshop.photoBackUrl ?? null,
+    };
+  }
+
+  private formatWorkshopWithDistance(
+    workshop: WorkshopWithDistance,
+  ): WorkshopWithDistanceResponse {
+    return {
+      ...workshop,
+      services: this.normalizeServices(workshop.services),
+      photoFrontUrl: workshop.photoFrontUrl ?? null,
+      photoBackUrl: workshop.photoBackUrl ?? null,
+    };
+  }
+
+  private normalizeServices(services: unknown): string[] {
+    if (!Array.isArray(services)) return [];
+
+    return services
+      .filter((service): service is string => typeof service === 'string')
+      .map((service) => service.trim())
+      .filter((service) => service.length > 0);
   }
 }

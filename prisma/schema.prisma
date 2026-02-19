@@ -84,6 +84,8 @@ model Workshop {
   phoneSecondary    String?
   whatsapp          String?
   description       String   @db.VarChar(400)
+  services          Json?
+  specialty         WorkshopSpecialty @default(CARRO)
 
   // Flags
   isActive          Boolean   @default(true)
@@ -139,6 +141,11 @@ enum State {
   SP
   SE
   TO
+}
+
+enum WorkshopSpecialty {
+  CARRO
+  MOTO
 }
 
 // ======================================================

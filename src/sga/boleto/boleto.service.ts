@@ -20,6 +20,7 @@ export class BoletoService {
     const dataInicial = new Date(now);
     dataInicial.setDate(now.getDate() - 90);
     const dataFinal = new Date(now);
+    dataFinal.setDate(dataFinal.getDate() + 30);
     dataFinal.setDate(now.getDate());
     const dataInicialStr = formatDateBR(dataInicial);
     const dataFinalStr = formatDateBR(dataFinal);

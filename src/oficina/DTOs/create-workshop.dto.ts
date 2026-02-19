@@ -8,9 +8,10 @@ import {
   IsLongitude,
   MaxLength,
   IsEnum,
+  IsArray,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { State } from '@prisma/client';
+import { State, WorkshopSpecialty } from '@prisma/client';
 
 export class CreateWorkshopDto {
   // Dados principais
@@ -41,6 +42,14 @@ export class CreateWorkshopDto {
   @IsString()
   @MaxLength(400)
   description: string;
+
+  @IsEnum(WorkshopSpecialty)
+  specialty: WorkshopSpecialty;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  services?: string[];
 
   // Flags
   @IsBoolean()
