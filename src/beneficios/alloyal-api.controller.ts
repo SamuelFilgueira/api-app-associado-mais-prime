@@ -1,15 +1,18 @@
 import { AlloyalPromotionDto } from './DTOs/alloyal-promotion.dto';
 import {
-  AlloyalCouponRedeemRequestDto,
   AlloyalCouponRedeemResponseDto,
   AlloyalCouponOrderResponseDto,
 } from './DTOs/alloyal-coupon-redeem.dto';
-import { AlloyalCouponGenericRedeemRequestDto } from './DTOs/alloyal-coupon-generic-redeem-request.dto';
+import { AlloyalCashbackTransferRequestDto } from './DTOs/alloyal-cashback-transfer-request.dto';
 import {
+  Body,
   Controller,
   Get,
+  Post,
+  Patch,
   Param,
   Query,
+  Headers,
   Logger,
   HttpException,
   HttpStatus,
@@ -25,6 +28,15 @@ import { AlloyalBranchDto } from './DTOs/alloyal-branch.dto';
 import { AlloyalOrganizationCouponDto } from './DTOs/alloyal-organization-coupon.dto';
 import { AlloyalBranchCouponDto } from './DTOs/alloyal-branch-coupon.dto';
 import { AlloyalCouponDetailDto } from './DTOs/alloyal-coupon-detail.dto';
+import { AlloyalCashbackRecordsResponseDto } from './DTOs/alloyal-cashback.dto';
+import { AlloyalUserDto } from './DTOs/alloyal-user.dto';
+import { AlloyalCreateUserRequestDto } from './DTOs/alloyal-create-user.dto';
+import { AlloyalUpdateUserRequestDto } from './DTOs/alloyal-update-user.dto';
+import {
+  AlloyalLoginRequestDto,
+  AlloyalLoginResponseDto,
+} from './DTOs/alloyal-login.dto';
+import { AlloyalSessionHeaders } from './alloyal-api.service';
 
 /**
  * Controller responsável por expor endpoints da API Alloyal de benefícios
@@ -35,22 +47,54 @@ export class AlloyalApiController {
   private readonly logger = new Logger(AlloyalApiController.name);
   constructor(private readonly alloyalApiService: AlloyalApiService) {}
 
+  private getSessionHeaders(
+    uid?: string,
+    client?: string,
+    accessToken?: string,
+  ): AlloyalSessionHeaders {
+    if (!uid || !client || !accessToken) {
+      throw new HttpException(
+        'Headers de autenticação da Alloyal ausentes (uid, client, access-token)',
+        HttpStatus.UNAUTHORIZED,
+      );
+    }
+
+    return { uid, client, accessToken };
+  }
+
+  /**
+   * Realiza login na API Alloyal com credenciais do usuário.
+   * Retorna os tokens (uid/client/access-token) para serem enviados nas demais rotas.
+   */
+  @Post('login')
+  async login(
+    @Body() dto: AlloyalLoginRequestDto,
+  ): Promise<AlloyalLoginResponseDto> {
+    try {
+      const session = await this.alloyalApiService.login(dto.cpf, dto.password);
+      return {
+        uid: session.uid,
+        client: session.client,
+        accessToken: session.accessToken,
+      };
+    } catch (error) {
+      this.logger.error('Erro ao fazer login na API Alloyal', error.stack);
+      throw new HttpException(
+        'Erro ao fazer login na API Alloyal',
+        HttpStatus.UNAUTHORIZED,
+      );
+    }
+  }
+
   /**
    * Endpoint de teste para validar autenticação na API Alloyal
    * @returns Headers de autenticação gerados
    */
   @Get('test-login')
-  async testLogin(): Promise<any> {
-    try {
-      await this.alloyalApiService.login();
-      return this.alloyalApiService.getAuthHeaders();
-    } catch (error) {
-      this.logger.error('Erro no teste de login', error.stack);
-      throw new HttpException(
-        'Erro ao testar login na API Alloyal',
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
+  testLogin(): { message: string } {
+    return {
+      message: 'Use POST /alloyal/login para autenticar com cpf e password.',
+    };
   }
 
   /**
@@ -58,9 +102,14 @@ export class AlloyalApiController {
    * @returns Array de categorias
    */
   @Get('categories')
-  async getCategories(): Promise<AlloyalCategoryDto[]> {
+  async getCategories(
+    @Headers('uid') uid: string,
+    @Headers('client') client: string,
+    @Headers('access-token') accessToken: string,
+  ): Promise<AlloyalCategoryDto[]> {
     try {
-      return await this.alloyalApiService.getCategories();
+      const session = this.getSessionHeaders(uid, client, accessToken);
+      return await this.alloyalApiService.getCategories(session);
     } catch (error) {
       this.logger.error('Erro ao buscar categorias', error.stack);
       throw new HttpException(
@@ -84,13 +133,18 @@ export class AlloyalApiController {
     @Query('page') page?: string,
     @Query('lat') lat?: string,
     @Query('lng') lng?: string,
+    @Headers('uid') uid?: string,
+    @Headers('client') client?: string,
+    @Headers('access-token') accessToken?: string,
   ): Promise<AlloyalOrganizationCategoryDto[]> {
     try {
+      const session = this.getSessionHeaders(uid, client, accessToken);
       return await this.alloyalApiService.getOrganizationsByCategory(
         id,
         page ? Number(page) : 1,
         lat,
         lng,
+        session,
       );
     } catch (error) {
       this.logger.error(
@@ -122,8 +176,12 @@ export class AlloyalApiController {
     @Query('organization_type') organization_type?: string,
     @Query('search') search?: string,
     @Query('category_id') category_id?: string,
+    @Headers('uid') uid?: string,
+    @Headers('client') client?: string,
+    @Headers('access-token') accessToken?: string,
   ): Promise<AlloyalOrganizationListDto[]> {
     try {
+      const session = this.getSessionHeaders(uid, client, accessToken);
       return await this.alloyalApiService.getOrganizations(
         page ? Number(page) : 1,
         lat,
@@ -131,6 +189,7 @@ export class AlloyalApiController {
         organization_type,
         search,
         category_id ? Number(category_id) : undefined,
+        session,
       );
     } catch (error) {
       this.logger.error('Erro ao buscar organizações', error.stack);
@@ -153,9 +212,17 @@ export class AlloyalApiController {
   async getNearestOrganizations(
     @Query('lat') lat?: string,
     @Query('lng') lng?: string,
+    @Headers('uid') uid?: string,
+    @Headers('client') client?: string,
+    @Headers('access-token') accessToken?: string,
   ): Promise<AlloyalOrganizationNearestDto[]> {
     try {
-      return await this.alloyalApiService.getNearestOrganizations(lat, lng);
+      const session = this.getSessionHeaders(uid, client, accessToken);
+      return await this.alloyalApiService.getNearestOrganizations(
+        lat,
+        lng,
+        session,
+      );
     } catch (error) {
       this.logger.error(
         'Erro ao buscar organizações mais próximas',
@@ -180,12 +247,17 @@ export class AlloyalApiController {
     @Param('organization_id') organization_id: string,
     @Query('lat') lat?: string,
     @Query('lng') lng?: string,
+    @Headers('uid') uid?: string,
+    @Headers('client') client?: string,
+    @Headers('access-token') accessToken?: string,
   ): Promise<AlloyalBranchDto[]> {
     try {
+      const session = this.getSessionHeaders(uid, client, accessToken);
       return await this.alloyalApiService.getBranchesByOrganization(
         Number(organization_id),
         lat,
         lng,
+        session,
       );
     } catch (error) {
       this.logger.error(
@@ -212,9 +284,17 @@ export class AlloyalApiController {
   async getHighlightsNearby(
     @Query('lat') lat?: string,
     @Query('lng') lng?: string,
+    @Headers('uid') uid?: string,
+    @Headers('client') client?: string,
+    @Headers('access-token') accessToken?: string,
   ): Promise<AlloyalOrganizationHighlightDto[]> {
     try {
-      return await this.alloyalApiService.getHighlightsNearby(lat, lng);
+      const session = this.getSessionHeaders(uid, client, accessToken);
+      return await this.alloyalApiService.getHighlightsNearby(
+        lat,
+        lng,
+        session,
+      );
     } catch (error) {
       this.logger.error(
         'Erro ao buscar organizações em destaque próximas',
@@ -232,11 +312,14 @@ export class AlloyalApiController {
    * @returns Array de organizações online em destaque
    */
   @Get('organizations/highlights_online')
-  async getHighlightsOnline(): Promise<
-    AlloyalOrganizationHighlightOnlineDto[]
-  > {
+  async getHighlightsOnline(
+    @Headers('uid') uid?: string,
+    @Headers('client') client?: string,
+    @Headers('access-token') accessToken?: string,
+  ): Promise<AlloyalOrganizationHighlightOnlineDto[]> {
     try {
-      return await this.alloyalApiService.getHighlightsOnline();
+      const session = this.getSessionHeaders(uid, client, accessToken);
+      return await this.alloyalApiService.getHighlightsOnline(session);
     } catch (error) {
       this.logger.error(
         'Erro ao buscar organizações online em destaque',
@@ -272,8 +355,12 @@ export class AlloyalApiController {
     @Query('organization_id') organization_id?: string,
     @Query('distance_km') distance_km?: string,
     @Query('term') term?: string,
+    @Headers('uid') uid?: string,
+    @Headers('client') client?: string,
+    @Headers('access-token') accessToken?: string,
   ): Promise<AlloyalPromotionDto[]> {
     try {
+      const session = this.getSessionHeaders(uid, client, accessToken);
       return await this.alloyalApiService.getPromotions(
         page ? Number(page) : undefined,
         lat,
@@ -283,11 +370,123 @@ export class AlloyalApiController {
         organization_id ? Number(organization_id) : undefined,
         distance_km ? Number(distance_km) : undefined,
         term,
+        session,
       );
     } catch (error) {
       this.logger.error('Erro ao buscar promoções', error.stack);
       throw new HttpException(
         'Erro ao buscar promoções',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  /**
+   * Lista transações de cashback do usuário (saldo e utilização)
+   * @returns Resumo de cashback e lista de transações
+   */
+  @Get('cashback_records')
+  async getCashbackRecords(
+    @Headers('uid') uid: string,
+    @Headers('client') client: string,
+    @Headers('access-token') accessToken: string,
+  ): Promise<AlloyalCashbackRecordsResponseDto> {
+    try {
+      const session = this.getSessionHeaders(uid, client, accessToken);
+      return await this.alloyalApiService.getCashbackRecords(session);
+    } catch (error) {
+      this.logger.error('Erro ao buscar transações de cashback', error.stack);
+      throw new HttpException(
+        'Erro ao buscar transações de cashback',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  /**
+   * Solicita resgate de cashback para chave PIX vinculada ao CPF
+   * @param dto CPF do usuário solicitante
+   */
+  @Post('cashback_transfer_requests')
+  async requestCashbackTransfer(
+    @Body() dto: AlloyalCashbackTransferRequestDto,
+    @Headers('uid') uid: string,
+    @Headers('client') client: string,
+    @Headers('access-token') accessToken: string,
+  ): Promise<void> {
+    try {
+      const session = this.getSessionHeaders(uid, client, accessToken);
+      await this.alloyalApiService.requestCashbackTransfer(dto, session);
+    } catch (error) {
+      this.logger.error('Erro ao solicitar resgate de cashback', error.stack);
+      throw new HttpException(
+        'Erro ao solicitar resgate de cashback',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  /**
+   * Cria um novo usuário na plataforma Alloyal
+   * @param dto Dados do usuário (name, cpf, email, password)
+   * @returns Dados do usuário criado
+   */
+  @Post('users')
+  async createUser(
+    @Body() dto: AlloyalCreateUserRequestDto,
+  ): Promise<AlloyalUserDto> {
+    this.logger.log(`[createUser] body: ${JSON.stringify(dto)}`);
+    try {
+      return await this.alloyalApiService.createUser(dto);
+    } catch (error) {
+      this.logger.error('Erro ao criar usuário na API Alloyal', error.stack);
+      throw new HttpException(
+        'Erro ao criar usuário na API Alloyal',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  /**
+   * Atualiza dados de um usuário na plataforma Alloyal
+   * @param userId ID do usuário a ser atualizado
+   * @param dto Campos a serem atualizados (name, cpf, email, password - todos opcionais)
+   * @returns Dados atualizados do usuário
+   */
+  @Patch('users/:userId')
+  async updateUser(
+    @Param('userId') userId: string,
+    @Body() dto: AlloyalUpdateUserRequestDto,
+  ): Promise<AlloyalUserDto> {
+    this.logger.log(`[updateUser] userId: ${userId}`);
+    this.logger.log(`[updateUser] body: ${JSON.stringify(dto)}`);
+    try {
+      return await this.alloyalApiService.updateUser(Number(userId), dto);
+    } catch (error) {
+      this.logger.error(
+        'Erro ao atualizar usuário na API Alloyal',
+        error.stack,
+      );
+      throw new HttpException(
+        'Erro ao atualizar usuário na API Alloyal',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  /**
+   * Busca usuários associados por CPF
+   * @param cpf CPF do usuário (com ou sem caracteres especiais)
+   * @returns Array de usuários encontrados ou array vazio
+   */
+  @Get('users/search/:cpf')
+  async searchUserByCpf(@Param('cpf') cpf: string): Promise<AlloyalUserDto[]> {
+    try {
+      return await this.alloyalApiService.searchUserByCpf(cpf);
+    } catch (error) {
+      this.logger.error('Erro ao buscar usuário por CPF', error.stack);
+      throw new HttpException(
+        'Erro ao buscar usuário por CPF',
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
@@ -305,11 +504,16 @@ export class AlloyalApiController {
   async getOrganizationCoupons(
     @Param('organization_id') organization_id: string,
     @Query('usage_type') usage_type?: string,
+    @Headers('uid') uid?: string,
+    @Headers('client') client?: string,
+    @Headers('access-token') accessToken?: string,
   ): Promise<AlloyalOrganizationCouponDto[]> {
     try {
+      const session = this.getSessionHeaders(uid, client, accessToken);
       return await this.alloyalApiService.getOrganizationCoupons(
         Number(organization_id),
         usage_type,
+        session,
       );
     } catch (error) {
       this.logger.error(
@@ -335,12 +539,17 @@ export class AlloyalApiController {
     @Param('organization_id') organization_id: string,
     @Param('branch_id') branch_id: string,
     @Query('page') page?: string,
+    @Headers('uid') uid?: string,
+    @Headers('client') client?: string,
+    @Headers('access-token') accessToken?: string,
   ): Promise<AlloyalBranchCouponDto[]> {
     try {
+      const session = this.getSessionHeaders(uid, client, accessToken);
       return await this.alloyalApiService.getBranchCoupons(
         Number(organization_id),
         Number(branch_id),
         page ? Number(page) : 1,
+        session,
       );
     } catch (error) {
       this.logger.error(
@@ -364,11 +573,16 @@ export class AlloyalApiController {
   async getCouponDetail(
     @Param('organization_id') organization_id: string,
     @Param('coupon_id') coupon_id: string,
+    @Headers('uid') uid?: string,
+    @Headers('client') client?: string,
+    @Headers('access-token') accessToken?: string,
   ): Promise<AlloyalCouponDetailDto> {
     try {
+      const session = this.getSessionHeaders(uid, client, accessToken);
       return await this.alloyalApiService.getCouponDetail(
         Number(organization_id),
         Number(coupon_id),
+        session,
       );
     } catch (error) {
       this.logger.error(
@@ -391,11 +605,16 @@ export class AlloyalApiController {
   async redeemCouponWithCode(
     @Param('organization_id') organization_id: string,
     @Query('coupon_id') coupon_id: string,
+    @Headers('uid') uid?: string,
+    @Headers('client') client?: string,
+    @Headers('access-token') accessToken?: string,
   ): Promise<AlloyalCouponRedeemResponseDto> {
     try {
+      const session = this.getSessionHeaders(uid, client, accessToken);
       return await this.alloyalApiService.redeemCouponWithCode(
         Number(organization_id),
         { coupon_id: Number(coupon_id) },
+        session,
       );
     } catch (error) {
       this.logger.error('Erro ao resgatar cupom com código', error.stack);
@@ -411,9 +630,14 @@ export class AlloyalApiController {
    * GET /orders
    */
   @Get('orders')
-  async listAllCouponOrders(): Promise<AlloyalCouponOrderResponseDto[]> {
+  async listAllCouponOrders(
+    @Headers('uid') uid?: string,
+    @Headers('client') client?: string,
+    @Headers('access-token') accessToken?: string,
+  ): Promise<AlloyalCouponOrderResponseDto[]> {
     try {
-      return await this.alloyalApiService.listAllCouponOrders();
+      const session = this.getSessionHeaders(uid, client, accessToken);
+      return await this.alloyalApiService.listAllCouponOrders(session);
     } catch (error) {
       this.logger.error('Erro ao listar resgates de cupons', error.stack);
       throw new HttpException(
@@ -430,11 +654,18 @@ export class AlloyalApiController {
   @Get('orders/redeem')
   async redeemCouponGeneric(
     @Query('coupon_id') coupon_id: string,
+    @Headers('uid') uid?: string,
+    @Headers('client') client?: string,
+    @Headers('access-token') accessToken?: string,
   ): Promise<AlloyalCouponRedeemResponseDto> {
     try {
-      return await this.alloyalApiService.redeemCouponGeneric({
-        coupon_id: Number(coupon_id),
-      });
+      const session = this.getSessionHeaders(uid, client, accessToken);
+      return await this.alloyalApiService.redeemCouponGeneric(
+        {
+          coupon_id: Number(coupon_id),
+        },
+        session,
+      );
     } catch (error) {
       this.logger.error('Erro ao resgatar cupom genérico', error.stack);
       throw new HttpException(

@@ -10,13 +10,23 @@ export class CartaoService {
 
   async gerarCartaoVirtual(userId: number) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!user || !user.plate || !user.cpf) {
-      throw new NotFoundException(
-        'Placa ou CPF não encontrados para o usuário',
-      );
+    if (!user || !user.cpf) {
+      throw new NotFoundException('CPF não encontrado para o usuário');
     }
-    const url = `https://tst-clubgas-api.azurewebsites.net/api/v1/CartaoClub/obter-virtual?Placa=${user.plate}&Cpf=${user.cpf}`;
-    const { data } = await axios.get(url);
+
+    const vehicle = await this.prisma.userVehicle.findFirst({
+      where: { userId, isActive: true, plate: { not: null } },
+    });
+    if (!vehicle?.plate) {
+      throw new NotFoundException('Placa não encontrada para o usuário');
+    }
+
+    const url = `https://clubgas-api.azurewebsites.net/api/v1/CartaoClub/obter-virtual?Placa=${vehicle.plate}&Cpf=${user.cpf}`;
+    const { data } = await axios.get(url, {
+      headers: {
+        Authorization: `Bearer ${process.env.TOKEN_API_CLUBGAS}`,
+      },
+    });
     this.logger.log(`Dados do cartão virtual obtidos para usuário: ${userId}`);
     return data;
   }

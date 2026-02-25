@@ -55,9 +55,145 @@ interface SoftruckTrackingResponse {
 
 export class RastreamentoSoftruck {
   private readonly logger = new Logger(RastreamentoSoftruck.name);
+  private softruckToken = process.env.SOFTRUCK_TOKEN;
 
   constructor() {
     this.logger.log('Módulo de rastreamento Softruck inicializado');
+  }
+
+  private formatError(error: unknown): string {
+    if (axios.isAxiosError(error)) {
+      return (
+        `HTTP ${error.response?.status ?? 'N/A'} | ` +
+        `URL: ${error.config?.url ?? 'N/A'} | ` +
+        `Body: ${JSON.stringify(error.response?.data ?? null)}`
+      );
+    }
+    if (error instanceof Error) {
+      return error.message;
+    }
+    return String(error);
+  }
+
+  private buildSoftruckUrl(path: string): string {
+    const baseUrl = process.env.SOFTRUCK_API_BASE_URL;
+
+    if (!baseUrl) {
+      throw new InternalServerErrorException(
+        'SOFTRUCK_API_BASE_URL não configurada',
+      );
+    }
+
+    const normalizedBaseUrl = baseUrl.endsWith('/')
+      ? baseUrl.slice(0, -1)
+      : baseUrl;
+
+    return `${normalizedBaseUrl}/${path.replace(/^\//, '')}`;
+  }
+
+  private getRequestHeaders() {
+    return {
+      Authorization: `Bearer ${this.softruckToken}`,
+      'public-key': process.env.PUBLIC_KEY_SOFTRUCK,
+    };
+  }
+
+  private isAuthError(error: unknown): boolean {
+    if (!axios.isAxiosError(error)) {
+      return false;
+    }
+
+    const status = error.response?.status;
+    return status === 401 || status === 403;
+  }
+
+  private async autenticarSoftruck(): Promise<void> {
+    const username = process.env.USERNAME_SOFTRUCK;
+    const password = process.env.PASSWORD_SOFTRUCK;
+
+    if (!username || !password) {
+      this.logger.error(
+        `Credenciais ausentes — USERNAME="${username ?? '(vazio)'}" PASSWORD="${password ? '***' : '(vazio)'}"`,
+      );
+      throw new InternalServerErrorException(
+        'Credenciais USERNAME/PASSWORD da Softruck não configuradas',
+      );
+    }
+
+    const loginUrl = this.buildSoftruckUrl('/auth/login');
+    const publicKey = process.env.PUBLIC_KEY_SOFTRUCK;
+
+
+    try {
+      const response = await axios.post<{
+        data?: {
+          token?: string;
+          refresh_token?: string;
+        };
+      }>(
+        loginUrl,
+        { username, password },
+        {
+          headers: {
+            'public-key': publicKey,
+          },
+        },
+      );
+
+      this.logger.debug(
+        `[LOGIN] Resposta HTTP ${response.status}: ${JSON.stringify(response.data)}`,
+      );
+
+      const token = response.data?.data?.token;
+
+      if (!token) {
+        this.logger.error(
+          `[LOGIN] Token ausente na resposta: ${JSON.stringify(response.data)}`,
+        );
+        throw new InternalServerErrorException(
+          'Token não retornado no login da Softruck',
+        );
+      }
+
+      this.softruckToken = token;
+      this.logger.log('Token da Softruck atualizado com sucesso');
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        this.logger.error(
+          `[LOGIN] Falha na autenticação Softruck:\n` +
+            `  → Status : ${error.response?.status ?? 'N/A'}\n` +
+            `  → Mensagem: ${error.response?.data?.error?.message ?? JSON.stringify(error.response?.data) ?? error.message}`,
+        );
+        throw new InternalServerErrorException(
+          `Falha no login Softruck (${error.response?.status}): ${error.response?.data?.error?.message ?? 'Erro desconhecido'}`,
+        );
+      }
+      this.logger.error(
+        `[LOGIN] Erro inesperado ao autenticar na Softruck: ${this.formatError(error)}`,
+      );
+      throw new InternalServerErrorException(
+        'Erro ao autenticar na API da Softruck',
+      );
+    }
+  }
+
+  private async executarComReautenticacao<T>(
+    request: () => Promise<T>,
+  ): Promise<T> {
+    try {
+      return await request();
+    } catch (error) {
+      if (!this.isAuthError(error)) {
+        throw error;
+      }
+
+      this.logger.warn(
+        'Token da Softruck expirado/inválido. Realizando novo login.',
+      );
+
+      await this.autenticarSoftruck();
+      return request();
+    }
   }
 
   // Consultar a última posição do veículo via Softruck
@@ -83,7 +219,9 @@ export class RastreamentoSoftruck {
       if (error instanceof InternalServerErrorException) {
         throw error;
       }
-      this.logger.error('Erro ao consultar última posição:', error);
+      this.logger.error(
+        `Erro ao consultar última posição: ${this.formatError(error)}`,
+      );
       throw new InternalServerErrorException(
         'Erro ao consultar última posição do veículo',
       );
@@ -98,17 +236,13 @@ export class RastreamentoSoftruck {
     modelName: string;
   }> {
     try {
-      const response = await axios.get<SoftruckVehicleResponse>(
-        `${process.env.SOFTRUCK_API_BASE_URL}vehicles`,
-        {
+      const response = await this.executarComReautenticacao(() =>
+        axios.get<SoftruckVehicleResponse>(this.buildSoftruckUrl('/vehicles'), {
           params: {
             search: chassi,
           },
-          headers: {
-            Authorization: `Bearer ${process.env.SOFTRUCK_TOKEN}`,
-            'public-key': process.env.PUBLIC_KEY_SOFTRUCK,
-          },
-        },
+          headers: this.getRequestHeaders(),
+        }),
       );
 
       if (
@@ -138,7 +272,7 @@ export class RastreamentoSoftruck {
       if (error instanceof InternalServerErrorException) {
         throw error;
       }
-      this.logger.error('Erro ao obter vehicle_id:', error);
+      this.logger.error(`Erro ao obter vehicle_id: ${this.formatError(error)}`);
       throw new InternalServerErrorException(
         'Erro ao buscar veículo pelo chassi',
       );
@@ -148,14 +282,13 @@ export class RastreamentoSoftruck {
   // STEP 2: Obter device_id através da associação
   private async obterDeviceId(vehicleId: string): Promise<string> {
     try {
-      const response = await axios.get<SoftruckDeviceAssociationResponse>(
-        `${process.env.SOFTRUCK_API_BASE_URL}vehicles/${vehicleId}/associations/devices`,
-        {
-          headers: {
-            Authorization: `Bearer ${process.env.SOFTRUCK_TOKEN}`,
-            'public-key': process.env.PUBLIC_KEY_SOFTRUCK,
+      const response = await this.executarComReautenticacao(() =>
+        axios.get<SoftruckDeviceAssociationResponse>(
+          this.buildSoftruckUrl(`/vehicles/${vehicleId}/associations/devices`),
+          {
+            headers: this.getRequestHeaders(),
           },
-        },
+        ),
       );
 
       if (
@@ -177,7 +310,7 @@ export class RastreamentoSoftruck {
       if (error instanceof InternalServerErrorException) {
         throw error;
       }
-      this.logger.error('Erro ao obter device_id:', error);
+      this.logger.error(`Erro ao obter device_id: ${this.formatError(error)}`);
       throw new InternalServerErrorException(
         'Erro ao buscar dispositivo associado ao veículo',
       );
@@ -190,14 +323,13 @@ export class RastreamentoSoftruck {
     deviceId: string,
   ): Promise<SoftruckTrackingResponse> {
     try {
-      const response = await axios.get<SoftruckTrackingResponse>(
-        `${process.env.SOFTRUCK_API_BASE_URL}vehicles/${vehicleId}/tracking/${deviceId}`,
-        {
-          headers: {
-            Authorization: `Bearer ${process.env.SOFTRUCK_TOKEN}`,
-            'public-key': process.env.PUBLIC_KEY_SOFTRUCK,
+      const response = await this.executarComReautenticacao(() =>
+        axios.get<SoftruckTrackingResponse>(
+          this.buildSoftruckUrl(`/vehicles/${vehicleId}/tracking/${deviceId}`),
+          {
+            headers: this.getRequestHeaders(),
           },
-        },
+        ),
       );
 
       if (!response.data || !response.data.data) {
@@ -214,7 +346,9 @@ export class RastreamentoSoftruck {
       if (error instanceof InternalServerErrorException) {
         throw error;
       }
-      this.logger.error('Erro ao obter dados de rastreamento:', error);
+      this.logger.error(
+        `Erro ao obter dados de rastreamento: ${this.formatError(error)}`,
+      );
       throw new InternalServerErrorException(
         'Erro ao buscar dados de rastreamento',
       );

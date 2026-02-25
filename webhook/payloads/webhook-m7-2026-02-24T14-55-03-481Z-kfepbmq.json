@@ -1,0 +1,7 @@
+{
+  "receivedAt": "2026-02-24T14:55:03.481Z",
+  "type": "M7_WEBHOOK",
+  "payload": {
+    "teste": "teste"
+  }
+}

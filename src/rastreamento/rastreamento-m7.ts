@@ -53,7 +53,7 @@ export class RastreamentoM7 {
     }
     try {
       const response = await axios.post(
-        `${process.env.M7_API_BASE_URL_HOMOLOG}api/veiculos/ultima-posicao`,
+        `${process.env.M7_API_BASE_URL}api/veiculos/ultima-posicao`,
         { cnpj, chassi },
         {
           headers: {
@@ -71,7 +71,7 @@ export class RastreamentoM7 {
       ) {
         await this.renovarToken();
         const retry = await axios.post(
-          `${process.env.M7_API_BASE_URL_HOMOLOG}api/veiculos/ultima-posicao`,
+          `${process.env.M7_API_BASE_URL}api/veiculos/ultima-posicao`,
           { cnpj, chassi },
           {
             headers: {
@@ -110,7 +110,7 @@ export class RastreamentoM7 {
 
     try {
       const response = await axios.post(
-        `${process.env.M7_API_BASE_URL_HOMOLOG}api/veiculos/ancora`,
+        `${process.env.M7_API_BASE_URL}api/veiculos/ancora`,
         payload,
         {
           headers: {
@@ -128,7 +128,7 @@ export class RastreamentoM7 {
       ) {
         await this.renovarToken();
         const retry = await axios.post(
-          `${process.env.M7_API_BASE_URL_HOMOLOG}api/veiculos/ancora`,
+          `${process.env.M7_API_BASE_URL}api/veiculos/ancora`,
           payload,
           {
             headers: {
@@ -183,17 +183,18 @@ export class RastreamentoM7 {
   async renovarToken() {
     try {
       const response = await axios.post(
-        `${process.env.M7_API_BASE_URL_HOMOLOG}login`,
+        `${process.env.M7_API_BASE_URL}login`,
         {
-          //codigo: '208' código de produção,
-          codigo: '1',
-          api_m7_token: process.env.MO7_TOKEN_HOMOLOG,
+          codigo: '208', //código de produção,
+          //codigo: '1',
+          api_m7_token: process.env.MO7_TOKEN,
         },
       );
       if (response.data && response.data.sucesso) {
         this.token = response.data.token;
         this.tokenExpires = response.data.expires_in;
         this.logger.log('Token M7 renovado com sucesso');
+        console.log('[M7] Token:', this.token);
         return {
           token: this.token,
           expires_in: this.tokenExpires,

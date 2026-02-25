@@ -12,8 +12,12 @@ export class EconomiaService {
       throw new NotFoundException('CPF não encontrado para o usuário');
     }
     const cpf = user.cpf.replace(/\D/g, '');
-    const url = `https://tst-clubgas-api.azurewebsites.net/api/v1/Aplicativo/total-economizado?CpfCnpj=${cpf}`;
-    const { data } = await axios.get(url);
+    const url = `https://clubgas-api.azurewebsites.net/api/v1/Aplicativo/total-economizado?CpfCnpj=${cpf}`;
+    const { data } = await axios.get(url, {
+      headers: {
+        Authorization: `Bearer ${process.env.TOKEN_API_CLUBGAS}`,
+      },
+    });
     return data;
   }
 }

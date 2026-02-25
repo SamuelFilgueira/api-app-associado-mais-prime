@@ -70,6 +70,13 @@ export class RastreamentoService {
     }
   }
 
+  // Orquestrador: delega para o rastreador Lógica Soluções
+  async ultimaPosicaoLogica(
+    chassi: string,
+  ): Promise<UltimaPosicaoLogicaResponse> {
+    return ultimaPosicaoLogica(chassi);
+  }
+
   // Orquestrador: delega para o rastreador M7
   async ultimaPosicaoM7(cnpj: string, chassi: string) {
     return this.m7.ultimaPosicaoM7(cnpj, chassi);
@@ -85,13 +92,6 @@ export class RastreamentoService {
 
   async renovarTokenM7() {
     return this.m7.renovarToken();
-  }
-
-  // Orquestrador: delega para o rastreador Lógica Soluções
-  async ultimaPosicaoLogica(
-    chassi: string,
-  ): Promise<UltimaPosicaoLogicaResponse> {
-    return ultimaPosicaoLogica(chassi);
   }
 
   // Orquestrador: delega para o rastreador Softruck

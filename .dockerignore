@@ -1,16 +1,13 @@
-node_modules
-dist
-.git
-.gitignore
-*.md
-.env
-.env.*
-uploads/profile-photos/*
-uploads/workshop-photos/*
-webhook/payloads/*
-test
-coverage
-.vscode
-.idea
-docker-compose.yml
-Dockerfile
+# Exclui TUDO por padrão — só entra no build o que for explicitamente liberado abaixo.
+# Isso evita o bug do BuildKit no Windows que rejeita dotfiles e arquivos arbitrários.
+*
+
+# Código-fonte e configurações de build
+!src/
+!prisma/
+!package.json
+!package-lock.json
+!nest-cli.json
+!tsconfig.json
+!tsconfig.build.json
+!scripts/

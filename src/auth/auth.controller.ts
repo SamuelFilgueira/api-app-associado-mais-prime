@@ -38,4 +38,14 @@ export class AuthController {
   async register(@Body() data: RegisterDto) {
     return this.authService.register(data);
   }
+
+  /**
+   * Reset de senha: gera uma nova senha aleatória e envia por e-mail
+   * POST /auth/reset-password
+   * Body: { email: string }
+   */
+  @Post('reset-password')
+  resetPassword(@Body() body: { email: string }) {
+    return this.authService.resetPassword(body.email);
+  }
 }

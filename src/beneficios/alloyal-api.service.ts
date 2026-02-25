@@ -16,6 +16,11 @@ import { AlloyalOrganizationListDto } from './DTOs/alloyal-organization-list.dto
 import { AlloyalOrganizationNearestDto } from './DTOs/alloyal-organization-nearest.dto';
 import { AlloyalOrganizationHighlightDto } from './DTOs/alloyal-organization-highlight.dto';
 import { AlloyalPromotionDto } from './DTOs/alloyal-promotion.dto';
+import { AlloyalCashbackRecordsResponseDto } from './DTOs/alloyal-cashback.dto';
+import { AlloyalCashbackTransferRequestDto } from './DTOs/alloyal-cashback-transfer-request.dto';
+import { AlloyalUserDto } from './DTOs/alloyal-user.dto';
+import { AlloyalCreateUserRequestDto } from './DTOs/alloyal-create-user.dto';
+import { AlloyalUpdateUserRequestDto } from './DTOs/alloyal-update-user.dto';
 
 /**
  * Interface para armazenar os headers de autenticação da API Alloyal
@@ -28,6 +33,16 @@ interface AuthHeaders {
 }
 
 /**
+ * Headers de sessão da Alloyal que o cliente deve enviar para este backend.
+ * O api-secret permanece apenas no servidor.
+ */
+export interface AlloyalSessionHeaders {
+  uid: string;
+  client: string;
+  accessToken: string;
+}
+
+/**
  * Service responsável por gerenciar todas as interações com a API Alloyal
  * Implementa autenticação automática e cache de tokens
  */
@@ -35,12 +50,34 @@ interface AuthHeaders {
 export class AlloyalApiService {
   private readonly logger = new Logger(AlloyalApiService.name);
   private axiosInstance: AxiosInstance;
-  private authHeaders: AuthHeaders | null = null;
 
   constructor() {
     this.axiosInstance = axios.create({
       baseURL: process.env.BASE_URL_ALLOYAL,
     });
+  }
+
+  private getApiSecret(): string {
+    const apiSecret = process.env.API_SECRET_ALLOYAL;
+    if (!apiSecret) {
+      this.logger.error('API_SECRET_ALLOYAL não configurado');
+      throw new Error('API_SECRET_ALLOYAL not set');
+    }
+    return apiSecret;
+  }
+
+  private buildAuthHeaders(session: AlloyalSessionHeaders): AuthHeaders {
+    if (!session?.uid || !session?.client || !session?.accessToken) {
+      throw new Error('Missing Alloyal session headers');
+    }
+
+    const apiSecret = this.getApiSecret();
+    return {
+      uid: session.uid,
+      client: session.client,
+      'access-token': session.accessToken,
+      'api-secret': apiSecret,
+    };
   }
 
   /**
@@ -52,62 +89,21 @@ export class AlloyalApiService {
    */
   private async makeAuthenticatedRequest<T>(
     requestFn: (headers: AuthHeaders) => Promise<AxiosResponse<T>>,
-    maxRetries: number = 1,
+    session: AlloyalSessionHeaders,
   ): Promise<AxiosResponse<T>> {
-    let attempts = 0;
-
-    while (attempts <= maxRetries) {
-      try {
-        // Garante que estamos autenticados
-        if (!this.authHeaders) {
-          await this.login();
-        }
-
-        // Executa a requisição passando os headers atualizados
-        return await requestFn(this.authHeaders!);
-      } catch (error) {
-        // Verifica se é um erro 401 (não autorizado)
-        if (axios.isAxiosError(error) && error.response?.status === 401) {
-          attempts++;
-
-          if (attempts <= maxRetries) {
-            this.logger.warn(
-              `Erro 401 detectado. Renovando autenticação e tentando novamente (tentativa ${attempts}/${maxRetries})...`,
-            );
-
-            // Limpa os headers antigos e força novo login
-            this.authHeaders = null;
-            await this.login();
-
-            // Continua o loop para tentar novamente com os novos headers
-            continue;
-          }
-        }
-
-        // Se não é 401 ou excedeu tentativas, propaga o erro
-        throw error;
-      }
-    }
-
-    // Não deveria chegar aqui, mas TypeScript exige
-    throw new Error('Failed to complete authenticated request');
+    const headers = this.buildAuthHeaders(session);
+    return await requestFn(headers);
   }
 
   /**
    * Realiza autenticação na API Alloyal e armazena os tokens em cache
    * @throws Error se a autenticação falhar ou headers estiverem ausentes
    */
-  async login(): Promise<void> {
+  async login(cpf: string, password: string): Promise<AlloyalSessionHeaders> {
     try {
-      const apiSecret = process.env.API_SECRET_ALLOYAL;
-      if (!apiSecret) {
-        this.logger.error('API_SECRET_ALLOYAL não configurado');
-        throw new Error('API_SECRET_ALLOYAL not set');
-      }
-
       const body = {
-        cpf: '18534553777',
-        password: 'Samuel685@',
+        cpf,
+        password,
       };
 
       this.logger.log('Realizando login na API Alloyal...');
@@ -116,7 +112,7 @@ export class AlloyalApiService {
         body,
         {
           headers: {
-            'api-secret': apiSecret,
+            'api-secret': this.getApiSecret(),
           },
         },
       );
@@ -131,14 +127,12 @@ export class AlloyalApiService {
         throw new Error('Missing authentication headers in response');
       }
 
-      this.authHeaders = {
+      this.logger.log('Login na API Alloyal realizado com sucesso');
+      return {
         uid,
         client,
-        'access-token': accessToken,
-        'api-secret': apiSecret,
+        accessToken: accessToken,
       };
-
-      this.logger.log('Login na API Alloyal realizado com sucesso');
     } catch (error) {
       this.logger.error('Erro ao fazer login na API Alloyal', error.stack);
       throw error;
@@ -146,23 +140,17 @@ export class AlloyalApiService {
   }
 
   /**
-   * Retorna os headers de autenticação atualmente em cache
-   * @returns Headers de autenticação ou null se não autenticado
-   */
-  getAuthHeaders(): AuthHeaders | null {
-    return this.authHeaders;
-  }
-
-  /**
    * Busca todas as categorias disponíveis na API Alloyal
    * @returns Lista de categorias
    */
-  async getCategories(): Promise<any[]> {
+  async getCategories(session: AlloyalSessionHeaders): Promise<any[]> {
     try {
-      const response = await this.makeAuthenticatedRequest((headers) =>
-        this.axiosInstance.get('/categories', {
-          headers: { ...headers },
-        }),
+      const response = await this.makeAuthenticatedRequest(
+        (headers) =>
+          this.axiosInstance.get('/categories', {
+            headers: { ...headers },
+          }),
+        session,
       );
       return response.data;
     } catch (error) {
@@ -184,28 +172,33 @@ export class AlloyalApiService {
     page = 1,
     lat?: string,
     lng?: string,
+    session?: AlloyalSessionHeaders,
   ): Promise<AlloyalOrganizationCategoryDto[]> {
     try {
       const params: any = { page };
       if (lat) params.lat = lat;
       if (lng) params.lng = lng;
 
-      const response = await this.makeAuthenticatedRequest((headers) =>
-        this.axiosInstance.get(`/categories/${id}/organizations`, {
-          headers: { ...headers },
-          params,
-        }),
+      if (!session) throw new Error('Missing Alloyal session headers');
+
+      const response = await this.makeAuthenticatedRequest(
+        (headers) =>
+          this.axiosInstance.get(`/categories/${id}/organizations`, {
+            headers: { ...headers },
+            params,
+          }),
+        session,
       );
       // Remove campos desnecessários e formata distância
       return response.data.map((org: any) => {
         const {
-          instagram_url,
-          facebook_url,
-          twitter_url,
-          top_background_image_large,
-          top_background_image_v2_large,
-          banner_image_large,
-          banner_image_v2_large,
+          instagram_url: _instagram_url,
+          facebook_url: _facebook_url,
+          twitter_url: _twitter_url,
+          top_background_image_large: _top_background_image_large,
+          top_background_image_v2_large: _top_background_image_v2_large,
+          banner_image_large: _banner_image_large,
+          banner_image_v2_large: _banner_image_v2_large,
           ...rest
         } = org;
         return {
@@ -241,6 +234,7 @@ export class AlloyalApiService {
     organization_type?: string,
     search?: string,
     category_id?: number,
+    session?: AlloyalSessionHeaders,
   ): Promise<AlloyalOrganizationListDto[]> {
     try {
       // Monta parâmetros da requisição
@@ -251,11 +245,15 @@ export class AlloyalApiService {
       if (search) params.search = search;
       if (category_id) params.category_id = category_id;
 
-      const response = await this.makeAuthenticatedRequest((headers) =>
-        this.axiosInstance.get('/organizations', {
-          headers: { ...headers },
-          params,
-        }),
+      if (!session) throw new Error('Missing Alloyal session headers');
+
+      const response = await this.makeAuthenticatedRequest(
+        (headers) =>
+          this.axiosInstance.get('/organizations', {
+            headers: { ...headers },
+            params,
+          }),
+        session,
       );
 
       // Mapeia dados e formata distância
@@ -275,17 +273,22 @@ export class AlloyalApiService {
   async getNearestOrganizations(
     lat?: string,
     lng?: string,
+    session?: AlloyalSessionHeaders,
   ): Promise<AlloyalOrganizationNearestDto[]> {
     try {
       const params: any = {};
       if (lat) params.lat = lat;
       if (lng) params.lng = lng;
 
-      const response = await this.makeAuthenticatedRequest((headers) =>
-        this.axiosInstance.get('/organizations/nearest', {
-          headers: { ...headers },
-          params,
-        }),
+      if (!session) throw new Error('Missing Alloyal session headers');
+
+      const response = await this.makeAuthenticatedRequest(
+        (headers) =>
+          this.axiosInstance.get('/organizations/nearest', {
+            headers: { ...headers },
+            params,
+          }),
+        session,
       );
 
       return response.data.map((org: any) => this.mapOrganization(org));
@@ -319,6 +322,7 @@ export class AlloyalApiService {
     organization_id?: number,
     distance_km?: number,
     term?: string,
+    session?: AlloyalSessionHeaders,
   ): Promise<AlloyalPromotionDto[]> {
     try {
       const params: any = {};
@@ -331,11 +335,15 @@ export class AlloyalApiService {
       if (distance_km) params.distance_km = Math.min(distance_km, 30);
       if (term) params.term = term;
 
-      const response = await this.makeAuthenticatedRequest((headers) =>
-        this.axiosInstance.get('/promotions', {
-          headers: { ...headers },
-          params,
-        }),
+      if (!session) throw new Error('Missing Alloyal session headers');
+
+      const response = await this.makeAuthenticatedRequest(
+        (headers) =>
+          this.axiosInstance.get('/promotions', {
+            headers: { ...headers },
+            params,
+          }),
+        session,
       );
 
       return response.data.map((promo: any) => ({
@@ -375,6 +383,122 @@ export class AlloyalApiService {
   }
 
   /**
+   * Lista transações de cashback do usuário (saldo e utilização)
+   * GET /cashback_records
+   * @returns Resumo de cashback e lista de transações
+   */
+  async getCashbackRecords(
+    session: AlloyalSessionHeaders,
+  ): Promise<AlloyalCashbackRecordsResponseDto> {
+    try {
+      const response = await this.makeAuthenticatedRequest(
+        (headers) =>
+          this.axiosInstance.get('/cashback_records', {
+            headers: { ...headers },
+          }),
+        session,
+      );
+
+      const data = response.data;
+
+      return {
+        total_amount: Number(data?.total_amount ?? 0),
+        pending_amount: Number(data?.pending_amount ?? 0),
+        approved_amount: Number(data?.approved_amount ?? 0),
+        available_amount: Number(data?.available_amount ?? 0),
+        in_transfer_amount: Number(data?.in_transfer_amount ?? 0),
+        transferred_amount: Number(data?.transferred_amount ?? 0),
+        title: data?.title ?? '',
+        subtitle: data?.subtitle ?? '',
+        status: data?.status ?? '',
+        cashback_records: Array.isArray(data?.cashback_records)
+          ? data.cashback_records
+          : [],
+      };
+    } catch (error) {
+      this.logger.error('Erro ao buscar transações de cashback', error.stack);
+      throw error;
+    }
+  }
+
+  /**
+   * Solicita resgate de cashback para chave PIX vinculada ao CPF
+   * POST /cashback_transfer_requests
+   * @param dto CPF do usuário solicitante
+   */
+  async requestCashbackTransfer(
+    dto: AlloyalCashbackTransferRequestDto,
+    session: AlloyalSessionHeaders,
+  ): Promise<void> {
+    try {
+      await this.makeAuthenticatedRequest(
+        (headers) =>
+          this.axiosInstance.post('/cashback_transfer_requests', dto, {
+            headers: { ...headers },
+          }),
+        session,
+      );
+    } catch (error) {
+      this.logger.error('Erro ao solicitar resgate de cashback', error.stack);
+      throw error;
+    }
+  }
+
+  /**
+   * Busca usuários associados por CPF utilizando credenciais de employee
+   * GET /client/v3/businesses/{businessId}/users
+   * @param cpf CPF do usuário (apenas números, sem caracteres especiais)
+   * @returns Lista de usuários encontrados ou array vazio
+   */
+  async searchUserByCpf(cpf: string): Promise<AlloyalUserDto[]> {
+    try {
+      const clientEmployeeEmail = process.env.x_clientemployee_email;
+      const clientEmployeeToken = process.env.x_clientemployee_token;
+      const businessId = process.env.ALLOYAL_BUSINESS_ID || '95';
+      const cnpj = process.env.ALLOYAL_BUSINESS_CNPJ || '29354995000170';
+
+      if (!clientEmployeeEmail || !clientEmployeeToken) {
+        this.logger.error(
+          'x_clientemployee_email ou x_clientemployee_token não configurados',
+        );
+        throw new Error(
+          'Missing x_clientemployee_email or x_clientemployee_token',
+        );
+      }
+
+      // Remove caracteres especiais do CPF (apenas números)
+      const cleanCpf = cpf.replace(/\D/g, '');
+
+      // Usa apenas a origem do BASE_URL_ALLOYAL, pois este endpoint tem caminho diferente
+      // ex: BASE_URL_ALLOYAL=https://api.lecupon.com/api/v1/public_integration/ → https://api.lecupon.com
+      const baseOrigin = new URL(
+        process.env.BASE_URL_ALLOYAL || 'https://api.lecupon.com',
+      ).origin;
+
+      const response = await axios.get(
+        `${baseOrigin}/client/v2/businesses/${cnpj}/users`,
+        {
+          headers: {
+            'x-clientemployee-email': clientEmployeeEmail,
+            'x-clientemployee-token': clientEmployeeToken,
+          },
+          params: {
+            page: 1,
+            active: true,
+            term: cleanCpf,
+          },
+        },
+      );
+      //console.log("Essa é a response do cpf", response.data); // Log da resposta para depuração
+      // Retorna array de usuários ou array vazio
+      return Array.isArray(response.data) ? response.data : [];
+    } catch (error) {
+      this.logger.error('Erro ao buscar usuário por CPF', error.stack);
+      throw error;
+    }
+  }
+
+  /**
    * Busca organizações em destaque próximas baseado em coordenadas
    * @param lat Latitude de referência (opcional)
    * @param lng Longitude de referência (opcional)
@@ -383,17 +507,22 @@ export class AlloyalApiService {
   async getHighlightsNearby(
     lat?: string,
     lng?: string,
+    session?: AlloyalSessionHeaders,
   ): Promise<AlloyalOrganizationHighlightDto[]> {
     try {
       const params: any = {};
       if (lat) params.lat = lat;
       if (lng) params.lng = lng;
 
-      const response = await this.makeAuthenticatedRequest((headers) =>
-        this.axiosInstance.get('/organizations/highlights_nearby', {
-          headers: { ...headers },
-          params,
-        }),
+      if (!session) throw new Error('Missing Alloyal session headers');
+
+      const response = await this.makeAuthenticatedRequest(
+        (headers) =>
+          this.axiosInstance.get('/organizations/highlights_nearby', {
+            headers: { ...headers },
+            params,
+          }),
+        session,
       );
 
       return response.data.map((org: any) => this.mapOrganization(org));
@@ -417,17 +546,22 @@ export class AlloyalApiService {
     organization_id: number,
     lat?: string,
     lng?: string,
+    session?: AlloyalSessionHeaders,
   ): Promise<AlloyalBranchDto[]> {
     try {
       const params: any = {};
       if (lat) params.lat = lat;
       if (lng) params.lng = lng;
 
-      const response = await this.makeAuthenticatedRequest((headers) =>
-        this.axiosInstance.get(`/organizations/${organization_id}/branches`, {
-          headers: { ...headers },
-          params,
-        }),
+      if (!session) throw new Error('Missing Alloyal session headers');
+
+      const response = await this.makeAuthenticatedRequest(
+        (headers) =>
+          this.axiosInstance.get(`/organizations/${organization_id}/branches`, {
+            headers: { ...headers },
+            params,
+          }),
+        session,
       );
 
       // Formata horários e distância
@@ -469,14 +603,16 @@ export class AlloyalApiService {
    * Busca organizações online em destaque
    * @returns Lista de organizações online em destaque
    */
-  async getHighlightsOnline(): Promise<
-    AlloyalOrganizationHighlightOnlineDto[]
-  > {
+  async getHighlightsOnline(
+    session: AlloyalSessionHeaders,
+  ): Promise<AlloyalOrganizationHighlightOnlineDto[]> {
     try {
-      const response = await this.makeAuthenticatedRequest((headers) =>
-        this.axiosInstance.get('/organizations/highlights_online', {
-          headers: { ...headers },
-        }),
+      const response = await this.makeAuthenticatedRequest(
+        (headers) =>
+          this.axiosInstance.get('/organizations/highlights_online', {
+            headers: { ...headers },
+          }),
+        session,
       );
 
       return response.data.map((org: any) => this.mapOrganization(org, false));
@@ -498,14 +634,19 @@ export class AlloyalApiService {
   async getOrganizationCoupons(
     organization_id: number,
     usage_type: string = 'online',
+    session?: AlloyalSessionHeaders,
   ): Promise<AlloyalOrganizationCouponDto[]> {
     try {
       const params: any = { usage_type };
-      const response = await this.makeAuthenticatedRequest((headers) =>
-        this.axiosInstance.get(`/organizations/${organization_id}/coupons`, {
-          headers: { ...headers },
-          params,
-        }),
+      if (!session) throw new Error('Missing Alloyal session headers');
+
+      const response = await this.makeAuthenticatedRequest(
+        (headers) =>
+          this.axiosInstance.get(`/organizations/${organization_id}/coupons`, {
+            headers: { ...headers },
+            params,
+          }),
+        session,
       );
 
       // Formata datas para padrão brasileiro
@@ -544,17 +685,22 @@ export class AlloyalApiService {
     organization_id: number,
     branch_id: number,
     page: number = 1,
+    session?: AlloyalSessionHeaders,
   ): Promise<AlloyalBranchCouponDto[]> {
     try {
       const params: any = { page };
-      const response = await this.makeAuthenticatedRequest((headers) =>
-        this.axiosInstance.get(
-          `/organizations/${organization_id}/branches/${branch_id}/coupons`,
-          {
-            headers: { ...headers },
-            params,
-          },
-        ),
+      if (!session) throw new Error('Missing Alloyal session headers');
+
+      const response = await this.makeAuthenticatedRequest(
+        (headers) =>
+          this.axiosInstance.get(
+            `/organizations/${organization_id}/branches/${branch_id}/coupons`,
+            {
+              headers: { ...headers },
+              params,
+            },
+          ),
+        session,
       );
 
       // Formata datas para padrão brasileiro
@@ -596,15 +742,20 @@ export class AlloyalApiService {
   async getCouponDetail(
     organization_id: number,
     coupon_id: number,
+    session?: AlloyalSessionHeaders,
   ): Promise<AlloyalCouponDetailDto> {
     try {
-      const response = await this.makeAuthenticatedRequest((headers) =>
-        this.axiosInstance.get(
-          `/organizations/${organization_id}/coupons/${coupon_id}`,
-          {
-            headers: { ...headers },
-          },
-        ),
+      if (!session) throw new Error('Missing Alloyal session headers');
+
+      const response = await this.makeAuthenticatedRequest(
+        (headers) =>
+          this.axiosInstance.get(
+            `/organizations/${organization_id}/coupons/${coupon_id}`,
+            {
+              headers: { ...headers },
+            },
+          ),
+        session,
       );
 
       const c = response.data;
@@ -648,12 +799,15 @@ export class AlloyalApiService {
   async redeemCouponWithCode(
     organization_id: number,
     dto: AlloyalCouponRedeemRequestDto,
+    session: AlloyalSessionHeaders,
   ): Promise<AlloyalCouponRedeemResponseDto> {
-    const response = await this.makeAuthenticatedRequest((headers) =>
-      this.axiosInstance.get(`/organizations/${organization_id}/orders`, {
-        headers: { ...headers },
-        params: dto,
-      }),
+    const response = await this.makeAuthenticatedRequest(
+      (headers) =>
+        this.axiosInstance.get(`/organizations/${organization_id}/orders`, {
+          headers: { ...headers },
+          params: dto,
+        }),
+      session,
     );
     return response.data;
   }
@@ -662,11 +816,15 @@ export class AlloyalApiService {
    * Listar todos os resgates de cupom
    * GET /orders
    */
-  async listAllCouponOrders(): Promise<AlloyalCouponOrderResponseDto[]> {
-    const response = await this.makeAuthenticatedRequest((headers) =>
-      this.axiosInstance.get('/orders', {
-        headers: { ...headers },
-      }),
+  async listAllCouponOrders(
+    session: AlloyalSessionHeaders,
+  ): Promise<AlloyalCouponOrderResponseDto[]> {
+    const response = await this.makeAuthenticatedRequest(
+      (headers) =>
+        this.axiosInstance.get('/orders', {
+          headers: { ...headers },
+        }),
+      session,
     );
     return response.data;
   }
@@ -677,13 +835,125 @@ export class AlloyalApiService {
    */
   async redeemCouponGeneric(
     dto: AlloyalCouponGenericRedeemRequestDto,
+    session: AlloyalSessionHeaders,
   ): Promise<AlloyalCouponRedeemResponseDto> {
-    const response = await this.makeAuthenticatedRequest((headers) =>
-      this.axiosInstance.post('/orders', dto, {
-        headers: { ...headers },
-      }),
+    const response = await this.makeAuthenticatedRequest(
+      (headers) =>
+        this.axiosInstance.post('/orders', dto, {
+          headers: { ...headers },
+        }),
+      session,
     );
     return response.data;
+  }
+
+  /**
+   * Cria um novo usuário na plataforma Alloyal
+   * POST /client/v2/businesses/{cnpj}/users
+   * @param dto Dados do usuário a ser criado
+   * @returns Dados do usuário criado
+   */
+  async createUser(dto: AlloyalCreateUserRequestDto): Promise<AlloyalUserDto> {
+    try {
+      const clientEmployeeEmail = process.env.x_clientemployee_email;
+      const clientEmployeeToken = process.env.x_clientemployee_token;
+      const cnpj = process.env.ALLOYAL_BUSINESS_CNPJ || '29354995000170';
+
+      if (!clientEmployeeEmail || !clientEmployeeToken) {
+        this.logger.error(
+          'x_clientemployee_email ou x_clientemployee_token não configurados',
+        );
+        throw new Error(
+          'Missing x_clientemployee_email or x_clientemployee_token',
+        );
+      }
+
+      const baseOrigin = new URL(
+        process.env.BASE_URL_ALLOYAL || 'https://api.lecupon.com',
+      ).origin;
+
+      const body = {
+        name: dto.name,
+        cpf: dto.cpf,
+        email: dto.email,
+        password: dto.password,
+        user_tags: 'APP-ASSOCIADO',
+      };
+
+      this.logger.log(`[createUser] Enviando para Alloyal: ${JSON.stringify(body)}`);
+
+      const response = await axios.post(
+        `${baseOrigin}/client/v2/businesses/${cnpj}/users`,
+        body,
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            'Tentant-id': cnpj,
+            'X-ClientEmployee-Email': clientEmployeeEmail,
+            'X-ClientEmployee-Token': clientEmployeeToken,
+          },
+        },
+      );
+
+      return response.data;
+    } catch (error) {
+      this.logger.error(
+        `Erro ao criar usuário na API Alloyal - status: ${error?.response?.status} - data: ${JSON.stringify(error?.response?.data)}`,
+        error.stack,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Atualiza dados de um usuário na plataforma Alloyal
+   * PATCH /client/v2/businesses/{cnpj}/users/{userId}
+   * @param userId ID do usuário a ser atualizado
+   * @param dto Campos a serem atualizados (todos opcionais)
+   * @returns Dados atualizados do usuário
+   */
+  async updateUser(
+    userId: number,
+    dto: AlloyalUpdateUserRequestDto,
+  ): Promise<AlloyalUserDto> {
+    try {
+      const clientEmployeeEmail = process.env.x_clientemployee_email;
+      const clientEmployeeToken = process.env.x_clientemployee_token;
+      const cnpj = process.env.ALLOYAL_BUSINESS_CNPJ || '29354995000170';
+
+      if (!clientEmployeeEmail || !clientEmployeeToken) {
+        this.logger.error(
+          'x_clientemployee_email ou x_clientemployee_token não configurados',
+        );
+        throw new Error(
+          'Missing x_clientemployee_email or x_clientemployee_token',
+        );
+      }
+
+      const baseOrigin = new URL(
+        process.env.BASE_URL_ALLOYAL || 'https://api.lecupon.com',
+      ).origin;
+
+      const response = await axios.patch(
+        `${baseOrigin}/client/v2/businesses/${cnpj}/users/${userId}`,
+        dto,
+        {
+          headers: {
+            'Tentant-id': cnpj,
+            'X-ClientEmployee-Email': clientEmployeeEmail,
+            'X-ClientEmployee-Token': clientEmployeeToken,
+          },
+        },
+      );
+
+      return response.data;
+    } catch (error) {
+      this.logger.error(
+        'Erro ao atualizar usuário na API Alloyal',
+        error.stack,
+      );
+      throw error;
+    }
   }
 
   /**

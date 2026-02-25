@@ -9,7 +9,6 @@ export class CartaoController {
 
   @Get('virtual')
   async gerarCartao(@Req() req) {
-    console.log("Cartão virtual sendo gerado com os dados:", req.user);
     const userId = req.user.userId;
     return this.cartaoService.gerarCartaoVirtual(userId);
   }

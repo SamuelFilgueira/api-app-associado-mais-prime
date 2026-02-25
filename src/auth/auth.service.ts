@@ -1,15 +1,17 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { RegisterDto } from './dto/register.dto';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma.service';
 import { Prisma } from '@prisma/client';
+import { MailService } from '../common/services/mail.service';
 
 @Injectable()
 export class AuthService {
   constructor(
     private prisma: PrismaService,
     private jwtService: JwtService,
+    private mailService: MailService,
   ) {}
 
   async getUserWithPlate(userId: number) {
@@ -104,5 +106,36 @@ export class AuthService {
 
       throw error; // outros erros continuam sendo tratados pelo Nest
     }
+  }
+
+  /**
+   * Gera uma senha aleatória, salva no banco (hash) e envia por e-mail ao usuário
+   * @param email E-mail do usuário
+   */
+  async resetPassword(email: string): Promise<{ message: string }> {
+    const user = await this.prisma.user.findUnique({ where: { email } });
+
+    if (!user) {
+      throw new NotFoundException('Nenhuma conta encontrada com este e-mail');
+    }
+
+    // Gera senha aleatória de 10 caracteres (letras + números)
+    const newPassword = Math.random().toString(36).slice(-5).toUpperCase() +
+      Math.random().toString(36).slice(-5);
+
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+
+    await this.prisma.user.update({
+      where: { email },
+      data: {
+        passwordHash,
+        primeiroLogin: true, // força troca de senha no próximo acesso
+        updatedAt: new Date(),
+      },
+    });
+
+    await this.mailService.sendPasswordReset(email, newPassword);
+
+    return { message: 'Nova senha enviada para o e-mail informado' };
   }
 }
