@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Post,
   Put,
   UseGuards,
@@ -18,6 +19,7 @@ import { CreateWorkshopDto } from './DTOs/create-workshop.dto';
 import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
 import { UpdateWorkshopDto } from './DTOs/update-workshop.dto';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
+import { AdminRoleGuard } from '../auth/admin-role.guard';
 
 @UseGuards(JwtAuthGuard)
 @Controller('oficina')
@@ -38,6 +40,7 @@ export class OficinaController {
   }
 
   @Get('all')
+  @UseGuards(AdminRoleGuard)
   @HttpCode(HttpStatus.OK)
   async findAll(
     @Query('page') page: string = '1',
@@ -49,6 +52,7 @@ export class OficinaController {
   }
 
   @Put(':id')
+  @UseGuards(AdminRoleGuard)
   @HttpCode(HttpStatus.OK)
   @UseInterceptors(
     FileFieldsInterceptor([
@@ -72,6 +76,7 @@ export class OficinaController {
   }
 
   @Post()
+  @UseGuards(AdminRoleGuard)
   @HttpCode(HttpStatus.CREATED)
   @UseInterceptors(
     FileFieldsInterceptor([
@@ -91,5 +96,12 @@ export class OficinaController {
       photoFront: files?.photoFront?.[0],
       photoBack: files?.photoBack?.[0],
     });
+  }
+
+  @Delete(':id')
+  @UseGuards(AdminRoleGuard)
+  @HttpCode(HttpStatus.OK)
+  async removeWorkshop(@Param('id', ParseIntPipe) id: number) {
+    return this.oficinaService.removeWorkshop(id);
   }
 }

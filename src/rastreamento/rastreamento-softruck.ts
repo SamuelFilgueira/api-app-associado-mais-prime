@@ -1,6 +1,17 @@
 import { InternalServerErrorException, Logger } from '@nestjs/common';
 import axios from 'axios';
 
+/** Timeout padrão para chamadas HTTP à API Softruck (em ms) */
+const SOFTRUCK_REQUEST_TIMEOUT = 15_000;
+
+/** TTL do cache de vehicle/device em ms (10 minutos) */
+const CACHE_TTL = 10 * 60 * 1000;
+
+interface CacheEntry<T> {
+  data: T;
+  expiresAt: number;
+}
+
 export interface UltimaPosicaoSoftruckResponse {
   date: string;
   ign?: boolean;
@@ -57,8 +68,31 @@ export class RastreamentoSoftruck {
   private readonly logger = new Logger(RastreamentoSoftruck.name);
   private softruckToken = process.env.SOFTRUCK_TOKEN;
 
+  /** Mutex para evitar logins simultâneos */
+  private loginPromise: Promise<void> | null = null;
+
+  /** Cache de vehicle data por chassi */
+  private vehicleCache = new Map<string, CacheEntry<{ id: string; plate: string; brandName: string; modelName: string }>>();
+
+  /** Cache de device ID por vehicle ID */
+  private deviceCache = new Map<string, CacheEntry<string>>();
+
   constructor() {
     this.logger.log('Módulo de rastreamento Softruck inicializado');
+  }
+
+  private getCached<T>(cache: Map<string, CacheEntry<T>>, key: string): T | null {
+    const entry = cache.get(key);
+    if (!entry) return null;
+    if (Date.now() > entry.expiresAt) {
+      cache.delete(key);
+      return null;
+    }
+    return entry.data;
+  }
+
+  private setCache<T>(cache: Map<string, CacheEntry<T>>, key: string, data: T): void {
+    cache.set(key, { data, expiresAt: Date.now() + CACHE_TTL });
   }
 
   private formatError(error: unknown): string {
@@ -108,6 +142,21 @@ export class RastreamentoSoftruck {
   }
 
   private async autenticarSoftruck(): Promise<void> {
+    // Mutex: se já estiver autenticando, reutiliza a mesma promise
+    if (this.loginPromise) {
+      await this.loginPromise;
+      return;
+    }
+
+    this.loginPromise = this.executeAutenticarSoftruck();
+    try {
+      await this.loginPromise;
+    } finally {
+      this.loginPromise = null;
+    }
+  }
+
+  private async executeAutenticarSoftruck(): Promise<void> {
     const username = process.env.USERNAME_SOFTRUCK;
     const password = process.env.PASSWORD_SOFTRUCK;
 
@@ -123,7 +172,6 @@ export class RastreamentoSoftruck {
     const loginUrl = this.buildSoftruckUrl('/auth/login');
     const publicKey = process.env.PUBLIC_KEY_SOFTRUCK;
 
-
     try {
       const response = await axios.post<{
         data?: {
@@ -137,6 +185,7 @@ export class RastreamentoSoftruck {
           headers: {
             'public-key': publicKey,
           },
+          timeout: SOFTRUCK_REQUEST_TIMEOUT,
         },
       );
 
@@ -235,6 +284,13 @@ export class RastreamentoSoftruck {
     brandName: string;
     modelName: string;
   }> {
+    // Verifica cache primeiro
+    const cached = this.getCached(this.vehicleCache, chassi);
+    if (cached) {
+      this.logger.debug(`[Cache HIT] Vehicle data para chassi: ${chassi}`);
+      return cached;
+    }
+
     try {
       const response = await this.executarComReautenticacao(() =>
         axios.get<SoftruckVehicleResponse>(this.buildSoftruckUrl('/vehicles'), {
@@ -242,6 +298,7 @@ export class RastreamentoSoftruck {
             search: chassi,
           },
           headers: this.getRequestHeaders(),
+          timeout: SOFTRUCK_REQUEST_TIMEOUT,
         }),
       );
 
@@ -262,12 +319,10 @@ export class RastreamentoSoftruck {
       const modelName = vehicleData.attributes.model_name;
 
       this.logger.log(`Vehicle ID obtido: ${vehicleId} para chassi: ${chassi}`);
-      return {
-        id: vehicleId,
-        plate,
-        brandName,
-        modelName,
-      };
+
+      const result = { id: vehicleId, plate, brandName, modelName };
+      this.setCache(this.vehicleCache, chassi, result);
+      return result;
     } catch (error) {
       if (error instanceof InternalServerErrorException) {
         throw error;
@@ -281,12 +336,20 @@ export class RastreamentoSoftruck {
 
   // STEP 2: Obter device_id através da associação
   private async obterDeviceId(vehicleId: string): Promise<string> {
+    // Verifica cache primeiro
+    const cached = this.getCached(this.deviceCache, vehicleId);
+    if (cached) {
+      this.logger.debug(`[Cache HIT] Device ID para vehicle: ${vehicleId}`);
+      return cached;
+    }
+
     try {
       const response = await this.executarComReautenticacao(() =>
         axios.get<SoftruckDeviceAssociationResponse>(
           this.buildSoftruckUrl(`/vehicles/${vehicleId}/associations/devices`),
           {
             headers: this.getRequestHeaders(),
+            timeout: SOFTRUCK_REQUEST_TIMEOUT,
           },
         ),
       );
@@ -305,6 +368,7 @@ export class RastreamentoSoftruck {
       this.logger.log(
         `Device ID obtido: ${deviceId} para vehicle: ${vehicleId}`,
       );
+      this.setCache(this.deviceCache, vehicleId, deviceId);
       return deviceId;
     } catch (error) {
       if (error instanceof InternalServerErrorException) {
@@ -328,6 +392,7 @@ export class RastreamentoSoftruck {
           this.buildSoftruckUrl(`/vehicles/${vehicleId}/tracking/${deviceId}`),
           {
             headers: this.getRequestHeaders(),
+            timeout: SOFTRUCK_REQUEST_TIMEOUT,
           },
         ),
       );

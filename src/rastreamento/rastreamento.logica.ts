@@ -1,5 +1,8 @@
 import axios from 'axios';
 
+/** Timeout padrão para chamadas HTTP à API Lógica Soluções (em ms) */
+const LOGICA_REQUEST_TIMEOUT = 15_000;
+
 export interface UltimaPosicaoLogicaResponse {
   oIgnicao: boolean;
   placa: string | null;
@@ -38,6 +41,7 @@ export async function ultimaPosicaoLogica(
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
       },
+      timeout: LOGICA_REQUEST_TIMEOUT,
     },
   );
 

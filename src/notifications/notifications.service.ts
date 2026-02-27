@@ -306,6 +306,123 @@ export class NotificationsService {
   }
 
   /**
+   * Disparada pelo processador de webhook M7.
+   *
+   * Regras:
+   *  - tipoevento === 32 ou evento === 'Ignição Ligada'  → notificação de ignição ligada
+   *  - tipoevento === 16 ou evento contém 'violação de ancora' → notificação de âncora violada
+   *
+   * Apenas usuários com `notificacaoIgnicao = true` que possuam um
+   * `UserVehicle` ativo com o chassi recebido serão notificados.
+   */
+  async dispararNotificacaoVeiculoWebhook(
+    chassi: string,
+    tipoevento: number | null,
+    evento: string | null,
+  ): Promise<{ sent: number; skipped: number }> {
+    const eventoLower = evento?.toLowerCase() ?? '';
+
+    const isIgnicaoLigada =
+      tipoevento === 32 || evento === 'Ignição Ligada';
+
+    const isAncoraViolada =
+      tipoevento === 16 ||
+      eventoLower.includes('violação de ancora') ||
+      eventoLower.includes('violacao de ancora');
+
+    if (!isIgnicaoLigada && !isAncoraViolada) {
+      this.logger.log(
+        `[Webhook] Evento sem mapeamento de notificação: tipoevento=${tipoevento}, evento="${evento}" — ignorando`,
+      );
+      return { sent: 0, skipped: 0 };
+    }
+
+    // Buscar veículos com esse chassi cujo usuário tem a flag ativa
+    const userVehicles = await this.prisma.userVehicle.findMany({
+      where: {
+        chassi,
+        isActive: true,
+        user: { notificacaoIgnicao: true, isActive: true },
+      },
+      select: {
+        userId: true,
+        plate: true,
+      },
+    });
+
+    if (userVehicles.length === 0) {
+      this.logger.log(
+        `[Webhook] Nenhum usuário com notificacaoIgnicao ativa para chassi "${chassi}"`,
+      );
+      return { sent: 0, skipped: 0 };
+    }
+
+    const userIds = userVehicles.map((v) => v.userId);
+
+    // Obter o token Expo mais recente de cada usuário
+    const latestTokens = await this.prisma.notification.findMany({
+      where: { userId: { in: userIds }, deleted: false },
+      orderBy: { sentAt: 'desc' },
+      distinct: ['userId'],
+      select: { userId: true, expoPushToken: true },
+    });
+
+    const tokenMap = new Map(latestTokens.map((t) => [t.userId, t.expoPushToken]));
+    const plateMap = new Map(userVehicles.map((v) => [v.userId, v.plate]));
+
+    let sent = 0;
+    let skipped = 0;
+
+    for (const { userId } of userVehicles) {
+      const expoPushToken = tokenMap.get(userId);
+
+      if (!expoPushToken || !Expo.isExpoPushToken(expoPushToken)) {
+        this.logger.warn(
+          `[Webhook] Token inválido ou ausente para user ${userId} — ignorando`,
+        );
+        skipped++;
+        continue;
+      }
+
+      const plate = plateMap.get(userId);
+      const vehicleLabel = plate ? `placa ${plate}` : `chassi ${chassi}`;
+
+      let title: string;
+      let body: string;
+      let data: NotificationData;
+
+      if (isIgnicaoLigada) {
+        title = 'Ignição Ligada 🔑';
+        body = `A ignição do seu veículo (${vehicleLabel}) foi ligada.`;
+        data = { chassi, plate: plate ?? undefined, ignition: 'on', eventType: 'ignition_on' };
+      } else {
+        title = 'Violação de Âncora ⚠️';
+        body = `Violação de âncora detectada no seu veículo (${vehicleLabel}).`;
+        data = { chassi, plate: plate ?? undefined, eventType: 'ancora_violation' };
+      }
+
+      const result = await this.sendPushNotification(userId, expoPushToken, title, body, data);
+
+      if (result.success) {
+        sent++;
+        this.logger.log(
+          `[Webhook] Notificação "${title}" enviada para user ${userId} (${vehicleLabel})`,
+        );
+      } else {
+        skipped++;
+        this.logger.warn(
+          `[Webhook] Falha ao enviar notificação para user ${userId}: ${result.message}`,
+        );
+      }
+    }
+
+    this.logger.log(
+      `[Webhook] Resultado para chassi "${chassi}": enviadas=${sent}, ignoradas=${skipped}`,
+    );
+    return { sent, skipped };
+  }
+
+  /**
    * Limpa notificações antigas (>30 dias por padrão)
    */
   async cleanOldNotifications(
@@ -360,7 +477,6 @@ export class NotificationsService {
       where: {
         deleted: false,
         user: {
-          acceptsMarketingNotifications: true,
           isActive: true,
         },
       },

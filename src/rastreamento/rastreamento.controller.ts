@@ -1,4 +1,4 @@
-import { Controller, Post, Body, UseGuards, Logger } from '@nestjs/common';
+import { Controller, Post, Get, Body, Query, UseGuards, Logger } from '@nestjs/common';
 import { RastreamentoService } from './rastreamento.service';
 import { M7WebhookGuard } from './guards/m7.guard';
 import { InjectQueue } from '@nestjs/bullmq';
@@ -35,6 +35,11 @@ export class RastreamentoController {
       body.chassi,
       body.ancora_ativa,
     );
+  }
+
+  @Get('ancora-status')
+  async getAncoraStatus(@Query('chassi') chassi: string) {
+    return this.rastreamentoService.getAncoraStatus(chassi);
   }
 
   // ROTAS REFERENTES AO RASTREAMENTO LÓGICA SOLUÇÕES

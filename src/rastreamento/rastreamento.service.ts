@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import * as fs from 'fs';
+import * as fs from 'fs/promises';
 import * as path from 'path';
 import { PrismaService } from '../prisma.service';
 import { RastreamentoM7, AncoraM7Response } from './rastreamento-m7';
@@ -12,6 +12,7 @@ import {
   RastreamentoSoftruck,
   UltimaPosicaoSoftruckResponse,
 } from './rastreamento-softruck';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class RastreamentoService {
@@ -19,7 +20,10 @@ export class RastreamentoService {
   private softruck: RastreamentoSoftruck;
   private readonly logger = new Logger(RastreamentoService.name);
 
-  constructor(private readonly prisma: PrismaService) {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notificationsService: NotificationsService,
+  ) {
     this.m7 = new RastreamentoM7();
     this.softruck = new RastreamentoSoftruck();
   }
@@ -87,7 +91,59 @@ export class RastreamentoService {
     chassi: string,
     ancoraAtiva: boolean,
   ): Promise<AncoraM7Response> {
-    return this.m7.ancoraM7(cnpj, chassi, ancoraAtiva);
+    const result = await this.m7.ancoraM7(cnpj, chassi, ancoraAtiva);
+
+    // Persiste o estado da âncora somente em caso de sucesso
+    if (!('erro' in result)) {
+      try {
+        const userVehicle = await this.prisma.userVehicle.findFirst({
+          where: { chassi },
+          select: { userId: true },
+        });
+
+        if (userVehicle) {
+          await this.prisma.user.update({
+            where: { id: userVehicle.userId },
+            data: { ancoraAtiva },
+          });
+          this.logger.log(
+            `Estado da âncora atualizado para userId=${userVehicle.userId}: ancoraAtiva=${ancoraAtiva}`,
+          );
+        } else {
+          this.logger.warn(
+            `Nenhum usuário encontrado para o chassi ${chassi} — estado da âncora não persistido`,
+          );
+        }
+      } catch (err) {
+        this.logger.error(
+          `Erro ao persistir estado da âncora para chassi=${chassi}`,
+          err?.stack || err,
+        );
+      }
+    }
+
+    return result;
+  }
+
+  async getAncoraStatus(
+    chassi: string,
+  ): Promise<{ ancoraAtiva: boolean; userId: number | null }> {
+    const userVehicle = await this.prisma.userVehicle.findFirst({
+      where: { chassi },
+      select: {
+        userId: true,
+        user: { select: { ancoraAtiva: true } },
+      },
+    });
+
+    if (!userVehicle) {
+      return { ancoraAtiva: false, userId: null };
+    }
+
+    return {
+      ancoraAtiva: userVehicle.user.ancoraAtiva,
+      userId: userVehicle.userId,
+    };
   }
 
   async renovarTokenM7() {
@@ -109,12 +165,58 @@ export class RastreamentoService {
     // Salva o payload antes de processar
     await this.salvarPayloadWebhook(payload);
     await this.saveM7WebhookEvent(payload);
+
+    // Disparar notificações push conforme tipo do evento
+    await this.dispararNotificacaoPorEvento(payload);
+
     return this.m7.processarWebhook(payload);
+  }
+
+  /**
+   * Extrai chassi/tipoevento/evento do payload e aciona o serviço de notificações.
+   * Nunca lança erro para não interromper o processamento do webhook.
+   */
+  private async dispararNotificacaoPorEvento(payload: unknown): Promise<void> {
+    try {
+      if (!payload || typeof payload !== 'object') return;
+
+      let chassi = '';
+      let evento: string | null = null;
+      let tipoevento: number | null = null;
+
+      if ('chassi' in payload && typeof payload['chassi'] === 'string') {
+        chassi = payload['chassi'];
+      }
+      if ('evento' in payload && typeof payload['evento'] === 'string') {
+        evento = payload['evento'];
+      }
+      if ('tipoevento' in payload) {
+        const n = Number(payload['tipoevento']);
+        tipoevento = isNaN(n) ? null : n;
+      }
+
+      if (!chassi) {
+        this.logger.warn('[Webhook] Payload sem chassi — notificação não disparada');
+        return;
+      }
+
+      await this.notificationsService.dispararNotificacaoVeiculoWebhook(
+        chassi,
+        tipoevento,
+        evento,
+      );
+    } catch (err) {
+      this.logger.error(
+        '[Webhook] Erro ao disparar notificação por evento',
+        err?.stack || err,
+      );
+    }
   }
 
   /**
    * Salva o payload do webhook M7 em um arquivo JSON estruturado
    * Os arquivos são salvos em webhook/payloads com timestamp único
+   * Usa operações assíncronas para não bloquear o event loop
    */
   private async salvarPayloadWebhook(payload: unknown): Promise<void> {
     try {
@@ -122,9 +224,7 @@ export class RastreamentoService {
       const payloadsDir = path.join(process.cwd(), 'webhook', 'payloads');
 
       // Cria a estrutura de diretórios se não existir
-      if (!fs.existsSync(payloadsDir)) {
-        fs.mkdirSync(payloadsDir, { recursive: true });
-      }
+      await fs.mkdir(payloadsDir, { recursive: true });
 
       // Gera um nome único para o arquivo usando timestamp e ID aleatório
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -139,8 +239,8 @@ export class RastreamentoService {
         payload: payload,
       };
 
-      // Salva o arquivo JSON formatado
-      fs.writeFileSync(
+      // Salva o arquivo JSON formatado (assíncrono)
+      await fs.writeFile(
         filepath,
         JSON.stringify(payloadStructured, null, 2),
         'utf-8',

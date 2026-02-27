@@ -20,9 +20,9 @@ import { Queue } from 'bullmq';
 import { NotificationsService } from './notifications.service';
 import { TestNotificationDto } from './DTOs/test-notification.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { AdminTokenGuard } from './admin-token.guard';
 import { SendMarketingNotificationDto } from './DTOs/send-marketing-notification.dto';
 import { NOTIFICATION_QUEUE } from '../queue/queue.module';
+import { AdminRoleGuard } from '../auth/admin-role.guard';
 
 @Controller('notifications')
 export class NotificationsController {
@@ -220,10 +220,16 @@ export class NotificationsController {
    * POST /notifications/admin/marketing
    * Envia notificacoes de marketing em massa (painel administrativo)
    */
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, AdminRoleGuard)
   @Post('admin/marketing')
   @HttpCode(HttpStatus.OK)
-  async sendMarketingNotification(@Body() dto: SendMarketingNotificationDto) {
-    return this.notificationsService.sendMarketingNotification(dto);
+  async sendMarketingNotification(
+    @Body() dto: SendMarketingNotificationDto,
+    @Request() req: any,
+  ) {
+    return this.notificationsService.sendMarketingNotification(
+      dto,
+      req.user?.userId,
+    );
   }
 }

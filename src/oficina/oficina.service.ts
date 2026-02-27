@@ -16,13 +16,13 @@ type WorkshopImageFiles = {
   photoBack?: Express.Multer.File;
 };
 
-type WorkshopResponse = Omit<Workshop, 'services'> & {
+type WorkshopResponse = Omit<workshop, 'services'> & {
   services: string[];
   photoFrontUrl: string | null;
   photoBackUrl: string | null;
 };
 
-type WorkshopWithDistance = Workshop & { distance: number };
+type WorkshopWithDistance = workshop & { distance: number };
 type WorkshopWithDistanceResponse = Omit<WorkshopWithDistance, 'services'> & {
   services: string[];
   photoFrontUrl: string | null;
@@ -189,6 +189,33 @@ export class OficinaService {
     });
   }
 
+  async removeWorkshop(id: number): Promise<{ deleted: true }> {
+    const workshopId = Number(id);
+
+    if (isNaN(workshopId) || workshopId <= 0) {
+      throw new BadRequestException('ID da oficina deve ser um número válido');
+    }
+
+    const existing = await this.prisma.workshop.findUnique({
+      where: { id: workshopId },
+    });
+
+    if (!existing) {
+      throw new NotFoundException('Oficina não encontrada');
+    }
+
+    if (existing.photoFrontUrl) {
+      await this.fileUploadService.deleteWorkshopPhoto(existing.photoFrontUrl);
+    }
+
+    if (existing.photoBackUrl) {
+      await this.fileUploadService.deleteWorkshopPhoto(existing.photoBackUrl);
+    }
+
+    await this.prisma.workshop.delete({ where: { id: workshopId } });
+    return { deleted: true };
+  }
+
   //Retorna todas as oficinas com paginação
   async findAllWorkshops(
     page = 1,
@@ -252,7 +279,7 @@ export class OficinaService {
     );
   }
 
-  private formatWorkshop(workshop: Workshop): WorkshopResponse {
+  private formatWorkshop(workshop: workshop): WorkshopResponse {
     return {
       ...workshop,
       services: this.normalizeServices(workshop.services),

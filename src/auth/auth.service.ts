@@ -26,6 +26,7 @@ export class AuthService {
         cep: true,
         address: true,
         primeiroLogin: true,
+        role: true,
       },
     });
   }
@@ -47,6 +48,7 @@ export class AuthService {
         id: true,
         cpf: true,
         name: true,
+        role: true,
       },
     });
 
@@ -58,6 +60,7 @@ export class AuthService {
       sub: dbUser.id,
       cpf: dbUser.cpf,
       username: dbUser.name,
+      role: dbUser.role,
     };
 
     return {

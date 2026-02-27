@@ -31,7 +31,6 @@ export class BoletoService {
       data_vencimento_original_inicial: dataInicialStr,
       data_vencimento_original_final: dataFinalStr,
     };
-    this.logger.log(`Dados do corpo da requisição: ${JSON.stringify(body)}`);
     try {
       const response = await axios.post(
         'https://api.hinova.com.br/api/sga/v2/listar/boleto-associado-veiculo',
@@ -45,7 +44,6 @@ export class BoletoService {
         },
       );
 
-      this.logger.log(`Dados retornados da API de boletos: ${JSON.stringify(response.data)}`);
 
       const boletos: Array<{
         nosso_numero?: any;

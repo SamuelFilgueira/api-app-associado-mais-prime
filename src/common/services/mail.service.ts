@@ -18,7 +18,7 @@ export class MailService {
 
   async sendPasswordReset(to: string, newPassword: string): Promise<void> {
     const mailOptions: nodemailer.SendMailOptions = {
-      from: `"Benefícios App" <${process.env.GMAIL_USER}>`,
+      from: `"Mais Prime App" <${process.env.GMAIL_USER}>`,
       to,
       subject: 'Redefinição de Senha',
       html: `

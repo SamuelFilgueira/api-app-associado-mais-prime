@@ -29,6 +29,7 @@ model user {
   isActive         Boolean        @default(true)
   acceptsMarketingNotifications Boolean @default(false)
   notificacaoIgnicao Boolean @default(true)
+  ancoraAtiva      Boolean        @default(false)
   role             UserRole       @default(USER)
   createdAt        DateTime       @default(now())
   updatedAt        DateTime
@@ -73,7 +74,7 @@ model VehicleWebhookEvent {
 // ======================================================
 //
 
-model Workshop {
+model workshop {
   id                Int       @id @default(autoincrement())
 
   // Dados principais

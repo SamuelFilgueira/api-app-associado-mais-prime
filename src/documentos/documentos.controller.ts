@@ -7,11 +7,15 @@ import {
   ParseIntPipe,
   Patch,
   Post,
+  UseGuards,
 } from '@nestjs/common';
 import { DocumentosService } from './documentos.service';
 import { CreateDocumentDto } from './DTOs/create-document.dto';
 import { UpdateDocumentDto } from './DTOs/update-document.dto';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { AdminRoleGuard } from '../auth/admin-role.guard';
 
+@UseGuards(JwtAuthGuard, AdminRoleGuard)
 @Controller('documentos')
 export class DocumentosController {
   constructor(private readonly documentosService: DocumentosService) {}
