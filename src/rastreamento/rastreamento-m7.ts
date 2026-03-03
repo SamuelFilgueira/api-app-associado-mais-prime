@@ -96,6 +96,10 @@ export class RastreamentoM7 {
         'Token não disponível. Tente novamente em instantes.',
       );
     }
+
+    // console.log("Consultando última posição M7 para CNPJ:", cnpj, "e chassi:", chassi);
+    // console.log("Token atual:", this.token);
+    // console.log("URL da API M7:", `${process.env.M7_API_BASE_URL}api/veiculos/ultima-posicao`);
     try {
       const data = await this.executarComReautenticacao(() =>
         axios.post(
@@ -107,6 +111,7 @@ export class RastreamentoM7 {
           },
         ),
       );
+      //console.log('Resposta da API M7:', data);
       return this.mapearUltimaPosicaoM7(data as Record<string, unknown>);
     } catch (error) {
       if (error instanceof InternalServerErrorException) throw error;
@@ -238,6 +243,7 @@ export class RastreamentoM7 {
       if (response.data && response.data.sucesso) {
         this.token = response.data.token;
         this.tokenExpires = response.data.expires_in;
+        console.log('Token M7:', this.token);
         this.logger.log('Token M7 renovado com sucesso');
         return;
       }

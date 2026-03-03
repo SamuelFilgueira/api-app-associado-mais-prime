@@ -5,7 +5,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import axios from 'axios';
-import { Workshop } from '@prisma/client';
+import { workshop } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import { FileUploadService } from '../common/services/file-upload.service';
 import { CreateWorkshopDto } from './DTOs/create-workshop.dto';
