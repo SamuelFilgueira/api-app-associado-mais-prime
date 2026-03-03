@@ -1,6 +1,7 @@
-import { Controller, Get, UseGuards, Req } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Patch, Post, Req, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { SgaService } from './sga.service';
+import { SetRevistoriaDto } from './dto/set-revistoria.dto';
 
 @UseGuards(JwtAuthGuard)
 @Controller('sga')
@@ -9,13 +10,22 @@ export class SgaController {
 
   @Get('associado')
   async consultarAssociado(@Req() req) {
-    const userId = req.user.userId;
+    const userId = Number(req.user.userId);
     return this.sgaService.consultarAssociado(userId);
   }
 
   @Get('veiculos')
   async consultarVeiculos(@Req() req) {
-    const userId = req.user.userId;
+    const userId = Number(req.user.userId);
     return this.sgaService.consultarVeiculosAssociado(userId);
+  }
+
+  @Patch('set-revistoria')
+  @HttpCode(204)
+  async setRevistoria(@Body() body: SetRevistoriaDto) {
+    return this.sgaService.setRevistoria(
+      body.chassi,
+      body.reinspectionRequired,
+    );
   }
 }

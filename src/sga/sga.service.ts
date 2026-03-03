@@ -84,7 +84,7 @@ export class SgaService {
       // Upsert all vehicles
       for (const v of veiculos) {
         if (!v.chassi) continue; // skip invalid
-        upsertedChassis.add(v.chassi);
+        upsertedChassis.add(String(v.chassi));
         await this.prisma.userVehicle.upsert({
           where: {
             userId_chassi: {
@@ -136,5 +136,26 @@ export class SgaService {
         'Erro ao consultar veículos do associado',
       );
     }
+  }
+
+  async setRevistoria(chassi: string, reinspectionRequired: boolean) {
+    const normalizedChassi = chassi.trim();
+
+    const result = await this.prisma.userVehicle.updateMany({
+      where: {
+        chassi: normalizedChassi,
+      },
+      data: {
+        reinspectionRequired,
+      },
+    });
+
+    if (result.count === 0) {
+      throw new NotFoundException(
+        'Veículo não encontrado para o chassi informado',
+      );
+    }
+
+    return;
   }
 }

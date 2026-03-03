@@ -37,6 +37,13 @@ model user {
   userVehicles     UserVehicle[]
 }
 
+model ReinspectionAnalyst {
+  id        Int      @id @default(autoincrement())
+  email     String   @db.VarChar(150) 
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 model UserVehicle {
   id                 Int      @id @default(autoincrement())
   userId             Int
@@ -44,6 +51,7 @@ model UserVehicle {
   plate              String?  @db.VarChar(20)
   externalVehicleCode String? @db.VarChar(50)
   isActive           Boolean  @default(true)
+  reinspectionRequired Boolean @default(false)
   lastSyncAt         DateTime @default(now())
   user               user     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
