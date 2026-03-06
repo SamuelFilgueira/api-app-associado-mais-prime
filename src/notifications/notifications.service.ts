@@ -4,7 +4,7 @@ import {
   ForbiddenException,
   Logger,
 } from '@nestjs/common';
-import { Expo } from 'expo-server-sdk';
+import { Expo, ExpoPushMessage } from 'expo-server-sdk';
 import { PrismaService } from '../prisma.service';
 import { Notification } from '@prisma/client';
 import {
@@ -25,6 +25,68 @@ export class NotificationsService {
 
   constructor(private prisma: PrismaService) {}
 
+  private maskExpoPushToken(token?: string | null): string {
+    if (!token) return 'ausente';
+    if (token.length <= 16) return token;
+    return `${token.slice(0, 12)}...${token.slice(-4)}`;
+  }
+
+  private buildExpoMessage(
+    expoPushToken: string,
+    title: string,
+    body: string,
+    data: NotificationData,
+  ): ExpoPushMessage {
+    return {
+      to: expoPushToken,
+      title,
+      body,
+      data,
+      sound: 'default',
+      priority: 'high',
+      channelId: 'alerts_v2',   // precisa bater com o canal do app
+      _contentAvailable: true,  // iOS background/killed
+      mutableContent: true,     // iOS compat
+      ttl: 60 * 60,             // 1h
+      expiration: Math.floor(Date.now() / 1000) + 60 * 60,
+    };
+  }
+
+  async registerExpoPushToken(
+    userId: number,
+    expoPushToken: string,
+  ): Promise<{ success: boolean; message: string }> {
+    this.logger.log(
+      `📝 [Token] Registrando expoPushToken para user ${userId}: ${this.maskExpoPushToken(expoPushToken)}`,
+    );
+
+    if (!Expo.isExpoPushToken(expoPushToken)) {
+      this.logger.warn(
+        `⚠️ [Token] expoPushToken inválido para user ${userId}: ${this.maskExpoPushToken(expoPushToken)}`,
+      );
+      return { success: false, message: 'Token Expo inválido.' };
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true },
+    });
+
+    if (!user) {
+      return {
+        success: false,
+        message: `Usuario com ID ${userId} nao encontrado no banco.`,
+      };
+    }
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { expoPushToken },
+    });
+
+    return { success: true, message: 'Token Expo registrado com sucesso.' };
+  }
+
   /**
    * Salva uma notificação no banco de dados
    */
@@ -35,6 +97,10 @@ export class NotificationsService {
     body: string,
     data: NotificationData,
   ): Promise<Notification> {
+    this.logger.log(
+      `🧾 [DB] Definindo expoPushToken para persistência: ${this.maskExpoPushToken(expoPushToken)} (user ${userId})`,
+    );
+
     const notification = await this.prisma.notification.create({
       data: {
         userId,
@@ -62,7 +128,14 @@ export class NotificationsService {
     body: string,
     data: NotificationData,
   ): Promise<{ success: boolean; message: string; notificationId?: number }> {
+    this.logger.log(
+      `📲 [Push] expoPushToken recebido para envio: ${this.maskExpoPushToken(expoPushToken)} (user ${userId})`,
+    );
+
     if (!Expo.isExpoPushToken(expoPushToken)) {
+      this.logger.warn(
+        `⚠️ [Push] expoPushToken inválido: ${this.maskExpoPushToken(expoPushToken)} (user ${userId})`,
+      );
       return { success: false, message: 'Token Expo inválido.' };
     }
 
@@ -80,13 +153,11 @@ export class NotificationsService {
     }
 
     // Validar preferências de ignição se aplicável
-    if (data?.ignition) {
-      if (!userExists.notificacaoIgnicao) {
-        return {
-          success: false,
-          message: 'Preferencia de notificacao de ignicao desativada.',
-        };
-      }
+    if (data?.ignition && !userExists.notificacaoIgnicao) {
+      return {
+        success: false,
+        message: 'Preferencia de notificacao de ignicao desativada.',
+      };
     }
 
     // Salvar no banco ANTES de enviar
@@ -98,16 +169,23 @@ export class NotificationsService {
       data,
     );
 
-    const message = {
-      to: expoPushToken,
-      sound: 'default' as const,
-      title,
-      body,
-      data,
-    };
+    const message = this.buildExpoMessage(expoPushToken, title, body, data);
 
     try {
-      await this.expo.sendPushNotificationsAsync([message]);
+      const tickets = await this.expo.sendPushNotificationsAsync([message]);
+      const firstTicket = tickets?.[0];
+
+      if (firstTicket?.status === 'error') {
+        this.logger.warn(
+          `⚠️ [Expo] Ticket erro para notificação #${savedNotification.id}: ${firstTicket.message ?? 'erro desconhecido'}`,
+        );
+        return {
+          success: false,
+          message: firstTicket.message || 'Erro no ticket Expo.',
+          notificationId: savedNotification.id,
+        };
+      }
+
       this.logger.log(
         `📤 [Expo] Notificação #${savedNotification.id} enviada com sucesso`,
       );
@@ -200,7 +278,6 @@ export class NotificationsService {
     userId: number,
     notificationId: number,
   ): Promise<Notification> {
-    // Verifica se a notificação existe e pertence ao usuário
     const notification = await this.prisma.notification.findUnique({
       where: { id: notificationId },
     });
@@ -257,7 +334,6 @@ export class NotificationsService {
     userId: number,
     notificationId: number,
   ): Promise<void> {
-    // Verifica se a notificação existe e pertence ao usuário
     const notification = await this.prisma.notification.findUnique({
       where: { id: notificationId },
     });
@@ -307,13 +383,6 @@ export class NotificationsService {
 
   /**
    * Disparada pelo processador de webhook M7.
-   *
-   * Regras:
-   *  - tipoevento === 32 ou evento === 'Ignição Ligada'  → notificação de ignição ligada
-   *  - tipoevento === 16 ou evento contém 'violação de ancora' → notificação de âncora violada
-   *
-   * Apenas usuários com `notificacaoIgnicao = true` que possuam um
-   * `UserVehicle` ativo com o chassi recebido serão notificados.
    */
   async dispararNotificacaoVeiculoWebhook(
     chassi: string,
@@ -322,8 +391,7 @@ export class NotificationsService {
   ): Promise<{ sent: number; skipped: number }> {
     const eventoLower = evento?.toLowerCase() ?? '';
 
-    const isIgnicaoLigada =
-      tipoevento === 32 || evento === 'Ignição Ligada';
+    const isIgnicaoLigada = tipoevento === 32 || evento === 'Ignição Ligada';
 
     const isAncoraViolada =
       tipoevento === 16 ||
@@ -337,7 +405,6 @@ export class NotificationsService {
       return { sent: 0, skipped: 0 };
     }
 
-    // Buscar veículos com esse chassi cujo usuário tem a flag ativa
     const userVehicles = await this.prisma.userVehicle.findMany({
       where: {
         chassi,
@@ -359,15 +426,20 @@ export class NotificationsService {
 
     const userIds = userVehicles.map((v) => v.userId);
 
-    // Obter o token Expo mais recente de cada usuário
-    const latestTokens = await this.prisma.notification.findMany({
-      where: { userId: { in: userIds }, deleted: false },
-      orderBy: { sentAt: 'desc' },
-      distinct: ['userId'],
-      select: { userId: true, expoPushToken: true },
+    const usersWithToken = await this.prisma.user.findMany({
+      where: {
+        id: { in: userIds },
+        isActive: true,
+        expoPushToken: { not: null },
+      },
+      select: { id: true, expoPushToken: true },
     });
 
-    const tokenMap = new Map(latestTokens.map((t) => [t.userId, t.expoPushToken]));
+    const tokenMap = new Map(
+      usersWithToken
+        .filter((u) => !!u.expoPushToken)
+        .map((u) => [u.id, u.expoPushToken as string]),
+    );
     const plateMap = new Map(userVehicles.map((v) => [v.userId, v.plate]));
 
     let sent = 0;
@@ -375,6 +447,10 @@ export class NotificationsService {
 
     for (const { userId } of userVehicles) {
       const expoPushToken = tokenMap.get(userId);
+
+      this.logger.log(
+        `[Webhook] expoPushToken resolvido para user ${userId}: ${this.maskExpoPushToken(expoPushToken)}`,
+      );
 
       if (!expoPushToken || !Expo.isExpoPushToken(expoPushToken)) {
         this.logger.warn(
@@ -394,14 +470,29 @@ export class NotificationsService {
       if (isIgnicaoLigada) {
         title = 'Ignição Ligada 🔑';
         body = `A ignição do seu veículo (${vehicleLabel}) foi ligada.`;
-        data = { chassi, plate: plate ?? undefined, ignition: 'on', eventType: 'ignition_on' };
+        data = {
+          chassi,
+          plate: plate ?? undefined,
+          ignition: 'on',
+          eventType: 'ignition_on',
+        };
       } else {
         title = 'Violação de Âncora ⚠️';
         body = `Violação de âncora detectada no seu veículo (${vehicleLabel}).`;
-        data = { chassi, plate: plate ?? undefined, eventType: 'ancora_violation' };
+        data = {
+          chassi,
+          plate: plate ?? undefined,
+          eventType: 'ancora_violation',
+        };
       }
 
-      const result = await this.sendPushNotification(userId, expoPushToken, title, body, data);
+      const result = await this.sendPushNotification(
+        userId,
+        expoPushToken,
+        title,
+        body,
+        data,
+      );
 
       if (result.success) {
         sent++;
@@ -457,7 +548,6 @@ export class NotificationsService {
     },
     adminUserId?: number,
   ): Promise<{ sentCount: number; skippedCount: number }> {
-    // Validar que quem está chamando é ADMIN
     if (adminUserId) {
       const admin = await this.prisma.user.findUnique({
         where: { id: adminUserId },
@@ -473,36 +563,43 @@ export class NotificationsService {
 
     const dataPayload = payload.data ?? { type: 'marketing' };
 
-    const recipients = await this.prisma.notification.findMany({
+    const recipients = await this.prisma.user.findMany({
       where: {
-        deleted: false,
-        user: {
-          isActive: true,
-        },
+        isActive: true,
+        acceptsMarketingNotifications: true,
+        expoPushToken: { not: null },
       },
-      orderBy: { sentAt: 'desc' },
-      distinct: ['userId'],
       select: {
-        userId: true,
+        id: true,
         expoPushToken: true,
       },
     });
 
-    const validRecipients = recipients.filter((recipient) =>
-      Expo.isExpoPushToken(recipient.expoPushToken),
-    );
+    const validRecipients: Array<{ id: number; expoPushToken: string }> = [];
+    for (const recipient of recipients) {
+      if (
+        recipient.expoPushToken &&
+        Expo.isExpoPushToken(recipient.expoPushToken)
+      ) {
+        validRecipients.push({
+          id: recipient.id,
+          expoPushToken: recipient.expoPushToken,
+        });
+      }
+    }
 
     if (validRecipients.length === 0) {
       return { sentCount: 0, skippedCount: recipients.length };
     }
 
-    const messages = validRecipients.map((recipient) => ({
-      to: recipient.expoPushToken,
-      sound: 'default' as const,
-      title: payload.title,
-      body: payload.body,
-      data: dataPayload,
-    }));
+    const messages: ExpoPushMessage[] = validRecipients.map((recipient) =>
+      this.buildExpoMessage(
+        recipient.expoPushToken,
+        payload.title,
+        payload.body,
+        dataPayload,
+      ),
+    );
 
     const chunks = this.expo.chunkPushNotifications(messages);
     for (const chunk of chunks) {
@@ -511,7 +608,7 @@ export class NotificationsService {
 
     await this.prisma.notification.createMany({
       data: validRecipients.map((recipient) => ({
-        userId: recipient.userId,
+        userId: recipient.id,
         expoPushToken: recipient.expoPushToken,
         title: payload.title,
         body: payload.body,

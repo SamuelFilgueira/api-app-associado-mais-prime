@@ -19,6 +19,7 @@ model user {
   cpf              String         @unique(map: "User_cpf_key")
   email            String         @unique(map: "User_email_key")
   passwordHash     String
+  expoPushToken    String?        @db.VarChar(255)
   cep              String?
   address          String?
   plate            String?
@@ -54,6 +55,7 @@ model UserVehicle {
   reinspectionRequired Boolean @default(false)
   lastSyncAt         DateTime @default(now())
   user               user     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reinspections      Reinspection[]
 
   @@unique([userId, chassi], map: "UserVehicle_userId_chassi_key")
   @@index([chassi], map: "UserVehicle_chassi_idx")
@@ -187,6 +189,69 @@ enum DocumentType {
 // ======================================================
 // NOVO MODEL — NOTIFICATIONS
 // ======================================================
+
+// ======================================================
+// NOVO MODEL — REVISTORIA
+// ======================================================
+
+enum ReinspectionVehicleType {
+  VEICULOS_LEVES
+  MOTOS
+  CAMINHOES
+}
+
+enum ReinspectionStatus {
+  PENDENTE
+  EM_ANALISE
+  FINALIZADA
+}
+
+model Reinspection {
+  id              Int                     @id @default(autoincrement())
+  userVehicleId   Int
+  vehicleType     ReinspectionVehicleType
+  status          ReinspectionStatus      @default(PENDENTE)
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+
+  userVehicle     UserVehicle             @relation(fields: [userVehicleId], references: [id], onDelete: Cascade)
+  photos          ReinspectionPhoto[]
+
+  @@index([userVehicleId], map: "Reinspection_userVehicleId_idx")
+  @@index([status], map: "Reinspection_status_idx")
+}
+
+model ReinspectionPhoto {
+  id              Int          @id @default(autoincrement())
+  reinspectionId  Int
+  nomeArquivo     String       @db.VarChar(255)
+  codigoTipo      Int?
+  url             String?      @db.VarChar(500)
+  hinovaSituacao  String?      @db.VarChar(50)   // retorno da Hinova: "Inserido", erro, etc.
+  sentToHinova    Boolean      @default(false)   // controle de envio
+  createdAt       DateTime     @default(now())
+
+  reinspection    Reinspection @relation(fields: [reinspectionId], references: [id], onDelete: Cascade)
+
+  @@index([reinspectionId], map: "ReinspectionPhoto_reinspectionId_idx")
+}
+
+// ======================================================
+// NOVO MODEL — TEMPLATE DE REVISTORIA
+// ======================================================
+
+model ReinspectionTemplatePhoto {
+  id           Int                     @id @default(autoincrement())
+  vehicleType  ReinspectionVehicleType
+  photoUrl     String                  @db.VarChar(500)
+  ordem        Int
+
+  createdAt    DateTime                @default(now())
+  updatedAt    DateTime                @updatedAt
+
+  @@unique([vehicleType, ordem], map: "ReinspectionTemplatePhoto_vehicleType_ordem_key")
+  @@index([vehicleType], map: "ReinspectionTemplatePhoto_vehicleType_idx")
+}
 
 model Notification {
   id              Int       @id @default(autoincrement())

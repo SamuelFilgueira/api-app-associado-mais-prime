@@ -17,6 +17,11 @@ export class FileUploadService {
     'uploads',
     'workshop-photos',
   );
+  private readonly reinspectionPhotosUploadPath = join(
+    process.cwd(),
+    'uploads',
+    'reinspection-photos',
+  );
 
   async uploadProfilePhoto(file: Express.Multer.File): Promise<string> {
     // Garante que o diretório de upload existe
@@ -86,6 +91,71 @@ export class FileUploadService {
     } catch (error) {
       this.logger.warn(`Erro ao deletar foto: ${error.message}`);
     }
+  }
+
+  async uploadReinspectionTemplatePhoto(
+    file: Express.Multer.File,
+  ): Promise<string> {
+    const templateUploadPath = join(
+      process.cwd(),
+      'uploads',
+      'reinspection-templates',
+    );
+    await this.ensureDirectory(templateUploadPath);
+
+    const timestamp = Date.now();
+    const randomString = Math.random().toString(36).substring(2, 15);
+    const filename = `template-${timestamp}-${randomString}.jpg`;
+    const filepath = join(templateUploadPath, filename);
+
+    await sharp(file.buffer)
+      .resize(1200, 1200, {
+        fit: 'inside',
+        withoutEnlargement: true,
+      })
+      .jpeg({ quality: 85, progressive: true })
+      .toFile(filepath);
+
+    return `uploads/reinspection-templates/${filename}`;
+  }
+
+  async deleteReinspectionTemplatePhoto(photoUrl: string): Promise<void> {
+    if (!photoUrl) return;
+
+    try {
+      const filepath = join(process.cwd(), photoUrl);
+      await fs.unlink(filepath);
+    } catch (error) {
+      this.logger.warn(`Erro ao deletar template foto: ${error.message}`);
+    }
+  }
+
+  async uploadReinspectionPhotoFromBase64(
+    base64Content: string,
+    originalName: string,
+  ): Promise<string> {
+    await this.ensureDirectory(this.reinspectionPhotosUploadPath);
+
+    const cleanedBase64 = base64Content.includes(',')
+      ? base64Content.split(',')[1]
+      : base64Content;
+
+    const buffer = Buffer.from(cleanedBase64, 'base64');
+
+    const timestamp = Date.now();
+    const randomString = Math.random().toString(36).substring(2, 15);
+    const sanitizedName = this.sanitizeFilename(originalName);
+    const filename = `reinspection-${timestamp}-${randomString}-${sanitizedName}`;
+    const filepath = join(this.reinspectionPhotosUploadPath, filename);
+
+    await fs.writeFile(filepath, buffer);
+
+    return `uploads/reinspection-photos/${filename}`;
+  }
+
+  private sanitizeFilename(filename: string): string {
+    const trimmed = filename?.trim() || 'photo.jpg';
+    return trimmed.replace(/[^a-zA-Z0-9._-]/g, '_');
   }
 
   private async ensureDirectory(pathToCheck: string): Promise<void> {

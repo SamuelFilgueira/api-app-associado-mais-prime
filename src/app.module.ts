@@ -21,6 +21,7 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { AlloyalApiModule } from './beneficios/alloyal-api.module';
 import { AlloyalApiController } from './beneficios/alloyal-api.controller';
 import { QueueModule } from './queue/queue.module';
+import { ReinspectionModule } from './reinspection/reinspection.module';
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { QueueModule } from './queue/queue.module';
     AssociadoModule,
     NotificationsModule,
     AlloyalApiModule,
+    ReinspectionModule,
   ],
   controllers: [
     AppController,

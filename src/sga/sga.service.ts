@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Injectable,
   NotFoundException,
   InternalServerErrorException,
@@ -29,6 +30,16 @@ export class SgaService {
    */
   private async fetchSgaAssociado(cpf: string) {
     const url = `https://api.hinova.com.br/api/sga/v2/associado/buscar/${cpf}`;
+    return axios.get(url, {
+      headers: {
+        Authorization: `Bearer ${process.env.SGA_TOKEN}`,
+      },
+      validateStatus: () => true,
+    });
+  }
+
+  private async fetchSgaVeiculo(chassi: string) {
+    const url = `https://api.hinova.com.br/api/sga/v2/veiculo/buscar/${chassi}`;
     return axios.get(url, {
       headers: {
         Authorization: `Bearer ${process.env.SGA_TOKEN}`,
@@ -134,6 +145,48 @@ export class SgaService {
       }
       throw new InternalServerErrorException(
         'Erro ao consultar veículos do associado',
+      );
+    }
+  }
+
+  async consultarVeiculoInfo(chassi: string) {
+    const normalizedChassi = chassi?.trim();
+
+    if (!normalizedChassi) {
+      throw new BadRequestException('Chassi é obrigatório');
+    }
+
+    try {
+      const response = await this.fetchSgaVeiculo(normalizedChassi);
+      if (response.status >= 400) {
+        return (
+          response.data || {
+            mensagem: 'Erro desconhecido',
+            error: [response.statusText],
+          }
+        );
+      }
+
+      const veiculos = Array.isArray(response.data)
+        ? response.data
+        : response.data
+          ? [response.data]
+          : [];
+
+      return veiculos.map((veiculo) => ({
+        codigo_veiculo: veiculo?.codigo_veiculo ?? null,
+        chassi: veiculo?.chassi ?? null,
+        placa: veiculo?.placa ?? null,
+        tipo: veiculo?.tipo ?? null,
+        categoria: veiculo?.categoria ?? null,
+        nome: veiculo?.nome ?? null,
+      }));
+    } catch (error) {
+      if (error.response && error.response.data) {
+        return error.response.data;
+      }
+      throw new InternalServerErrorException(
+        'Erro ao consultar veículo no SGA',
       );
     }
   }

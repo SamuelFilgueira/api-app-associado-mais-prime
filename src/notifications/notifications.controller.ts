@@ -4,7 +4,6 @@ import {
   Post,
   Get,
   Patch,
-  Delete,
   Param,
   Query,
   ParseIntPipe,
@@ -23,10 +22,17 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { SendMarketingNotificationDto } from './DTOs/send-marketing-notification.dto';
 import { NOTIFICATION_QUEUE } from '../queue/queue.module';
 import { AdminRoleGuard } from '../auth/admin-role.guard';
+import { RegisterExpoTokenDto } from './DTOs/register-expo-token.dto';
 
 @Controller('notifications')
 export class NotificationsController {
   private readonly logger = new Logger(NotificationsController.name);
+
+  private maskExpoPushToken(token?: string | null): string {
+    if (!token) return 'ausente';
+    if (token.length <= 16) return token;
+    return `${token.slice(0, 12)}...${token.slice(-4)}`;
+  }
 
   constructor(
     private readonly notificationsService: NotificationsService,
@@ -41,6 +47,9 @@ export class NotificationsController {
   @Post('queue-test')
   async queueTestNotification(@Body() dto: TestNotificationDto) {
     const data = { plate: dto.plate, ignition: dto.ignition };
+    this.logger.log(
+      `[QUEUE] expoPushToken recebido para enfileiramento: ${this.maskExpoPushToken(dto.expoPushToken)}`,
+    );
     const job = await this.notificationQueue.add(
       'push-test',
       {
@@ -52,7 +61,9 @@ export class NotificationsController {
       },
       { attempts: 3, backoff: { type: 'exponential', delay: 2000 } },
     );
-    this.logger.log(`[QUEUE] Job #${job.id} enfileirado para user ${dto.userId}`);
+    this.logger.log(
+      `[QUEUE] Job #${job.id} enfileirado para user ${dto.userId}`,
+    );
     return {
       queued: true,
       jobId: job.id,
@@ -68,6 +79,9 @@ export class NotificationsController {
       ignition: dto.ignition,
     };
     this.logger.log(
+      `[TEST] expoPushToken recebido para envio direto: ${this.maskExpoPushToken(dto.expoPushToken)}`,
+    );
+    this.logger.log(
       `Enviando notificação de teste com dados: ${JSON.stringify(data)}`,
     );
     // Nota: Para teste, usando um userId padrão (1)
@@ -78,6 +92,23 @@ export class NotificationsController {
       dto.title,
       dto.body,
       data,
+    );
+  }
+
+  /**
+   * POST /notifications/register-token
+   * Registra/atualiza o Expo Push Token do usuário autenticado.
+   */
+  @UseGuards(JwtAuthGuard)
+  @Post('register-token')
+  @HttpCode(HttpStatus.OK)
+  async registerExpoPushToken(
+    @Body() dto: RegisterExpoTokenDto,
+    @Request() req: any,
+  ) {
+    return this.notificationsService.registerExpoPushToken(
+      req.user.userId,
+      dto.expoPushToken,
     );
   }
 

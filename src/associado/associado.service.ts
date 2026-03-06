@@ -151,6 +151,43 @@ export class AssociadoService {
     return associado;
   }
 
+  async findVehiclesByCpf(rawCpf: string) {
+    const cpf = rawCpf?.replace(/\D/g, '');
+
+    if (!cpf) {
+      throw new BadRequestException('CPF é obrigatório');
+    }
+
+    const associado = await this.prisma.user.findFirst({
+      where: {
+        OR: [{ cpf }, { cpf: rawCpf }],
+      },
+      select: {
+        id: true,
+        cpf: true,
+      },
+    });
+
+    if (!associado) {
+      throw new NotFoundException('Associado não encontrado');
+    }
+
+    const vehicles = await this.prisma.userVehicle.findMany({
+      where: {
+        userId: associado.id,
+      },
+      orderBy: {
+        id: 'desc',
+      },
+    });
+
+    return {
+      userId: associado.id,
+      cpf: associado.cpf,
+      vehicles,
+    };
+  }
+
   async updateAssociado(
     id: number,
     data: UpdateAssociadoDto,

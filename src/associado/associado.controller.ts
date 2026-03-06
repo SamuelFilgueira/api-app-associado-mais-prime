@@ -37,6 +37,12 @@ export class AssociadoController {
     return resposta;
   }
 
+  @Get('cpf/:cpf/veiculos')
+  async findVehiclesByCpf(@Param('cpf') cpf: string) {
+    this.logger.log(`Buscando veículos do associado pelo CPF: ${cpf}`);
+    return this.associadoService.findVehiclesByCpf(cpf);
+  }
+
   @Patch(':id')
   @UseInterceptors(FileInterceptor('profilePhoto'))
   updateAssociado(
