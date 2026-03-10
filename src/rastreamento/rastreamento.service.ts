@@ -196,7 +196,9 @@ export class RastreamentoService {
       }
 
       if (!chassi) {
-        this.logger.warn('[Webhook] Payload sem chassi — notificação não disparada');
+        this.logger.warn(
+          '[Webhook] Payload sem chassi — notificação não disparada',
+        );
         return;
       }
 

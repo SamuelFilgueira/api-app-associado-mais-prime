@@ -7,6 +7,11 @@ import { MailService } from 'src/common/services/mail.service';
 
 @Module({
   controllers: [ReinspectionController],
-  providers: [ReinspectionService, PrismaService, FileUploadService, MailService],
+  providers: [
+    ReinspectionService,
+    PrismaService,
+    FileUploadService,
+    MailService,
+  ],
 })
 export class ReinspectionModule {}

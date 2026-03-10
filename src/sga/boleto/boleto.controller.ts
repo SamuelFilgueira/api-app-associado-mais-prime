@@ -11,7 +11,9 @@ export class BoletoController {
 
   @Post('listar')
   async listarBoletos(@Body() body: { codigo_veiculo: number }) {
-    this.logger.log(`Dados recebidos em listarBoletos: ${JSON.stringify(body)}`);
+    this.logger.log(
+      `Dados recebidos em listarBoletos: ${JSON.stringify(body)}`,
+    );
     return this.boletoService.consultarBoletosPorVeiculo(body.codigo_veiculo);
   }
 }

@@ -44,7 +44,6 @@ export class BoletoService {
         },
       );
 
-
       const boletos: Array<{
         nosso_numero?: any;
         linha_digitavel?: any;

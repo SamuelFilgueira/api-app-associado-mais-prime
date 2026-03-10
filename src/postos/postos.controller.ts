@@ -1,4 +1,12 @@
-import { Controller, Post, Body, UseGuards, Req, Query, Logger } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Body,
+  UseGuards,
+  Req,
+  Query,
+  Logger,
+} from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PostosService } from './postos.service';
 import { PostosRequestDto } from './dto/postos-request.dto';

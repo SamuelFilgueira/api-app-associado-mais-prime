@@ -80,7 +80,9 @@ export class ReinspectionController {
   finalizeByUserVehicleId(
     @Query('userVehicleId', ParseIntPipe) userVehicleId: number,
   ) {
-    console.log(`Recebido pedido para finalizar revistoria do userVehicleId: ${userVehicleId}`);
+    console.log(
+      `Recebido pedido para finalizar revistoria do userVehicleId: ${userVehicleId}`,
+    );
     return this.reinspectionService.finalizeByUserVehicleId(userVehicleId);
   }
 }

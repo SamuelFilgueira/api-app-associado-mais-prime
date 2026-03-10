@@ -1,4 +1,8 @@
-import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  NotFoundException,
+} from '@nestjs/common';
 import { RegisterDto } from './dto/register.dto';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
@@ -27,6 +31,7 @@ export class AuthService {
         address: true,
         primeiroLogin: true,
         role: true,
+        expoPushToken: true,
       },
     });
   }
@@ -123,7 +128,8 @@ export class AuthService {
     }
 
     // Gera senha aleatória de 10 caracteres (letras + números)
-    const newPassword = Math.random().toString(36).slice(-5).toUpperCase() +
+    const newPassword =
+      Math.random().toString(36).slice(-5).toUpperCase() +
       Math.random().toString(36).slice(-5);
 
     const passwordHash = await bcrypt.hash(newPassword, 10);

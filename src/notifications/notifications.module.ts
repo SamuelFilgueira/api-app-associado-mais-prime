@@ -7,7 +7,12 @@ import { NotificationProcessor } from './notification.processor';
 
 @Module({
   controllers: [NotificationsController],
-  providers: [NotificationsService, PrismaService, AdminTokenGuard, NotificationProcessor],
+  providers: [
+    NotificationsService,
+    PrismaService,
+    AdminTokenGuard,
+    NotificationProcessor,
+  ],
   exports: [NotificationsService],
 })
 export class NotificationsModule {}

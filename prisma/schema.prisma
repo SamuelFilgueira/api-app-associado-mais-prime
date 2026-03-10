@@ -78,6 +78,19 @@ model VehicleWebhookEvent {
 }
 
 
+model SliderInfo {
+  id          Int      @id @default(autoincrement())
+  title       String   @db.VarChar(255)
+  subtitle    String?  @db.VarChar(255)
+  description String   @db.Text
+  imageUrl    String   @db.VarChar(500)
+  whatsapp    String?  @db.VarChar(50)
+  linkUrl     String?  @db.VarChar(500)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
 //
 // ======================================================
 // NOVO MODEL — WORKSHOP (OFICINA)

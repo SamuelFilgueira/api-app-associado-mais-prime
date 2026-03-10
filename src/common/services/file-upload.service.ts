@@ -22,6 +22,11 @@ export class FileUploadService {
     'uploads',
     'reinspection-photos',
   );
+  private readonly sliderUploadPath = join(
+    process.cwd(),
+    'uploads',
+    'slider-photos',
+  );
 
   async uploadProfilePhoto(file: Express.Multer.File): Promise<string> {
     // Garante que o diretório de upload existe
@@ -70,6 +75,25 @@ export class FileUploadService {
     return `uploads/workshop-photos/${filename}`;
   }
 
+  async uploadSliderPhoto(file: Express.Multer.File): Promise<string> {
+    await this.ensureDirectory(this.sliderUploadPath);
+
+    const timestamp = Date.now();
+    const randomString = Math.random().toString(36).substring(2, 15);
+    const filename = `slider-${timestamp}-${randomString}.jpg`;
+    const filepath = join(this.sliderUploadPath, filename);
+
+    await sharp(file.buffer)
+      .resize(1600, 900, {
+        fit: 'inside',
+        withoutEnlargement: true,
+      })
+      .jpeg({ quality: 85, progressive: true })
+      .toFile(filepath);
+
+    return `uploads/slider-photos/${filename}`;
+  }
+
   async deleteProfilePhoto(photoUrl: string): Promise<void> {
     if (!photoUrl) return;
 
@@ -90,6 +114,17 @@ export class FileUploadService {
       await fs.unlink(filepath);
     } catch (error) {
       this.logger.warn(`Erro ao deletar foto: ${error.message}`);
+    }
+  }
+
+  async deleteSliderPhoto(photoUrl: string): Promise<void> {
+    if (!photoUrl) return;
+
+    try {
+      const filepath = join(process.cwd(), photoUrl);
+      await fs.unlink(filepath);
+    } catch (error) {
+      this.logger.warn(`Erro ao deletar foto de slider: ${error.message}`);
     }
   }
 

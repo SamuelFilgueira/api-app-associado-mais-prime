@@ -72,7 +72,15 @@ export class RastreamentoSoftruck {
   private loginPromise: Promise<void> | null = null;
 
   /** Cache de vehicle data por chassi */
-  private vehicleCache = new Map<string, CacheEntry<{ id: string; plate: string; brandName: string; modelName: string }>>();
+  private vehicleCache = new Map<
+    string,
+    CacheEntry<{
+      id: string;
+      plate: string;
+      brandName: string;
+      modelName: string;
+    }>
+  >();
 
   /** Cache de device ID por vehicle ID */
   private deviceCache = new Map<string, CacheEntry<string>>();
@@ -81,7 +89,10 @@ export class RastreamentoSoftruck {
     this.logger.log('Módulo de rastreamento Softruck inicializado');
   }
 
-  private getCached<T>(cache: Map<string, CacheEntry<T>>, key: string): T | null {
+  private getCached<T>(
+    cache: Map<string, CacheEntry<T>>,
+    key: string,
+  ): T | null {
     const entry = cache.get(key);
     if (!entry) return null;
     if (Date.now() > entry.expiresAt) {
@@ -91,7 +102,11 @@ export class RastreamentoSoftruck {
     return entry.data;
   }
 
-  private setCache<T>(cache: Map<string, CacheEntry<T>>, key: string, data: T): void {
+  private setCache<T>(
+    cache: Map<string, CacheEntry<T>>,
+    key: string,
+    data: T,
+  ): void {
     cache.set(key, { data, expiresAt: Date.now() + CACHE_TTL });
   }
 

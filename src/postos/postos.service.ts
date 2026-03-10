@@ -14,7 +14,6 @@ export class PostosService {
     userId: number,
     page: number = 1,
   ) {
-
     const vehicle = await this.prisma.userVehicle.findFirst({
       where: { userId, isActive: true, plate: { not: null } },
     });
@@ -26,7 +25,9 @@ export class PostosService {
 
     const url = `https://clubgas-api.azurewebsites.net/api/v1/Posto/obter-map-app?Latitude=${latitude}&Longitude=${longitude}&Placa=${vehicle.plate}`;
     this.logger.log(`URL chamada para API de postos: ${url}`);
-    this.logger.log(`TOKEN_API_CLUBGAS definido: ${!!process.env.TOKEN_API_CLUBGAS}`);
+    this.logger.log(
+      `TOKEN_API_CLUBGAS definido: ${!!process.env.TOKEN_API_CLUBGAS}`,
+    );
 
     let data: any;
     try {
@@ -37,7 +38,10 @@ export class PostosService {
       });
       data = response.data;
     } catch (error) {
-      this.logger.error(`Erro ao chamar API de postos: ${error?.message}`, error?.response?.data);
+      this.logger.error(
+        `Erro ao chamar API de postos: ${error?.message}`,
+        error?.response?.data,
+      );
       throw error;
     }
     // Paginação local

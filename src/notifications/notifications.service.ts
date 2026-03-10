@@ -44,10 +44,10 @@ export class NotificationsService {
       data,
       sound: 'default',
       priority: 'high',
-      channelId: 'alerts_v2',   // precisa bater com o canal do app
-      _contentAvailable: true,  // iOS background/killed
-      mutableContent: true,     // iOS compat
-      ttl: 60 * 60,             // 1h
+      channelId: 'alerts_v2', // precisa bater com o canal do app
+      _contentAvailable: true, // iOS background/killed
+      mutableContent: true, // iOS compat
+      ttl: 60 * 60, // 1h
       expiration: Math.floor(Date.now() / 1000) + 60 * 60,
     };
   }

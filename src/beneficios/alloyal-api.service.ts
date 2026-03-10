@@ -880,7 +880,9 @@ export class AlloyalApiService {
         user_tags: 'APP-ASSOCIADO',
       };
 
-      this.logger.log(`[createUser] Enviando para Alloyal: ${JSON.stringify(body)}`);
+      this.logger.log(
+        `[createUser] Enviando para Alloyal: ${JSON.stringify(body)}`,
+      );
 
       const response = await axios.post(
         `${baseOrigin}/client/v2/businesses/${cnpj}/users`,

@@ -1,4 +1,12 @@
-import { Controller, Post, Get, Body, Query, UseGuards, Logger } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Get,
+  Body,
+  Query,
+  UseGuards,
+  Logger,
+} from '@nestjs/common';
 import { RastreamentoService } from './rastreamento.service';
 import { M7WebhookGuard } from './guards/m7.guard';
 import { InjectQueue } from '@nestjs/bullmq';
@@ -22,7 +30,9 @@ export class RastreamentoController {
 
   @Post('ultima-posicao')
   async ultimaPosicaoM7(@Body() body: { cnpj: string; chassi: string }) {
-    this.logger.log(`Body recebido para ultimaPosicao: ${JSON.stringify(body)}`);
+    this.logger.log(
+      `Body recebido para ultimaPosicao: ${JSON.stringify(body)}`,
+    );
     return this.rastreamentoService.ultimaPosicaoM7(body.cnpj, body.chassi);
   }
 
@@ -63,10 +73,14 @@ export class RastreamentoController {
   @Post('webhook-m7')
   async webhookM7(@Body() payload: unknown) {
     this.logger.log('Webhook M7 recebido — enfileirando para processamento');
-    const job = await this.webhookQueue.add('m7-event', { payload }, {
-      attempts: 3,
-      backoff: { type: 'exponential', delay: 5000 },
-    });
+    const job = await this.webhookQueue.add(
+      'm7-event',
+      { payload },
+      {
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 5000 },
+      },
+    );
     return { queued: true, jobId: job.id };
   }
 }
