@@ -40,7 +40,7 @@ export class OficinaController {
   }
 
   @Get('all')
-  @UseGuards(AdminRoleGuard)
+  //@UseGuards(AdminRoleGuard)
   @HttpCode(HttpStatus.OK)
   async findAll(
     @Query('page') page: string = '1',

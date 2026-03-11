@@ -44,11 +44,13 @@ export class NotificationsService {
       data,
       sound: 'default',
       priority: 'high',
-      channelId: 'alerts_v2', // precisa bater com o canal do app
-      _contentAvailable: true, // iOS background/killed
-      mutableContent: true, // iOS compat
-      ttl: 60 * 60, // 1h
-      expiration: Math.floor(Date.now() / 1000) + 60 * 60,
+      channelId: 'alerts_v2',
+      _contentAvailable: true,
+      mutableContent: true, // precisa bater com o canal do app
+      //_contentAvailable: true, // iOS background/killed
+      //mutableContent: true, // iOS compat
+      //ttl: 60 * 60, // 1h
+      //expiration: Math.floor(Date.now() / 1000) + 60 * 60,
     };
   }
 
@@ -174,6 +176,25 @@ export class NotificationsService {
     try {
       const tickets = await this.expo.sendPushNotificationsAsync([message]);
       const firstTicket = tickets?.[0];
+
+      const receiptIds = tickets
+        .filter((ticket) => ticket.status === 'ok')
+        .map((ticket) => ticket.id);
+
+      if (receiptIds.length) {
+        const receipts = await this.expo.getPushNotificationReceiptsAsync(receiptIds);
+
+        for (const receiptId in receipts) {
+          const receipt = receipts[receiptId];
+
+          if (receipt.status === 'error') {
+            this.logger.error(
+              `❌ [Expo Receipt] erro na entrega: ${receipt.message}`,
+              receipt.details,
+            );
+          }
+        }
+      }
 
       if (firstTicket?.status === 'error') {
         this.logger.warn(
