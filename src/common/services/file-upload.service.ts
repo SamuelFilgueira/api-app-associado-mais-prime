@@ -193,6 +193,15 @@ export class FileUploadService {
     return trimmed.replace(/[^a-zA-Z0-9._-]/g, '_');
   }
 
+  buildUrl(relativePath: string | null | undefined): string | null {
+    if (!relativePath) return null;
+    const baseUrl = (process.env.APP_URL ?? 'http://localhost:3001').replace(
+      /\/+$/,
+      '',
+    );
+    return `${baseUrl}/${relativePath}`;
+  }
+
   private async ensureDirectory(pathToCheck: string): Promise<void> {
     try {
       await fs.access(pathToCheck);

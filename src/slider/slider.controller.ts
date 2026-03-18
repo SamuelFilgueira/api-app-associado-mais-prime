@@ -11,6 +11,7 @@ import {
   UploadedFile,
   UseGuards,
   UseInterceptors,
+  Patch,
 } from '@nestjs/common';
 import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
 import { SliderService } from './slider.service';
@@ -40,7 +41,7 @@ export class SliderController {
     return this.sliderService.createSlider(body, image);
   }
 
-  @Put(':id')
+  @Patch(':id')
   @UseInterceptors(FileInterceptor('image'))
   updateSlider(
     @Param('id', ParseIntPipe) id: number,

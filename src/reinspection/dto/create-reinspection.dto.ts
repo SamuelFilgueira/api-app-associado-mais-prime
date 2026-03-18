@@ -26,6 +26,11 @@ export class ReinspectionPhotoDto {
   @IsInt()
   codigoTipo?: number;
 
+  /** ID do template correspondente a esta foto (usado no fluxo de reenvio). */
+  @IsOptional()
+  @IsInt()
+  templatePhotoId?: number;
+
   /** Imagem comprimida pelo app e convertida para base64. */
   @IsString()
   binario: string;

@@ -28,7 +28,7 @@ model user {
   longitude        Float?
   profilePhotoUrl  String?
   isActive         Boolean        @default(true)
-  acceptsMarketingNotifications Boolean @default(false)
+  acceptsMarketingNotifications Boolean @default(true)
   notificacaoIgnicao Boolean @default(true)
   ancoraAtiva      Boolean        @default(false)
   role             UserRole       @default(USER)
@@ -217,6 +217,14 @@ enum ReinspectionStatus {
   PENDENTE
   EM_ANALISE
   FINALIZADA
+  APROVADA
+  REPROVADA
+}
+
+enum ReinspectionPhotoStatus {
+  PENDENTE
+  APROVADA
+  REPROVADA
 }
 
 model Reinspection {
@@ -224,6 +232,7 @@ model Reinspection {
   userVehicleId   Int
   vehicleType     ReinspectionVehicleType
   status          ReinspectionStatus      @default(PENDENTE)
+  codigoVeiculo   Int?                    // código do veículo na Hinova (usado no reenvio)
   createdAt       DateTime                @default(now())
   updatedAt       DateTime                @updatedAt
 
@@ -240,13 +249,17 @@ model ReinspectionPhoto {
   nomeArquivo     String       @db.VarChar(255)
   codigoTipo      Int?
   url             String?      @db.VarChar(500)
+  status          ReinspectionPhotoStatus
   hinovaSituacao  String?      @db.VarChar(50)   // retorno da Hinova: "Inserido", erro, etc.
   sentToHinova    Boolean      @default(false)   // controle de envio
+  templatePhotoId Int?                           // relação com o template correspondente
   createdAt       DateTime     @default(now())
 
   reinspection    Reinspection @relation(fields: [reinspectionId], references: [id], onDelete: Cascade)
+  templatePhoto   ReinspectionTemplatePhoto? @relation(fields: [templatePhotoId], references: [id])
 
   @@index([reinspectionId], map: "ReinspectionPhoto_reinspectionId_idx")
+  @@index([status], map: "ReinspectionPhoto_status_idx")
 }
 
 // ======================================================
@@ -261,6 +274,8 @@ model ReinspectionTemplatePhoto {
 
   createdAt    DateTime                @default(now())
   updatedAt    DateTime                @updatedAt
+
+  photos       ReinspectionPhoto[]
 
   @@unique([vehicleType, ordem], map: "ReinspectionTemplatePhoto_vehicleType_ordem_key")
   @@index([vehicleType], map: "ReinspectionTemplatePhoto_vehicleType_idx")

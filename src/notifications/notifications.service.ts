@@ -412,7 +412,7 @@ export class NotificationsService {
   ): Promise<{ sent: number; skipped: number }> {
     const eventoLower = evento?.toLowerCase() ?? '';
 
-    const isIgnicaoLigada = tipoevento === 32 || evento === 'Ignição Ligada';
+    const isIgnicaoLigada = tipoevento === 32 || eventoLower.includes('igniçao ligada') || eventoLower.includes('ignição ligada');
 
     const isAncoraViolada =
       tipoevento === 16 ||
@@ -569,6 +569,8 @@ export class NotificationsService {
     },
     adminUserId?: number,
   ): Promise<{ sentCount: number; skippedCount: number }> {
+    this.logger.log('[MARKETING] Iniciando envio de notificações de marketing');
+
     if (adminUserId) {
       const admin = await this.prisma.user.findUnique({
         where: { id: adminUserId },
@@ -576,6 +578,9 @@ export class NotificationsService {
       });
 
       if (!admin || admin.role !== 'ADMIN') {
+        this.logger.warn(
+          `[MARKETING] Usuário ${adminUserId} sem permissão (role: ${admin?.role})`,
+        );
         throw new ForbiddenException(
           'Apenas usuarios com role ADMIN podem enviar notificacoes de marketing.',
         );
@@ -584,6 +589,7 @@ export class NotificationsService {
 
     const dataPayload = payload.data ?? { type: 'marketing' };
 
+    this.logger.log('[MARKETING] Buscando usuários elegíveis');
     const recipients = await this.prisma.user.findMany({
       where: {
         isActive: true,
@@ -596,8 +602,13 @@ export class NotificationsService {
       },
     });
 
+    this.logger.log(`[MARKETING] ${recipients.length} usuários candidatos encontrados`);
+
+    // Remover duplicatas por ID (em caso de inconsistência)
+    const uniqueRecipients = new Map(recipients.map(r => [r.id, r]));
+    
     const validRecipients: Array<{ id: number; expoPushToken: string }> = [];
-    for (const recipient of recipients) {
+    for (const recipient of uniqueRecipients.values()) {
       if (
         recipient.expoPushToken &&
         Expo.isExpoPushToken(recipient.expoPushToken)
@@ -610,8 +621,11 @@ export class NotificationsService {
     }
 
     if (validRecipients.length === 0) {
+      this.logger.warn('[MARKETING] Nenhum recipiente válido encontrado');
       return { sentCount: 0, skippedCount: recipients.length };
     }
+
+    this.logger.log(`[MARKETING] ${validRecipients.length} tokens válidos após validação`);
 
     const messages: ExpoPushMessage[] = validRecipients.map((recipient) =>
       this.buildExpoMessage(
@@ -623,24 +637,60 @@ export class NotificationsService {
     );
 
     const chunks = this.expo.chunkPushNotifications(messages);
-    for (const chunk of chunks) {
-      await this.expo.sendPushNotificationsAsync(chunk);
+    const sentNotifications: Array<{ id: number; expoPushToken: string }> = [];
+    
+    for (let i = 0; i < chunks.length; i++) {
+      try {
+        this.logger.log(
+          `[MARKETING] Enviando chunk ${i + 1}/${chunks.length} (${chunks[i].length} mensagens)`,
+        );
+        const response = await this.expo.sendPushNotificationsAsync(chunks[i]);
+        
+        // Registrar apenas as que foram enviadas com sucesso
+        for (let j = 0; j < response.length; j++) {
+          const ticket = response[j];
+          if (ticket.status === 'ok') {
+            sentNotifications.push(validRecipients[i * chunks[i].length + j]);
+          } else {
+            this.logger.warn(
+              `[MARKETING] Falha ao enviar para usuário: ${ticket.message}`,
+            );
+          }
+        }
+      } catch (error) {
+        this.logger.error(
+          `[MARKETING] Erro ao enviar chunk ${i + 1}: ${error.message}`,
+        );
+      }
     }
 
-    await this.prisma.notification.createMany({
-      data: validRecipients.map((recipient) => ({
-        userId: recipient.id,
-        expoPushToken: recipient.expoPushToken,
-        title: payload.title,
-        body: payload.body,
-        data: dataPayload as any,
-        sentAt: new Date(),
-      })),
-    });
+    // Salvar APENAS as que foram realmente enviadas
+    this.logger.log(
+      `[MARKETING] Salvando ${sentNotifications.length} notificações enviadas no banco`,
+    );
+    try {
+      await this.prisma.notification.createMany({
+        data: sentNotifications.map((recipient) => ({
+          userId: recipient.id,
+          expoPushToken: recipient.expoPushToken,
+          title: payload.title,
+          body: payload.body,
+          data: dataPayload as any,
+          sentAt: new Date(),
+        })),
+      });
+    } catch (error) {
+      this.logger.error(`[MARKETING] Erro ao salvar notificações: ${error.message}`);
+    }
+
+    const skippedCount = validRecipients.length - sentNotifications.length;
+    this.logger.log(
+      `[MARKETING] Concluído: ${sentNotifications.length} enviadas, ${skippedCount} puladas`,
+    );
 
     return {
-      sentCount: validRecipients.length,
-      skippedCount: recipients.length - validRecipients.length,
+      sentCount: sentNotifications.length,
+      skippedCount,
     };
   }
 }

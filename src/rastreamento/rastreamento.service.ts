@@ -14,6 +14,17 @@ import {
 } from './rastreamento-softruck';
 import { NotificationsService } from '../notifications/notifications.service';
 
+type RastreamentoUnificadoResponse =
+  | UltimaPosicaoLogicaResponse
+  | Awaited<ReturnType<RastreamentoM7['ultimaPosicaoM7']>>
+  | UltimaPosicaoSoftruckResponse;
+
+interface RastreamentoCandidato {
+  data: RastreamentoUnificadoResponse;
+  dataOriginal: string;
+  timestamp: number;
+}
+
 @Injectable()
 export class RastreamentoService {
   private m7: RastreamentoM7;
@@ -79,6 +90,71 @@ export class RastreamentoService {
     chassi: string,
   ): Promise<UltimaPosicaoLogicaResponse> {
     return ultimaPosicaoLogica(chassi);
+  }
+
+  async rastreamento(
+    cnpj: string,
+    chassi: string,
+  ): Promise<RastreamentoUnificadoResponse> {
+    const candidatos: RastreamentoCandidato[] = [];
+
+    try {
+      const logica = await this.ultimaPosicaoLogica(chassi);
+      const timestamp = this.parseDateToTimestamp(logica.ultimaTrasmissao);
+      candidatos.push({
+        data: logica,
+        dataOriginal: logica.ultimaTrasmissao,
+        timestamp,
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Falha no rastreamento Lógica para chassi ${chassi}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+
+    try {
+      const m7 = await this.ultimaPosicaoM7(cnpj, chassi);
+      const timestamp = this.parseDateToTimestamp(m7.data_gps);
+      candidatos.push({
+        data: m7,
+        dataOriginal: m7.data_gps,
+        timestamp,
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Falha no rastreamento M7 para chassi ${chassi}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+
+    try {
+      const softruck = await this.ultimaPosicaoSoftruck(chassi);
+      const timestamp = this.parseDateToTimestamp(softruck.date);
+      candidatos.push({
+        data: softruck,
+        dataOriginal: softruck.date,
+        timestamp,
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Falha no rastreamento Softruck para chassi ${chassi}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+
+    if (candidatos.length === 0) {
+      throw new Error('Nenhum provedor de rastreamento retornou dados válidos');
+    }
+
+    const maisRecente = candidatos.reduce((atualMaisRecente, candidato) =>
+      candidato.timestamp > atualMaisRecente.timestamp
+        ? candidato
+        : atualMaisRecente,
+    );
+
+    this.logger.log(
+      `Rastreamento unificado retornando registro mais recente em ${maisRecente.dataOriginal}`,
+    );
+
+    return maisRecente.data;
   }
 
   // Orquestrador: delega para o rastreador M7
@@ -170,6 +246,37 @@ export class RastreamentoService {
     await this.dispararNotificacaoPorEvento(payload);
 
     return this.m7.processarWebhook(payload);
+  }
+
+  private parseDateToTimestamp(dateValue: string): number {
+    const dateTrimmed = dateValue.trim();
+
+    const parsedNative = Date.parse(dateTrimmed.replace(' ', 'T'));
+    if (!Number.isNaN(parsedNative)) {
+      return parsedNative;
+    }
+
+    const brDateMatch = dateTrimmed.match(
+      /^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})(?::(\d{2}))?$/,
+    );
+
+    if (brDateMatch) {
+      const [, day, month, year, hour, minute, second] = brDateMatch;
+      const parsed = new Date(
+        Number(year),
+        Number(month) - 1,
+        Number(day),
+        Number(hour),
+        Number(minute),
+        Number(second ?? '0'),
+      ).getTime();
+
+      if (!Number.isNaN(parsed)) {
+        return parsed;
+      }
+    }
+
+    throw new Error(`Formato de data inválido: ${dateValue}`);
   }
 
   /**

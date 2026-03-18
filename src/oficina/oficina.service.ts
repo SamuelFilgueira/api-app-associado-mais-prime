@@ -60,6 +60,10 @@ export class OficinaService {
       longitude?: number;
     } = { ...data };
 
+    if (typeof payload.cep === 'string') {
+      payload.cep = this.normalizeCep(payload.cep);
+    }
+
     // Normalizar telefones com prefixo +55
     this.normalizePhoneNumbers(payload);
 
@@ -140,6 +144,10 @@ export class OficinaService {
       latitude?: number;
       longitude?: number;
     } = { ...data };
+
+    if (typeof payload.cep === 'string') {
+      payload.cep = this.normalizeCep(payload.cep);
+    }
 
     // Normalizar telefones com prefixo +55
     this.normalizePhoneNumbers(payload);
@@ -306,6 +314,10 @@ export class OficinaService {
       .filter((service): service is string => typeof service === 'string')
       .map((service) => service.trim())
       .filter((service) => service.length > 0);
+  }
+
+  private normalizeCep(cep: string): string {
+    return cep.replace(/[\s-]+/g, '');
   }
 
   /**

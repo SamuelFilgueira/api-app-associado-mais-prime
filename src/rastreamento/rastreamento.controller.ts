@@ -23,6 +23,11 @@ export class RastreamentoController {
   ) {}
 
   // ROTAS REFERENTES AO RASTREAMENTO M7
+  @Post()
+  rastreamento(@Body() body: { cnpj: string; chassi: string }) {
+    return this.rastreamentoService.rastreamento(body.cnpj, body.chassi);
+  }
+
   @Post('renovar-token')
   async renovarToken() {
     return this.rastreamentoService.renovarTokenM7();

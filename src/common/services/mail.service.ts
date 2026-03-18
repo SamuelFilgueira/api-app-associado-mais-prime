@@ -103,6 +103,38 @@ export class MailService {
     }
   }
 
+  async sendRevistoriaAprovadaEmail(chassi: string): Promise<void> {
+    const mailOptions: nodemailer.SendMailOptions = {
+      from: `"Mais Prime App" <${process.env.GMAIL_USER}>`,
+      to: 'leumas685@gmail.com',
+      subject: 'Revistoria Aprovada com Sucesso',
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 480px; margin: auto; padding: 24px; border: 1px solid #e0e0e0; border-radius: 8px;">
+          <h2 style="color: #2e7d32;">Revistoria Aprovada ✓</h2>
+          <p>A revistoria do veículo com o chassi abaixo foi <strong>aprovada com sucesso</strong>:</p>
+          <div style="background: #f4f4f4; border-radius: 6px; padding: 12px 20px; font-size: 22px; font-weight: bold; letter-spacing: 2px; text-align: center; color: #222;">
+            ${chassi}
+          </div>
+          <p style="margin-top: 20px;">As fotos foram verificadas e a revistoria foi concluída com êxito.</p>
+          <p style="color: #888; font-size: 12px;">Em caso de dúvidas, entre em contato com o suporte.</p>
+        </div>
+      `,
+    };
+
+    try {
+      await this.transporter.sendMail(mailOptions);
+      this.logger.log(
+        `E-mail de revistoria aprovada enviado | chassi=${chassi}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Falha ao enviar e-mail de revistoria aprovada | chassi=${chassi}`,
+        error,
+      );
+      throw error;
+    }
+  }
+
   private getExtensionFromPath(pathValue: string): string {
     const dotIndex = pathValue.lastIndexOf('.');
     if (dotIndex === -1) {
@@ -110,5 +142,64 @@ export class MailService {
     }
 
     return pathValue.substring(dotIndex);
+  }
+
+  async sendFotoRecusadaReenviadaEmail(
+    chassi: string,
+    photoUrls: string[] = [],
+  ): Promise<void> {
+    const attachments = photoUrls.map((photoUrl, index) => ({
+      filename: `reinspection-resend-${index + 1}${this.getExtensionFromPath(photoUrl)}`,
+      path: join(process.cwd(), photoUrl),
+      cid: `reinspection-resend-photo-${index + 1}`,
+    }));
+
+    const imagesHtml = attachments.length
+      ? attachments
+          .map(
+            (attachment, index) => `
+              <div style="margin-top: 12px;">
+                <p style="margin: 0 0 8px 0; color: #555; font-size: 13px;">Foto ${index + 1}</p>
+                <img src="cid:${attachment.cid}" alt="Foto reenviada ${index + 1}" style="max-width: 100%; border-radius: 6px; border: 1px solid #e0e0e0;" />
+              </div>
+            `,
+          )
+          .join('')
+      : '<p style="color: #888;">Nenhuma imagem local foi encontrada para este registro.</p>';
+
+    const mailOptions: nodemailer.SendMailOptions = {
+      from: `"Mais Prime App" <${process.env.GMAIL_USER}>`,
+      to: 'leumas685@gmail.com',
+      subject: 'Revistoria - Foto recusada reenviada',
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 480px; margin: auto; padding: 24px; border: 1px solid #e0e0e0; border-radius: 8px;">
+          <h2 style="color: #333;">Foto recusada reenviada — Chassi ${chassi}</h2>
+          <p>Uma foto que havia sido reprovada foi reenviada pelo associado para o chassi:</p>
+          <div style="background: #f4f4f4; border-radius: 6px; padding: 12px 20px; font-size: 22px; font-weight: bold; letter-spacing: 2px; text-align: center; color: #222;">
+            ${chassi}
+          </div>
+          <p style="margin-top: 16px;">A revistoria foi movida de volta para <strong>EM AN\u00c1LISE</strong> e a nova foto foi encaminhada \u00e0 Hinova.</p>
+          <div style="margin-top: 20px;">
+            <h3 style="color: #333; margin-bottom: 10px;">Nova imagem enviada</h3>
+            ${imagesHtml}
+          </div>
+          <p style="color: #888; font-size: 12px;">Em caso de d\u00favidas, entre em contato com o suporte.</p>
+        </div>
+      `,
+      attachments,
+    };
+
+    try {
+      await this.transporter.sendMail(mailOptions);
+      this.logger.log(
+        `E-mail de foto recusada reenviada enviado | chassi=${chassi} | imagens=${attachments.length}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Falha ao enviar e-mail de foto recusada reenviada | chassi=${chassi}`,
+        error,
+      );
+      throw error;
+    }
   }
 }

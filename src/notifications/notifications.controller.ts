@@ -258,9 +258,23 @@ export class NotificationsController {
     @Body() dto: SendMarketingNotificationDto,
     @Request() req: any,
   ) {
-    return this.notificationsService.sendMarketingNotification(
-      dto,
-      req.user?.userId,
-    );
+    this.logger.log('[MARKETING] Iniciando envio de notificações de marketing');
+    try {
+      const result = await this.notificationsService.sendMarketingNotification(
+        dto,
+        req.user?.userId,
+      );
+
+      this.logger.log(
+        `[MARKETING] ✅ Envio concluído: ${result.sentCount} enviadas, ${result.skippedCount} puladas`,
+      );
+      return result;
+    } catch (error) {
+      this.logger.error(
+        `[MARKETING] ❌ Erro: ${error.message}`,
+        error.stack,
+      );
+      throw error;
+    }
   }
 }
