@@ -70,7 +70,7 @@ export class MailService {
 
     const mailOptions: nodemailer.SendMailOptions = {
       from: `"Mais Prime App" <${process.env.GMAIL_USER}>`,
-      to: 'leumas685@gmail.com',
+      to: 'previa@maisprime.org.br',
       subject: 'Nova Vistoria Recebida',
       html: `
           <div style="font-family: Arial, sans-serif; max-width: 480px; margin: auto; padding: 24px; border: 1px solid #e0e0e0; border-radius: 8px;">
@@ -92,11 +92,11 @@ export class MailService {
     try {
       await this.transporter.sendMail(mailOptions);
       this.logger.log(
-        `E-mail de revistoria enviado para: leumas685@gmail.com | imagens=${attachments.length}`,
+        `E-mail de revistoria enviado para: previa@maisprime.org.br | imagens=${attachments.length}`,
       );
     } catch (error) {
       this.logger.error(
-        `Falha ao enviar e-mail para leumas685@gmail.com`,
+        `Falha ao enviar e-mail para previa@maisprime.org.br`,
         error,
       );
       throw error;
@@ -106,7 +106,7 @@ export class MailService {
   async sendRevistoriaAprovadaEmail(chassi: string): Promise<void> {
     const mailOptions: nodemailer.SendMailOptions = {
       from: `"Mais Prime App" <${process.env.GMAIL_USER}>`,
-      to: 'leumas685@gmail.com',
+      to: 'cobranca@maisprime.org.br',
       subject: 'Revistoria Aprovada com Sucesso',
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 480px; margin: auto; padding: 24px; border: 1px solid #e0e0e0; border-radius: 8px;">
@@ -169,7 +169,7 @@ export class MailService {
 
     const mailOptions: nodemailer.SendMailOptions = {
       from: `"Mais Prime App" <${process.env.GMAIL_USER}>`,
-      to: 'leumas685@gmail.com',
+      to: 'previa@maisprime.org.br',
       subject: 'Revistoria - Foto recusada reenviada',
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 480px; margin: auto; padding: 24px; border: 1px solid #e0e0e0; border-radius: 8px;">
