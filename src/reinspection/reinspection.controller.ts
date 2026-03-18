@@ -18,6 +18,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AdminRoleGuard } from '../auth/admin-role.guard';
 import { ReinspectionService } from './reinspection.service';
 import { CreateReinspectionDto } from './dto/create-reinspection.dto';
+import { AddPhotosDto } from './dto/add-photos.dto';
 import { UpsertTemplatePhotoDto } from './dto/upsert-template-photo.dto';
 import { ListReinspectionsDto } from './dto/list-reinspections.dto';
 import { ResendPhotoDto } from './dto/resend-photo.dto';
@@ -28,12 +29,34 @@ export class ReinspectionController {
   constructor(private readonly reinspectionService: ReinspectionService) {}
 
   /**
-   * Cria uma revistoria, persiste as fotos como log e as envia para a Hinova.
-   * O app deve comprimir as fotos e convertê-las para base64 antes de enviar.
+   * Cria uma revistoria sem fotos. O frontend deve usar POST /:id/photos
+   * para enviar as fotos em lotes e POST /:id/submit para finalizar.
    */
   @Post()
   async create(@Body() dto: CreateReinspectionDto) {
     return this.reinspectionService.create(dto);
+  }
+
+  /**
+   * Adiciona um lote de fotos (máx. 10) a uma revistoria existente com status PENDENTE.
+   * Pode ser chamado múltiplas vezes para envio incremental, evitando erro 413.
+   * Body: { photos: [{ nomeArquivo, binario, codigoTipo?, templatePhotoId? }] }
+   */
+  @Post(':id/photos')
+  @HttpCode(HttpStatus.OK)
+  addPhotos(@Param('id', ParseIntPipe) id: number, @Body() dto: AddPhotosDto) {
+    return this.reinspectionService.addPhotos(id, dto);
+  }
+
+  /**
+   * Finaliza a revistoria após todas as fotos serem enviadas.
+   * Dispara o e-mail de notificação para os analistas.
+   * Requer ao menos uma foto e status PENDENTE.
+   */
+  @Post(':id/submit')
+  @HttpCode(HttpStatus.OK)
+  submitReinspection(@Param('id', ParseIntPipe) id: number) {
+    return this.reinspectionService.submitReinspection(id);
   }
 
   /**

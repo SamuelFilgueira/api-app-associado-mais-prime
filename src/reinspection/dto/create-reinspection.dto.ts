@@ -1,39 +1,9 @@
-import {
-  IsArray,
-  IsEnum,
-  IsInt,
-  IsOptional,
-  IsString,
-  MaxLength,
-  ValidateNested,
-  ArrayMinSize,
-  ArrayMaxSize,
-} from 'class-validator';
-import { Type } from 'class-transformer';
+import { IsEnum, IsInt, IsOptional } from 'class-validator';
 
 export enum ReinspectionVehicleType {
   VEICULOS_LEVES = 'VEICULOS_LEVES',
   MOTOS = 'MOTOS',
   CAMINHOES = 'CAMINHOES',
-}
-
-export class ReinspectionPhotoDto {
-  @IsString()
-  @MaxLength(255)
-  nomeArquivo: string;
-
-  @IsOptional()
-  @IsInt()
-  codigoTipo?: number;
-
-  /** ID do template correspondente a esta foto (usado no fluxo de reenvio). */
-  @IsOptional()
-  @IsInt()
-  templatePhotoId?: number;
-
-  /** Imagem comprimida pelo app e convertida para base64. */
-  @IsString()
-  binario: string;
 }
 
 export class CreateReinspectionDto {
@@ -47,11 +17,4 @@ export class CreateReinspectionDto {
   @IsOptional()
   @IsInt()
   codigoVeiculo?: number;
-
-  @IsArray()
-  @ArrayMinSize(7)
-  @ArrayMaxSize(50)
-  @ValidateNested({ each: true })
-  @Type(() => ReinspectionPhotoDto)
-  photos: ReinspectionPhotoDto[];
 }

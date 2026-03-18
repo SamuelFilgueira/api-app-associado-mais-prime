@@ -15,6 +15,7 @@ import {
 import { PrismaService } from '../prisma.service';
 import { FileUploadService } from '../common/services/file-upload.service';
 import { CreateReinspectionDto } from './dto/create-reinspection.dto';
+import { AddPhotosDto } from './dto/add-photos.dto';
 import { UpsertTemplatePhotoDto } from './dto/upsert-template-photo.dto';
 import { MailService } from 'src/common/services/mail.service';
 
@@ -30,25 +31,9 @@ export class ReinspectionService {
 
   async create(dto: CreateReinspectionDto) {
     this.logger.log(
-      `Iniciando create de revistoria | userVehicleId=${dto.userVehicleId} | vehicleType=${dto.vehicleType} | photos=${dto.photos?.length ?? 0} | codigoVeiculo=${dto.codigoVeiculo ?? 'N/A'}`,
+      `Iniciando create de revistoria | userVehicleId=${dto.userVehicleId} | vehicleType=${dto.vehicleType} | codigoVeiculo=${dto.codigoVeiculo ?? 'N/A'}`,
     );
 
-    if (!dto.photos?.length) {
-      this.logger.warn(
-        `Validação falhou no create: nenhuma foto enviada | userVehicleId=${dto.userVehicleId}`,
-      );
-      throw new BadRequestException('Pelo menos uma foto é obrigatória');
-    }
-
-    const invalidPhoto = dto.photos.find((p) => !p.nomeArquivo || !p.binario);
-    if (invalidPhoto) {
-      this.logger.warn(
-        `Validação falhou no create: foto inválida detectada | nomeArquivo=${invalidPhoto.nomeArquivo ?? 'N/A'} | hasBinario=${Boolean(invalidPhoto.binario)}`,
-      );
-      throw new BadRequestException(
-        'Cada foto precisa informar nomeArquivo e binario',
-      );
-    }
     const vehicle = await this.prisma.userVehicle.findUnique({
       where: { id: dto.userVehicleId },
     });
@@ -60,15 +45,60 @@ export class ReinspectionService {
       throw new NotFoundException('Veículo não encontrado');
     }
 
-    this.logger.debug(
-      `Veículo validado com sucesso | userVehicleId=${dto.userVehicleId} | chassi=${vehicle.chassi}`,
+    const reinspection = await this.prisma.reinspection.create({
+      data: {
+        userVehicleId: dto.userVehicleId,
+        vehicleType: dto.vehicleType,
+        codigoVeiculo: dto.codigoVeiculo ?? null,
+      },
+    });
+
+    this.logger.log(
+      `Revistoria criada | reinspectionId=${reinspection.id} | userVehicleId=${dto.userVehicleId}`,
     );
+
+    return {
+      reinspectionId: reinspection.id,
+      status: reinspection.status,
+      createdAt: reinspection.createdAt,
+    };
+  }
+
+  /**
+   * Adiciona um lote de fotos a uma revistoria existente com status PENDENTE.
+   * Pode ser chamado múltiplas vezes para envio incremental.
+   */
+  async addPhotos(reinspectionId: number, dto: AddPhotosDto) {
+    this.logger.log(
+      `Adicionando fotos à revistoria | reinspectionId=${reinspectionId} | photos=${dto.photos.length}`,
+    );
+
+    const reinspection = await this.prisma.reinspection.findUnique({
+      where: { id: reinspectionId },
+      select: { id: true, status: true },
+    });
+
+    if (!reinspection) {
+      throw new NotFoundException('Revistoria não encontrada');
+    }
+
+    if (reinspection.status !== 'PENDENTE') {
+      throw new BadRequestException(
+        'Fotos só podem ser adicionadas a revistorias com status PENDENTE',
+      );
+    }
+
+    const invalidPhoto = dto.photos.find((p) => !p.nomeArquivo || !p.binario);
+    if (invalidPhoto) {
+      throw new BadRequestException(
+        'Cada foto precisa informar nomeArquivo e binario',
+      );
+    }
 
     let photosWithUrl: Array<{
       nomeArquivo: string;
       codigoTipo?: number;
       templatePhotoId?: number;
-      binario: string;
       url: string;
     }>;
 
@@ -80,19 +110,17 @@ export class ReinspectionService {
               photo.binario,
               photo.nomeArquivo,
             );
-
           return {
             nomeArquivo: photo.nomeArquivo,
             codigoTipo: photo.codigoTipo,
             templatePhotoId: photo.templatePhotoId,
-            binario: photo.binario,
             url,
           };
         }),
       );
     } catch (error) {
       this.logger.error(
-        `Falha ao salvar fotos da revistoria localmente | userVehicleId=${dto.userVehicleId}`,
+        `Falha ao salvar fotos | reinspectionId=${reinspectionId}`,
         error instanceof Error ? error.stack : undefined,
       );
       throw new BadRequestException(
@@ -100,45 +128,88 @@ export class ReinspectionService {
       );
     }
 
-    // 2. Persiste a revistoria e as fotos como log antes de chamar a Hinova
-    const reinspection = await this.prisma.reinspection.create({
-      data: {
-        userVehicleId: dto.userVehicleId,
-        vehicleType: dto.vehicleType,
-        codigoVeiculo: dto.codigoVeiculo ?? null,
-        photos: {
-          create: photosWithUrl.map((p) => ({
-            nomeArquivo: p.nomeArquivo,
-            codigoTipo: p.codigoTipo ?? null,
-            templatePhotoId: p.templatePhotoId ?? null,
-            url: p.url,
-            status: 'PENDENTE' as unknown as ReinspectionPhotoStatus,
-            sentToHinova: false,
-          })),
-        },
-      },
-      include: { photos: true },
+    await this.prisma.reinspectionPhoto.createMany({
+      data: photosWithUrl.map((p) => ({
+        reinspectionId,
+        nomeArquivo: p.nomeArquivo,
+        codigoTipo: p.codigoTipo ?? null,
+        templatePhotoId: p.templatePhotoId ?? null,
+        url: p.url,
+        status: 'PENDENTE' as unknown as ReinspectionPhotoStatus,
+        sentToHinova: false,
+      })),
+    });
+
+    const totalPhotos = await this.prisma.reinspectionPhoto.count({
+      where: { reinspectionId },
     });
 
     this.logger.log(
-      `Revistoria persistida localmente | reinspectionId=${reinspection.id} | photos=${reinspection.photos.length}`,
+      `Fotos adicionadas | reinspectionId=${reinspectionId} | added=${dto.photos.length} | total=${totalPhotos}`,
     );
+
+    return {
+      reinspectionId,
+      photosAdded: dto.photos.length,
+      totalPhotos,
+    };
+  }
+
+  /**
+   * Finaliza o envio das fotos, disparando o e-mail de notificação para os analistas.
+   * Requer ao menos uma foto e status PENDENTE.
+   */
+  async submitReinspection(reinspectionId: number) {
+    this.logger.log(`Submetendo revistoria | reinspectionId=${reinspectionId}`);
+
+    const reinspection = await this.prisma.reinspection.findUnique({
+      where: { id: reinspectionId },
+      select: {
+        id: true,
+        status: true,
+        photos: { select: { url: true } },
+        userVehicle: { select: { chassi: true } },
+      },
+    });
+
+    if (!reinspection) {
+      throw new NotFoundException('Revistoria não encontrada');
+    }
+
+    if (reinspection.status !== 'PENDENTE') {
+      throw new BadRequestException(
+        'Somente revistorias com status PENDENTE podem ser submetidas',
+      );
+    }
+
+    if (reinspection.photos.length === 0) {
+      throw new BadRequestException(
+        'É necessário enviar pelo menos uma foto antes de submeter a revistoria',
+      );
+    }
 
     try {
       await this.mailService.sendRevistoriaEmail(
-        vehicle.chassi,
-        photosWithUrl.map((photo) => photo.url),
+        reinspection.userVehicle.chassi,
+        reinspection.photos
+          .map((p) => p.url)
+          .filter((url): url is string => url !== null),
       );
     } catch (emailError) {
       this.logger.error(
-        `Falha ao enviar email de revistoria | reinspectionId=${reinspection.id} | userVehicleId=${dto.userVehicleId}`,
+        `Falha ao enviar e-mail de revistoria | reinspectionId=${reinspectionId}`,
         emailError instanceof Error ? emailError.stack : undefined,
       );
     }
 
+    this.logger.log(
+      `Revistoria submetida com sucesso | reinspectionId=${reinspectionId} | photos=${reinspection.photos.length}`,
+    );
+
     return {
       reinspectionId: reinspection.id,
-      hinovaResponse: [],
+      status: reinspection.status,
+      totalPhotos: reinspection.photos.length,
     };
   }
 
