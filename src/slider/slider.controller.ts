@@ -27,7 +27,9 @@ export class SliderController {
   @Get()
   getSliders(@Query('isActive') isActive?: string) {
     const parsedIsActive =
-      typeof isActive === 'string' ? isActive.toLowerCase() === 'true' : undefined;
+      typeof isActive === 'string'
+        ? isActive.toLowerCase() === 'true'
+        : undefined;
 
     return this.sliderService.getSliders(parsedIsActive);
   }

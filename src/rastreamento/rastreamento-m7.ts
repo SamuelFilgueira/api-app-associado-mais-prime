@@ -31,6 +31,11 @@ export type AncoraM7Response =
       erro: string;
     };
 
+export interface EventoPadraoM7Response {
+  ancoraAtiva: boolean;
+  evtIgn: boolean;
+}
+
 export class RastreamentoM7 {
   private readonly logger = new Logger(RastreamentoM7.name);
   private token: string | null = null;
@@ -86,6 +91,74 @@ export class RastreamentoM7 {
     return response.data;
   }
 
+  /**
+   * Busca o estado atual do veículo na API M7 (âncora + ignição).
+   * Usado como fallback quando o banco não possui o estado.
+   */
+  async getEventoPadraoM7(
+    cnpj: string,
+    chassi: string,
+  ): Promise<EventoPadraoM7Response> {
+    if (!this.token) {
+      throw new InternalServerErrorException(
+        'Token não disponível. Tente novamente em instantes.',
+      );
+    }
+    try {
+      const data = await this.executarComReautenticacao(() =>
+        axios.get(`${process.env.M7_API_BASE_URL}api/veiculos/evento-padrao`, {
+          params: { cnpj, chassi, scope: 'cliente' },
+          headers: { Authorization: `Bearer ${this.token}` },
+          timeout: M7_REQUEST_TIMEOUT,
+        }),
+      );
+      const evento = ((data as Record<string, unknown>).evento ?? {}) as Record<
+        string,
+        unknown
+      >;
+      return {
+        ancoraAtiva: Boolean(evento.ancora),
+        evtIgn: Boolean(evento.ignicao_ligada),
+      };
+    } catch (error) {
+      if (error instanceof InternalServerErrorException) throw error;
+      this.logger.error(
+        `Erro ao buscar evento-padrão M7: ${
+          error instanceof Error ? error.message : error
+        }`,
+      );
+      throw new InternalServerErrorException(
+        'Erro ao buscar estado atual do veículo na API M7',
+      );
+    }
+  }
+
+  /**
+   * Envia o payload completo (âncora + ignição) para o endpoint da API M7.
+   * Sempre envia ambos os campos para evitar que um reset acidental do outro.
+   */
+  private async _enviarComandoVeiculo(
+    cnpj: string,
+    chassi: string,
+    ancoraAtiva: boolean,
+    evtIgn: boolean,
+  ): Promise<AncoraM7Response> {
+    const payload = {
+      cnpj,
+      chassi,
+      ancora_ativa: ancoraAtiva,
+      evt_ign: evtIgn,
+      Envio_mult: false,
+    };
+    const data = await this.executarComReautenticacao(() =>
+      axios.post(`${process.env.M7_API_BASE_URL}api/veiculos/ancora`, payload, {
+        headers: { Authorization: `Bearer ${this.token}` },
+        timeout: M7_REQUEST_TIMEOUT,
+      }),
+    );
+    return this.mapearAncoraM7(data as Record<string, unknown>);
+  }
+
   // Consultar a última posição do veículo via M7
   async ultimaPosicaoM7(
     cnpj: string,
@@ -128,39 +201,53 @@ export class RastreamentoM7 {
     cnpj: string,
     chassi: string,
     ancoraAtiva: boolean,
+    evtIgn: boolean,
   ): Promise<AncoraM7Response> {
     if (!this.token) {
       throw new InternalServerErrorException(
         'Token não disponível. Tente novamente em instantes.',
       );
     }
-
-    const payload = {
-      cnpj,
-      chassi,
-      ancora_ativa: ancoraAtiva,
-      evt_ign: true,
-      Envio_mult: false,
-    };
-
     try {
-      const data = await this.executarComReautenticacao(() =>
-        axios.post(
-          `${process.env.M7_API_BASE_URL}api/veiculos/ancora`,
-          payload,
-          {
-            headers: { Authorization: `Bearer ${this.token}` },
-            timeout: M7_REQUEST_TIMEOUT,
-          },
-        ),
+      return await this._enviarComandoVeiculo(
+        cnpj,
+        chassi,
+        ancoraAtiva,
+        evtIgn,
       );
-      return this.mapearAncoraM7(data as Record<string, unknown>);
     } catch (error) {
       if (error instanceof InternalServerErrorException) throw error;
       this.logger.error(
         `Erro ao atualizar âncora M7: ${error instanceof Error ? error.message : error}`,
       );
       throw new InternalServerErrorException('Erro ao atualizar âncora');
+    }
+  }
+
+  async ignicaoM7(
+    cnpj: string,
+    chassi: string,
+    evtIgn: boolean,
+    ancoraAtiva: boolean,
+  ): Promise<AncoraM7Response> {
+    if (!this.token) {
+      throw new InternalServerErrorException(
+        'Token não disponível. Tente novamente em instantes.',
+      );
+    }
+    try {
+      return await this._enviarComandoVeiculo(
+        cnpj,
+        chassi,
+        ancoraAtiva,
+        evtIgn,
+      );
+    } catch (error) {
+      if (error instanceof InternalServerErrorException) throw error;
+      this.logger.error(
+        `Erro ao atualizar ignição M7: ${error instanceof Error ? error.message : error}`,
+      );
+      throw new InternalServerErrorException('Erro ao atualizar ignição');
     }
   }
 

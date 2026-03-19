@@ -29,7 +29,7 @@ model user {
   profilePhotoUrl  String?
   isActive         Boolean        @default(true)
   acceptsMarketingNotifications Boolean @default(true)
-  notificacaoIgnicao Boolean @default(true)
+  notificacaoIgnicao Boolean @default(false)
   ancoraAtiva      Boolean        @default(false)
   role             UserRole       @default(USER)
   createdAt        DateTime       @default(now())

@@ -1,9 +1,13 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { PrismaService } from '../prisma.service';
-import { RastreamentoM7, AncoraM7Response } from './rastreamento-m7';
+import {
+  RastreamentoM7,
+  AncoraM7Response,
+  EventoPadraoM7Response,
+} from './rastreamento-m7';
 import {
   ultimaPosicaoLogica,
   UltimaPosicaoLogicaResponse,
@@ -162,14 +166,55 @@ export class RastreamentoService {
     return this.m7.ultimaPosicaoM7(cnpj, chassi);
   }
 
+  /**
+   * Obtém o estado atual do veículo (ancoraAtiva + notificacaoIgnicao).
+   * Prioriza o banco; se não encontrado, consulta o endpoint de evento-padrão da API M7.
+   */
+  private async getVehicleState(
+    cnpj: string,
+    chassi: string,
+  ): Promise<{ ancoraAtiva: boolean; notificacaoIgnicao: boolean }> {
+    const userVehicle = await this.prisma.userVehicle.findFirst({
+      where: { chassi },
+      select: {
+        user: { select: { ancoraAtiva: true, notificacaoIgnicao: true } },
+      },
+    });
+
+    if (userVehicle?.user) {
+      return {
+        ancoraAtiva: userVehicle.user.ancoraAtiva,
+        notificacaoIgnicao: userVehicle.user.notificacaoIgnicao,
+      };
+    }
+
+    this.logger.warn(
+      `Estado do veículo não encontrado no banco para chassi=${chassi} — consultando API M7`,
+    );
+    const estadoM7: EventoPadraoM7Response = await this.m7.getEventoPadraoM7(
+      cnpj,
+      chassi,
+    );
+    return {
+      ancoraAtiva: estadoM7.ancoraAtiva,
+      notificacaoIgnicao: estadoM7.evtIgn,
+    };
+  }
+
   async ancoraM7(
     cnpj: string,
     chassi: string,
     ancoraAtiva: boolean,
   ): Promise<AncoraM7Response> {
-    const result = await this.m7.ancoraM7(cnpj, chassi, ancoraAtiva);
+    // Preserva o estado de ignição atual para evitar reset acidental
+    const estado = await this.getVehicleState(cnpj, chassi);
+    const result = await this.m7.ancoraM7(
+      cnpj,
+      chassi,
+      ancoraAtiva,
+      estado.notificacaoIgnicao,
+    );
 
-    // Persiste o estado da âncora somente em caso de sucesso
     if (!('erro' in result)) {
       try {
         const userVehicle = await this.prisma.userVehicle.findFirst({
@@ -201,6 +246,94 @@ export class RastreamentoService {
     return result;
   }
 
+  async ignicaoM7(
+    cnpj: string,
+    chassi: string,
+    evtIgn: boolean,
+  ): Promise<AncoraM7Response> {
+    const evtIgnNormalizado = this.normalizarBooleanoEntrada(evtIgn, 'evt_ign');
+
+    // Preserva o estado da âncora atual para evitar reset acidental
+    const estado = await this.getVehicleState(cnpj, chassi);
+
+    if (evtIgnNormalizado && estado.ancoraAtiva) {
+      this.logger.warn(
+        `Tentativa inválida de ativar ignição com âncora ativa para chassi=${chassi}`,
+      );
+      throw new BadRequestException(
+        'Não é permitido ligar ignição com âncora ativa',
+      );
+    }
+
+    const result = await this.m7.ignicaoM7(
+      cnpj,
+      chassi,
+      evtIgnNormalizado,
+      estado.ancoraAtiva,
+    );
+
+    if (!('erro' in result)) {
+      try {
+        const userVehicle = await this.prisma.userVehicle.findFirst({
+          where: { chassi },
+          select: { userId: true },
+        });
+
+        if (userVehicle) {
+          await this.prisma.user.update({
+            where: { id: userVehicle.userId },
+            data: { notificacaoIgnicao: evtIgnNormalizado },
+          });
+          this.logger.log(
+            `Estado de ignição atualizado para userId=${userVehicle.userId}: notificacaoIgnicao=${evtIgnNormalizado}`,
+          );
+        } else {
+          this.logger.warn(
+            `Nenhum usuário encontrado para o chassi ${chassi} — estado de ignição não persistido`,
+          );
+        }
+      } catch (err) {
+        this.logger.error(
+          `Erro ao persistir estado de ignição para chassi=${chassi}`,
+          err?.stack || err,
+        );
+      }
+    }
+
+    return result;
+  }
+
+  async getIgnicaoStatus(
+    chassi: string,
+  ): Promise<{ notificacaoIgnicao: boolean; userId: number | null }> {
+    const normalizedChassi = chassi?.trim();
+
+    if (!normalizedChassi) {
+      throw new BadRequestException('Chassi é obrigatório');
+    }
+
+    const userVehicle = await this.prisma.userVehicle.findFirst({
+      where: {
+        chassi: normalizedChassi,
+        isActive: true,
+        user: { isActive: true },
+      },
+      select: {
+        userId: true,
+        user: { select: { notificacaoIgnicao: true } },
+      },
+    });
+
+    if (!userVehicle) {
+      return { notificacaoIgnicao: false, userId: null };
+    }
+
+    return {
+      notificacaoIgnicao: userVehicle.user.notificacaoIgnicao,
+      userId: userVehicle.userId,
+    };
+  }
+
   async getAncoraStatus(
     chassi: string,
   ): Promise<{ ancoraAtiva: boolean; userId: number | null }> {
@@ -224,6 +357,30 @@ export class RastreamentoService {
 
   async renovarTokenM7() {
     return this.m7.renovarToken();
+  }
+
+  private normalizarBooleanoEntrada(
+    value: unknown,
+    fieldName: string,
+  ): boolean {
+    if (typeof value === 'boolean') {
+      return value;
+    }
+
+    if (typeof value === 'number') {
+      if (value === 1) return true;
+      if (value === 0) return false;
+    }
+
+    if (typeof value === 'string') {
+      const normalized = value.trim().toLowerCase();
+      if (normalized === 'true' || normalized === '1') return true;
+      if (normalized === 'false' || normalized === '0') return false;
+    }
+
+    throw new BadRequestException(
+      `Campo ${fieldName} inválido. Use true/false ou 1/0.`,
+    );
   }
 
   // Orquestrador: delega para o rastreador Softruck

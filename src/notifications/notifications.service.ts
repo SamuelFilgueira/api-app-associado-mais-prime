@@ -182,7 +182,8 @@ export class NotificationsService {
         .map((ticket) => ticket.id);
 
       if (receiptIds.length) {
-        const receipts = await this.expo.getPushNotificationReceiptsAsync(receiptIds);
+        const receipts =
+          await this.expo.getPushNotificationReceiptsAsync(receiptIds);
 
         for (const receiptId in receipts) {
           const receipt = receipts[receiptId];
@@ -412,7 +413,10 @@ export class NotificationsService {
   ): Promise<{ sent: number; skipped: number }> {
     const eventoLower = evento?.toLowerCase() ?? '';
 
-    const isIgnicaoLigada = tipoevento === 32 || eventoLower.includes('igniçao ligada') || eventoLower.includes('ignição ligada');
+    const isIgnicaoLigada =
+      tipoevento === 32 ||
+      eventoLower.includes('igniçao ligada') ||
+      eventoLower.includes('ignição ligada');
 
     const isAncoraViolada =
       tipoevento === 16 ||
@@ -602,11 +606,13 @@ export class NotificationsService {
       },
     });
 
-    this.logger.log(`[MARKETING] ${recipients.length} usuários candidatos encontrados`);
+    this.logger.log(
+      `[MARKETING] ${recipients.length} usuários candidatos encontrados`,
+    );
 
     // Remover duplicatas por ID (em caso de inconsistência)
-    const uniqueRecipients = new Map(recipients.map(r => [r.id, r]));
-    
+    const uniqueRecipients = new Map(recipients.map((r) => [r.id, r]));
+
     const validRecipients: Array<{ id: number; expoPushToken: string }> = [];
     for (const recipient of uniqueRecipients.values()) {
       if (
@@ -625,7 +631,9 @@ export class NotificationsService {
       return { sentCount: 0, skippedCount: recipients.length };
     }
 
-    this.logger.log(`[MARKETING] ${validRecipients.length} tokens válidos após validação`);
+    this.logger.log(
+      `[MARKETING] ${validRecipients.length} tokens válidos após validação`,
+    );
 
     const messages: ExpoPushMessage[] = validRecipients.map((recipient) =>
       this.buildExpoMessage(
@@ -638,14 +646,14 @@ export class NotificationsService {
 
     const chunks = this.expo.chunkPushNotifications(messages);
     const sentNotifications: Array<{ id: number; expoPushToken: string }> = [];
-    
+
     for (let i = 0; i < chunks.length; i++) {
       try {
         this.logger.log(
           `[MARKETING] Enviando chunk ${i + 1}/${chunks.length} (${chunks[i].length} mensagens)`,
         );
         const response = await this.expo.sendPushNotificationsAsync(chunks[i]);
-        
+
         // Registrar apenas as que foram enviadas com sucesso
         for (let j = 0; j < response.length; j++) {
           const ticket = response[j];
@@ -680,7 +688,9 @@ export class NotificationsService {
         })),
       });
     } catch (error) {
-      this.logger.error(`[MARKETING] Erro ao salvar notificações: ${error.message}`);
+      this.logger.error(
+        `[MARKETING] Erro ao salvar notificações: ${error.message}`,
+      );
     }
 
     const skippedCount = validRecipients.length - sentNotifications.length;

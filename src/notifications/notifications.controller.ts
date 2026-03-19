@@ -270,10 +270,7 @@ export class NotificationsController {
       );
       return result;
     } catch (error) {
-      this.logger.error(
-        `[MARKETING] ❌ Erro: ${error.message}`,
-        error.stack,
-      );
+      this.logger.error(`[MARKETING] ❌ Erro: ${error.message}`, error.stack);
       throw error;
     }
   }

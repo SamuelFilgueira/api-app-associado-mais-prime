@@ -52,6 +52,24 @@ export class RastreamentoController {
     );
   }
 
+  @Post('ignicao-m7')
+  ignicaoM7(@Body() body: { cnpj: string; chassi: string; evt_ign: boolean }) {
+    console.log("Body recebido para ignicaoM7:", body);
+     this.logger.log(
+      `Body recebido para ignicaoM7: ${JSON.stringify(body)}`,
+    );
+    return this.rastreamentoService.ignicaoM7(
+      body.cnpj,
+      body.chassi,
+      body.evt_ign,
+    );
+  }
+
+  @Get('ignicao-status')
+  async getIgnicaoStatus(@Query('chassi') chassi: string) {
+    return this.rastreamentoService.getIgnicaoStatus(chassi);
+  }
+
   @Get('ancora-status')
   async getAncoraStatus(@Query('chassi') chassi: string) {
     return this.rastreamentoService.getAncoraStatus(chassi);
