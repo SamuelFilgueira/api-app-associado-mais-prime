@@ -1,20 +1,68 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { CreateDocumentDto } from './DTOs/create-document.dto';
 import { UpdateDocumentDto } from './DTOs/update-document.dto';
+import { FileUploadService } from 'src/common/services/file-upload.service';
 
 @Injectable()
 export class DocumentosService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly fileUploadService: FileUploadService,
+  ) {}
 
-  async create(data: CreateDocumentDto) {
-    return this.prisma.document.create({ data });
+  private readonly urlBase =
+    'https://concerned-wedding-strings-ram.trycloudflare.com';
+
+  private buildDocumentUrl(url: string): string {
+    if (/^https?:\/\//i.test(url)) {
+      return url;
+    }
+
+    const normalizedBase = this.urlBase.replace(/\/+$/, '');
+    const normalizedPath = url.startsWith('/') ? url : `/${url}`;
+    return `${normalizedBase}${normalizedPath}`;
+  }
+
+  uploadDocument(file: Express.Multer.File): Promise<string> {
+    if (!file) {
+      throw new BadRequestException('Arquivo do documento é obrigatório');
+    }
+
+    return this.fileUploadService.uploadDocumentFile(file);
+  }
+
+  async create(data: CreateDocumentDto, file?: Express.Multer.File) {
+    const uploadedPath = file ? await this.uploadDocument(file) : null;
+    const documentUrl = uploadedPath ?? data.documentUrl;
+
+    if (!documentUrl) {
+      throw new BadRequestException(
+        'Arquivo do documento é obrigatório quando documentUrl não for informado',
+      );
+    }
+
+    return this.prisma.document.create({
+      data: {
+        ...data,
+        documentUrl,
+      },
+    });
   }
 
   async findAll() {
-    return this.prisma.document.findMany({
+    const documents = await this.prisma.document.findMany({
       orderBy: { createdAt: 'desc' },
     });
+
+    return documents.map((document) => ({
+      ...document,
+      documentUrl: this.buildDocumentUrl(document.documentUrl),
+    }));
   }
 
   async findOne(id: number) {
@@ -26,7 +74,10 @@ export class DocumentosService {
       throw new NotFoundException('Documento nao encontrado');
     }
 
-    return document;
+    return {
+      ...document,
+      documentUrl: this.buildDocumentUrl(document.documentUrl),
+    };
   }
 
   async update(id: number, data: UpdateDocumentDto) {

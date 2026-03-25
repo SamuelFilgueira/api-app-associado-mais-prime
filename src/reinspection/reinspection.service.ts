@@ -29,7 +29,7 @@ export class ReinspectionService {
     private readonly fileUploadService: FileUploadService,
   ) {}
 
-  async create(dto: CreateReinspectionDto) {
+  async create(dto: CreateReinspectionDto, _userId: unknown) {
     this.logger.log(
       `Iniciando create de revistoria | userVehicleId=${dto.userVehicleId} | vehicleType=${dto.vehicleType} | codigoVeiculo=${dto.codigoVeiculo ?? 'N/A'}`,
     );
@@ -168,7 +168,7 @@ export class ReinspectionService {
         id: true,
         status: true,
         photos: { select: { url: true } },
-        userVehicle: { select: { chassi: true } },
+        userVehicle: { select: { chassi: true, plate: true } },
       },
     });
 
@@ -191,6 +191,7 @@ export class ReinspectionService {
     try {
       await this.mailService.sendRevistoriaEmail(
         reinspection.userVehicle.chassi,
+        reinspection.userVehicle.plate,
         reinspection.photos
           .map((p) => p.url)
           .filter((url): url is string => url !== null),
@@ -499,7 +500,7 @@ export class ReinspectionService {
   async approveByUserVehicleId(userVehicleId: number) {
     const vehicle = await this.prisma.userVehicle.findUnique({
       where: { id: userVehicleId },
-      select: { id: true, chassi: true },
+      select: { id: true, chassi: true, plate: true },
     });
 
     if (!vehicle) {
@@ -554,10 +555,13 @@ export class ReinspectionService {
     }
 
     try {
-      await this.mailService.sendRevistoriaAprovadaEmail(vehicle.chassi);
+      await this.mailService.sendRevistoriaAprovadaEmail(
+        vehicle.chassi,
+        vehicle.plate,
+      );
     } catch (emailError) {
       this.logger.error(
-        `Falha ao enviar e-mail de aprovação | reinspectionId=${updated.id} | chassi=${vehicle.chassi}`,
+        `Falha ao enviar e-mail de aprovação | reinspectionId=${updated.id} | chassi=${vehicle.chassi} | plate=${vehicle.plate ?? 'N/A'}`,
         emailError instanceof Error ? emailError.stack : undefined,
       );
     }
@@ -768,7 +772,7 @@ export class ReinspectionService {
             id: true,
             codigoVeiculo: true,
             userVehicle: {
-              select: { chassi: true },
+              select: { chassi: true, plate: true },
             },
           },
         },
@@ -831,6 +835,7 @@ export class ReinspectionService {
     try {
       await this.mailService.sendFotoRecusadaReenviadaEmail(
         photo.reinspection.userVehicle.chassi,
+        photo.reinspection.userVehicle.plate,
         [newUrl],
       );
     } catch (emailError) {

@@ -47,8 +47,11 @@ export class MailService {
 
   async sendRevistoriaEmail(
     chassi: string,
+    plate: string | null,
     photoUrls: string[] = [],
   ): Promise<void> {
+    const safePlate = plate ?? 'N/A';
+
     const attachments = photoUrls.map((photoUrl, index) => ({
       filename: `reinspection-${index + 1}${this.getExtensionFromPath(photoUrl)}`,
       path: join(process.cwd(), photoUrl),
@@ -76,9 +79,10 @@ export class MailService {
           <div style="font-family: Arial, sans-serif; max-width: 480px; margin: auto; padding: 24px; border: 1px solid #e0e0e0; border-radius: 8px;">
           <h2 style="color: #333;">Fotos de revistoria adicionadas para o chassi ${chassi} </h2>
           <p>.</p>
-          <p>Foi recebida uma nova solicitação de revistoria para o chassi:</p>
+          <p>Foi recebida uma nova solicitação de revistoria para o chassi/placa:</p>
           <div style="background: #f4f4f4; border-radius: 6px; padding: 12px 20px; font-size: 22px; font-weight: bold; letter-spacing: 2px; text-align: center; color: #222;">
-            ${chassi}
+            Chassi: ${chassi}<br />
+            Placa: ${safePlate}
           </div>
           <div style="margin-top: 20px;">
             <h3 style="color: #333; margin-bottom: 10px;">Imagens recebidas</h3>
@@ -92,7 +96,7 @@ export class MailService {
     try {
       await this.transporter.sendMail(mailOptions);
       this.logger.log(
-        `E-mail de revistoria enviado para: previa@maisprime.org.br | imagens=${attachments.length}`,
+        `E-mail de revistoria enviado para: previa@maisprime.org.br | chassi=${chassi} | plate=${safePlate} | imagens=${attachments.length}`,
       );
     } catch (error) {
       this.logger.error(
@@ -103,7 +107,12 @@ export class MailService {
     }
   }
 
-  async sendRevistoriaAprovadaEmail(chassi: string): Promise<void> {
+  async sendRevistoriaAprovadaEmail(
+    chassi: string,
+    plate: string | null,
+  ): Promise<void> {
+    const safePlate = plate ?? 'N/A';
+
     const mailOptions: nodemailer.SendMailOptions = {
       from: `"Mais Prime App" <${process.env.GMAIL_USER}>`,
       to: 'cobranca@maisprime.org.br',
@@ -111,9 +120,10 @@ export class MailService {
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 480px; margin: auto; padding: 24px; border: 1px solid #e0e0e0; border-radius: 8px;">
           <h2 style="color: #2e7d32;">Revistoria Aprovada ✓</h2>
-          <p>A revistoria do veículo com o chassi abaixo foi <strong>aprovada com sucesso</strong>:</p>
+          <p>A revistoria do veículo abaixo foi <strong>aprovada com sucesso</strong>:</p>
           <div style="background: #f4f4f4; border-radius: 6px; padding: 12px 20px; font-size: 22px; font-weight: bold; letter-spacing: 2px; text-align: center; color: #222;">
-            ${chassi}
+            Chassi: ${chassi}<br />
+            Placa: ${safePlate}
           </div>
           <p style="margin-top: 20px;">As fotos foram verificadas e a revistoria foi concluída com êxito.</p>
           <p style="color: #888; font-size: 12px;">Em caso de dúvidas, entre em contato com o suporte.</p>
@@ -124,11 +134,11 @@ export class MailService {
     try {
       await this.transporter.sendMail(mailOptions);
       this.logger.log(
-        `E-mail de revistoria aprovada enviado | chassi=${chassi}`,
+        `E-mail de revistoria aprovada enviado | chassi=${chassi} | plate=${safePlate}`,
       );
     } catch (error) {
       this.logger.error(
-        `Falha ao enviar e-mail de revistoria aprovada | chassi=${chassi}`,
+        `Falha ao enviar e-mail de revistoria aprovada | chassi=${chassi} | plate=${safePlate}`,
         error,
       );
       throw error;
@@ -146,8 +156,11 @@ export class MailService {
 
   async sendFotoRecusadaReenviadaEmail(
     chassi: string,
+    plate: string | null,
     photoUrls: string[] = [],
   ): Promise<void> {
+    const safePlate = plate ?? 'N/A';
+
     const attachments = photoUrls.map((photoUrl, index) => ({
       filename: `reinspection-resend-${index + 1}${this.getExtensionFromPath(photoUrl)}`,
       path: join(process.cwd(), photoUrl),
@@ -173,10 +186,11 @@ export class MailService {
       subject: 'Revistoria - Foto recusada reenviada',
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 480px; margin: auto; padding: 24px; border: 1px solid #e0e0e0; border-radius: 8px;">
-          <h2 style="color: #333;">Foto recusada reenviada — Chassi ${chassi}</h2>
-          <p>Uma foto que havia sido reprovada foi reenviada pelo associado para o chassi:</p>
+          <h2 style="color: #333;">Foto recusada reenviada — Chassi ${chassi} / Placa ${safePlate}</h2>
+          <p>Uma foto que havia sido reprovada foi reenviada pelo associado para o veículo:</p>
           <div style="background: #f4f4f4; border-radius: 6px; padding: 12px 20px; font-size: 22px; font-weight: bold; letter-spacing: 2px; text-align: center; color: #222;">
-            ${chassi}
+            Chassi: ${chassi}<br />
+            Placa: ${safePlate}
           </div>
           <p style="margin-top: 16px;">A revistoria foi movida de volta para <strong>EM AN\u00c1LISE</strong> e a nova foto foi encaminhada \u00e0 Hinova.</p>
           <div style="margin-top: 20px;">
@@ -192,11 +206,11 @@ export class MailService {
     try {
       await this.transporter.sendMail(mailOptions);
       this.logger.log(
-        `E-mail de foto recusada reenviada enviado | chassi=${chassi} | imagens=${attachments.length}`,
+        `E-mail de foto recusada reenviada enviado | chassi=${chassi} | plate=${safePlate} | imagens=${attachments.length}`,
       );
     } catch (error) {
       this.logger.error(
-        `Falha ao enviar e-mail de foto recusada reenviada | chassi=${chassi}`,
+        `Falha ao enviar e-mail de foto recusada reenviada | chassi=${chassi} | plate=${safePlate}`,
         error,
       );
       throw error;

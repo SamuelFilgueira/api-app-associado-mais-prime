@@ -11,12 +11,14 @@ import {
   GetNotificationsResponseDto,
   GetNotificationsListResponseDto,
 } from './DTOs/get-notifications-response.dto';
+import { SendMarketingNotificationDto } from './DTOs/send-marketing-notification.dto';
 
 export type NotificationData = {
   plate?: string;
   ignition?: 'on' | 'off';
   [key: string]: any;
 };
+
 
 @Injectable()
 export class NotificationsService {
@@ -569,12 +571,10 @@ export class NotificationsService {
     payload: {
       title: string;
       body: string;
-      data?: Record<string, any>;
+      data?: SendMarketingNotificationDto['data'];
     },
     adminUserId?: number,
   ): Promise<{ sentCount: number; skippedCount: number }> {
-    this.logger.log('[MARKETING] Iniciando envio de notificações de marketing');
-
     if (adminUserId) {
       const admin = await this.prisma.user.findUnique({
         where: { id: adminUserId },
@@ -582,9 +582,6 @@ export class NotificationsService {
       });
 
       if (!admin || admin.role !== 'ADMIN') {
-        this.logger.warn(
-          `[MARKETING] Usuário ${adminUserId} sem permissão (role: ${admin?.role})`,
-        );
         throw new ForbiddenException(
           'Apenas usuarios com role ADMIN podem enviar notificacoes de marketing.',
         );
@@ -593,7 +590,6 @@ export class NotificationsService {
 
     const dataPayload = payload.data ?? { type: 'marketing' };
 
-    this.logger.log('[MARKETING] Buscando usuários elegíveis');
     const recipients = await this.prisma.user.findMany({
       where: {
         isActive: true,
@@ -631,9 +627,6 @@ export class NotificationsService {
       return { sentCount: 0, skippedCount: recipients.length };
     }
 
-    this.logger.log(
-      `[MARKETING] ${validRecipients.length} tokens válidos após validação`,
-    );
 
     const messages: ExpoPushMessage[] = validRecipients.map((recipient) =>
       this.buildExpoMessage(
@@ -673,9 +666,6 @@ export class NotificationsService {
     }
 
     // Salvar APENAS as que foram realmente enviadas
-    this.logger.log(
-      `[MARKETING] Salvando ${sentNotifications.length} notificações enviadas no banco`,
-    );
     try {
       await this.prisma.notification.createMany({
         data: sentNotifications.map((recipient) => ({
@@ -694,9 +684,6 @@ export class NotificationsService {
     }
 
     const skippedCount = validRecipients.length - sentNotifications.length;
-    this.logger.log(
-      `[MARKETING] Concluído: ${sentNotifications.length} enviadas, ${skippedCount} puladas`,
-    );
 
     return {
       sentCount: sentNotifications.length,

@@ -11,5 +11,11 @@ export class SendMarketingNotificationDto {
 
   @IsObject()
   @IsOptional()
-  data?: Record<string, any>;
+  data?: {
+    type: 'external_link' | 'internal_route' | 'campaign';
+    url?: string;
+    screen?: string;
+    params?: Record<string, any>;
+    campaignId?: string;
+  };
 }

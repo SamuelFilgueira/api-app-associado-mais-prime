@@ -148,7 +148,7 @@ export class RastreamentoM7 {
       chassi,
       ancora_ativa: ancoraAtiva,
       evt_ign: evtIgn,
-      Envio_mult: false,
+      Envio_mult: true,
     };
     const data = await this.executarComReautenticacao(() =>
       axios.post(`${process.env.M7_API_BASE_URL}api/veiculos/ancora`, payload, {
@@ -156,6 +156,7 @@ export class RastreamentoM7 {
         timeout: M7_REQUEST_TIMEOUT,
       }),
     );
+      this.logger.log(`Payload enviado para M7: ${JSON.stringify(payload)}`);
     return this.mapearAncoraM7(data as Record<string, unknown>);
   }
 

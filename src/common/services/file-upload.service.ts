@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { promises as fs } from 'fs';
-import { join } from 'path';
+import { extname, join } from 'path';
 import sharp from 'sharp';
 
 @Injectable()
@@ -27,6 +27,27 @@ export class FileUploadService {
     'uploads',
     'slider-photos',
   );
+  private readonly documentsUploadPath = join(process.cwd(), 'uploads');
+
+  async uploadDocumentFile(file: Express.Multer.File): Promise<string> {
+    await this.ensureDirectory(this.documentsUploadPath);
+
+    const timestamp = Date.now();
+    const randomString = Math.random().toString(36).substring(2, 15);
+    const sanitizedOriginalName = this.sanitizeFilename(
+      file.originalname || 'document',
+    );
+    const extension = extname(sanitizedOriginalName);
+    const basename = extension
+      ? sanitizedOriginalName.slice(0, -extension.length)
+      : sanitizedOriginalName;
+    const filename = `${timestamp}-${randomString}-${basename}${extension || '.bin'}`;
+    const filepath = join(this.documentsUploadPath, filename);
+
+    await fs.writeFile(filepath, file.buffer);
+
+    return `/uploads/${filename}`;
+  }
 
   async uploadProfilePhoto(file: Express.Multer.File): Promise<string> {
     // Garante que o diretório de upload existe

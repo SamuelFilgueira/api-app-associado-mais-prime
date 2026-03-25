@@ -7,13 +7,16 @@ import {
   ParseIntPipe,
   Patch,
   Post,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
 import { DocumentosService } from './documentos.service';
 import { CreateDocumentDto } from './DTOs/create-document.dto';
 import { UpdateDocumentDto } from './DTOs/update-document.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AdminRoleGuard } from '../auth/admin-role.guard';
+import { FileInterceptor } from '@nestjs/platform-express';
 
 @UseGuards(JwtAuthGuard, AdminRoleGuard)
 @Controller('documentos')
@@ -21,8 +24,12 @@ export class DocumentosController {
   constructor(private readonly documentosService: DocumentosService) {}
 
   @Post()
-  create(@Body() data: CreateDocumentDto) {
-    return this.documentosService.create(data);
+  @UseInterceptors(FileInterceptor('file'))
+  create(
+    @Body() data: CreateDocumentDto,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    return this.documentosService.create(data, file);
   }
 
   @Get()

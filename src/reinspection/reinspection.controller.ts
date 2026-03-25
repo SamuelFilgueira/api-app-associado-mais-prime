@@ -9,6 +9,7 @@ import {
   Patch,
   Post,
   Query,
+  Req,
   UploadedFile,
   UseGuards,
   UseInterceptors,
@@ -33,8 +34,8 @@ export class ReinspectionController {
    * para enviar as fotos em lotes e POST /:id/submit para finalizar.
    */
   @Post()
-  async create(@Body() dto: CreateReinspectionDto) {
-    return this.reinspectionService.create(dto);
+  async create(@Body() dto: CreateReinspectionDto, @Req() req: any) {
+    return this.reinspectionService.create(dto, req.user.id);
   }
 
   /**
