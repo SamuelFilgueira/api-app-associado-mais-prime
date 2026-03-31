@@ -37,13 +37,21 @@ export class AssociadoController {
     return resposta;
   }
 
+
+  @Get('verificar-situacao/:cpf')
+  async verificarSituacao(@Param('cpf') cpf: string) {
+    return this.associadoService.verificarSituacao(cpf);
+  }
+
   @Get('cpf/:cpf/veiculos')
+  @UseGuards(JwtAuthGuard)
   async findVehiclesByCpf(@Param('cpf') cpf: string) {
     this.logger.log(`Buscando veículos do associado pelo CPF: ${cpf}`);
     return this.associadoService.findVehiclesByCpf(cpf);
   }
 
   @Patch(':id')
+  @UseGuards(JwtAuthGuard)
   @UseInterceptors(FileInterceptor('profilePhoto'))
   updateAssociado(
     @Param('id', ParseIntPipe) id: number,

@@ -2,6 +2,7 @@ import * as bcrypt from 'bcrypt';
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   InternalServerErrorException,
   Logger,
@@ -93,8 +94,9 @@ export class AssociadoService {
       response.status >= 400 ||
       data?.mensagem === 'Não aceitável' ||
       data?.error?.some((msg: string) =>
-        msg.includes('Associado não encontrado'),
-      )
+        msg.includes('Associado não encontrado')
+      ) ||
+      !['ATIVO', 'INADIMPLENTE 20 DIAS'].includes(data?.descricao_situacao)
     ) {
       throw new BadRequestException('Cpf de associado inválido para cadastro');
     }
@@ -136,6 +138,41 @@ export class AssociadoService {
       message: 'Associado cadastrado com sucesso',
       access_token: loginResult.access_token,
       primeiroLogin: true,
+    };
+  }
+
+  async verificarSituacao(rawCpf: string) {
+    const cpf = rawCpf?.replace(/\D/g, '');
+
+    if (!cpf) {
+      throw new BadRequestException('CPF é obrigatório');
+    }
+
+    const url = `https://api.hinova.com.br/api/sga/v2/buscar/situacao-associado/${cpf}`;
+
+    let response;
+    try {
+      response = await axios.get(url, {
+        headers: {
+          Authorization: `Bearer ${process.env.SGA_TOKEN}`,
+        },
+        validateStatus: () => true,
+      });
+
+      this.logger.log(`Resposta da API SGA para verificar situação: ${JSON.stringify(response.data)}`);
+    } catch {
+      throw new InternalServerErrorException('Erro ao consultar SGA');
+    }
+
+    const data = response?.data;
+
+    if (response.status >= 400 || data?.mensagem === 'Não aceitável' || !['ATIVO', 'INADIMPLENTE 20 DIAS'].includes(data?.descricao)) {
+      throw new ForbiddenException('Associado sem permissão para acessar a aplicação');
+    }
+
+    return {
+      situacao: data?.descricao,
+      mensagem: data?.mensagem || 'Situação verificada com sucesso',
     };
   }
 
