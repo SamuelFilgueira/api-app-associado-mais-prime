@@ -8,14 +8,18 @@ export class CartaoService {
 
   constructor(private prisma: PrismaService) {}
 
-  async gerarCartaoVirtual(userId: number) {
+  async gerarCartaoVirtual(userId: number, chassi: string) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user || !user.cpf) {
       throw new NotFoundException('CPF não encontrado para o usuário');
     }
 
     const vehicle = await this.prisma.userVehicle.findFirst({
-      where: { userId, isActive: true, plate: { not: null } },
+      where: {
+        userId,
+        chassi,
+        isActive: true,
+      },
     });
     if (!vehicle?.plate) {
       throw new NotFoundException('Placa não encontrada para o usuário');

@@ -18,11 +18,12 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AdminRoleGuard } from '../auth/admin-role.guard';
 import { FileInterceptor } from '@nestjs/platform-express';
 
-@UseGuards(JwtAuthGuard, AdminRoleGuard)
+@UseGuards(JwtAuthGuard)
 @Controller('documentos')
 export class DocumentosController {
   constructor(private readonly documentosService: DocumentosService) {}
 
+  @UseGuards(AdminRoleGuard)
   @Post()
   @UseInterceptors(FileInterceptor('file'))
   create(
@@ -50,6 +51,7 @@ export class DocumentosController {
     return this.documentosService.update(id, data);
   }
 
+  @UseGuards(AdminRoleGuard)
   @Delete(':id')
   remove(@Param('id', ParseIntPipe) id: number) {
     return this.documentosService.remove(id);

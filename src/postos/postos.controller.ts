@@ -32,6 +32,7 @@ export class PostosController {
       body.latitude,
       body.longitude,
       userId,
+      body.chassi,
       pageNumber,
     );
   }

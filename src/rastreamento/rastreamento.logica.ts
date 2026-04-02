@@ -11,6 +11,8 @@ export interface UltimaPosicaoLogicaResponse {
   marca: string;
   alertaIgnicao: boolean;
   cidade: string;
+  endereco: string;
+  bairro: string;
   estado: string;
   latitude: number;
   ultimaTrasmissao: string;
@@ -46,6 +48,7 @@ export async function ultimaPosicaoLogica(
   );
 
   const data = response.data;
+
   if (!data.lista || !Array.isArray(data.lista) || data.lista.length === 0) {
     throw new Error('Nenhum veículo encontrado para o chassi informado');
   }
@@ -60,12 +63,18 @@ export async function ultimaPosicaoLogica(
     condutorNome: item.condutorNome,
     modelo: item.modelo,
     alertaIgnicao: item.alertaIgnicao,
+
     cidade: ultimaPosicao.cidade,
     estado: ultimaPosicao.estado,
+
+    // 🔥 novos campos
+    endereco: ultimaPosicao.endereco,
+    bairro: ultimaPosicao.bairro,
+
     ultimaTrasmissao: ultimaPosicao.ultimaTrasmissao,
     latitude: ultimaPosicao.latitude,
-    direcao: ultimaPosicao.direcao,
     longitude: ultimaPosicao.longitude,
+    direcao: ultimaPosicao.direcao,
     ignicao: ultimaPosicao.ignicao,
     hodometro: ultimaPosicao.hodometro,
     velocidade: ultimaPosicao.velocidade,

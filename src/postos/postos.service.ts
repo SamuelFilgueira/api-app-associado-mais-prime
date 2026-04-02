@@ -12,10 +12,15 @@ export class PostosService {
     latitude: number,
     longitude: number,
     userId: number,
+    chassi: string,
     page: number = 1,
   ) {
     const vehicle = await this.prisma.userVehicle.findFirst({
-      where: { userId, isActive: true, plate: { not: null } },
+      where: {
+        userId,
+        chassi,
+        isActive: true,
+      },
     });
 
     if (!vehicle?.plate) {

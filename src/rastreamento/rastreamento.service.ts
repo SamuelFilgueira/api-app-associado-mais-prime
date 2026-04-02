@@ -99,53 +99,70 @@ export class RastreamentoService {
   async rastreamento(
     cnpj: string,
     chassi: string,
-  ): Promise<RastreamentoUnificadoResponse> {
-    const candidatos: RastreamentoCandidato[] = [];
+  ): Promise<RastreamentoUnificadoResponse & { origem: "m7" | "logica" | "softruck" }> {
+    const candidatos: Array<{
+      data: any;
+      dataOriginal: string;
+      timestamp: number;
+      origem: "m7" | "logica" | "softruck";
+    }> = [];
 
     try {
       const logica = await this.ultimaPosicaoLogica(chassi);
       const timestamp = this.parseDateToTimestamp(logica.ultimaTrasmissao);
+
       candidatos.push({
         data: logica,
         dataOriginal: logica.ultimaTrasmissao,
         timestamp,
+        origem: "logica",
       });
     } catch (error) {
       this.logger.warn(
-        `Falha no rastreamento Lógica para chassi ${chassi}: ${error instanceof Error ? error.message : String(error)}`,
+        `Falha no rastreamento Lógica para chassi ${chassi}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
       );
     }
 
     try {
       const m7 = await this.ultimaPosicaoM7(cnpj, chassi);
       const timestamp = this.parseDateToTimestamp(m7.data_gps);
+
       candidatos.push({
         data: m7,
         dataOriginal: m7.data_gps,
         timestamp,
+        origem: "m7",
       });
     } catch (error) {
       this.logger.warn(
-        `Falha no rastreamento M7 para chassi ${chassi}: ${error instanceof Error ? error.message : String(error)}`,
+        `Falha no rastreamento M7 para chassi ${chassi}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
       );
     }
 
     try {
       const softruck = await this.ultimaPosicaoSoftruck(chassi);
       const timestamp = this.parseDateToTimestamp(softruck.date);
+
       candidatos.push({
         data: softruck,
         dataOriginal: softruck.date,
         timestamp,
+        origem: "softruck",
       });
     } catch (error) {
       this.logger.warn(
-        `Falha no rastreamento Softruck para chassi ${chassi}: ${error instanceof Error ? error.message : String(error)}`,
+        `Falha no rastreamento Softruck para chassi ${chassi}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
       );
     }
 
     if (candidatos.length === 0) {
-      throw new Error('Nenhum provedor de rastreamento retornou dados válidos');
+      throw new Error("Nenhum provedor de rastreamento retornou dados válidos");
     }
 
     const maisRecente = candidatos.reduce((atualMaisRecente, candidato) =>
@@ -155,12 +172,15 @@ export class RastreamentoService {
     );
 
     this.logger.log(
-      `Rastreamento unificado retornando registro mais recente em ${maisRecente.dataOriginal}`,
+      `Rastreamento unificado retornando registro mais recente em ${maisRecente.dataOriginal} (${maisRecente.origem})`,
     );
 
-    return maisRecente.data;
+    // 🔥 Aqui está o pulo do gato
+    return {
+      ...maisRecente.data,
+      origem: maisRecente.origem,
+    };
   }
-
   // Orquestrador: delega para o rastreador M7
   async ultimaPosicaoM7(cnpj: string, chassi: string) {
     return this.m7.ultimaPosicaoM7(cnpj, chassi);

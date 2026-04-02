@@ -1,4 +1,4 @@
-import { Controller, Get, UseGuards, Req } from '@nestjs/common';
+import { Controller, Get, UseGuards, Req, Query } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CartaoService } from './cartao.service';
 
@@ -8,8 +8,11 @@ export class CartaoController {
   constructor(private readonly cartaoService: CartaoService) {}
 
   @Get('virtual')
-  async gerarCartao(@Req() req) {
+  async gerarCartao(
+    @Req() req,
+    @Query('chassi') chassi: string,
+  ) {
     const userId = req.user.userId;
-    return this.cartaoService.gerarCartaoVirtual(userId);
+    return this.cartaoService.gerarCartaoVirtual(userId, chassi);
   }
 }
