@@ -1,5 +1,6 @@
 import { InternalServerErrorException, Logger } from '@nestjs/common';
 import axios from 'axios';
+import { BaseOrigin } from 'src/shared/token-resolver.service';
 
 /** Timeout padrão para chamadas HTTP à API Softruck (em ms) */
 const SOFTRUCK_REQUEST_TIMEOUT = 15_000;
@@ -66,10 +67,10 @@ interface SoftruckTrackingResponse {
 
 export class RastreamentoSoftruck {
   private readonly logger = new Logger(RastreamentoSoftruck.name);
-  private softruckToken = process.env.SOFTRUCK_TOKEN;
+  private softruckTokenByBase = new Map<BaseOrigin, string>();
 
-  /** Mutex para evitar logins simultâneos */
-  private loginPromise: Promise<void> | null = null;
+  /** Mutex por base para evitar logins simultâneos */
+  private loginPromiseByBase = new Map<BaseOrigin, Promise<void>>();
 
   /** Cache de vehicle data por chassi */
   private vehicleCache = new Map<
@@ -85,9 +86,7 @@ export class RastreamentoSoftruck {
   /** Cache de device ID por vehicle ID */
   private deviceCache = new Map<string, CacheEntry<string>>();
 
-  constructor() {
-    this.logger.log('Módulo de rastreamento Softruck inicializado');
-  }
+  constructor() {}
 
   private getCached<T>(
     cache: Map<string, CacheEntry<T>>,
@@ -140,10 +139,28 @@ export class RastreamentoSoftruck {
     return `${normalizedBaseUrl}/${path.replace(/^\//, '')}`;
   }
 
-  private getRequestHeaders() {
+  private maskSecret(value?: string): string {
+    if (!value) return '(vazio)';
+    if (value.length <= 8) return '***';
+    return `${value.slice(0, 4)}...${value.slice(-4)}`;
+  }
+
+  private getRequestHeaders(
+    baseOrigin: BaseOrigin,
+    publicKey: string,
+    overrideToken?: string,
+  ) {
+    const token = overrideToken ?? this.softruckTokenByBase.get(baseOrigin);
+
+    if (!token) {
+      throw new InternalServerErrorException(
+        `Token Softruck não disponível para base ${baseOrigin}`,
+      );
+    }
+
     return {
-      Authorization: `Bearer ${this.softruckToken}`,
-      'public-key': process.env.PUBLIC_KEY_SOFTRUCK,
+      Authorization: `Bearer ${token}`,
+      'public-key': publicKey,
     };
   }
 
@@ -156,22 +173,30 @@ export class RastreamentoSoftruck {
     return status === 401 || status === 403;
   }
 
-  private async autenticarSoftruck(): Promise<void> {
-    // Mutex: se já estiver autenticando, reutiliza a mesma promise
-    if (this.loginPromise) {
-      await this.loginPromise;
+  private async autenticarSoftruck(
+    baseOrigin: BaseOrigin,
+    publicKey: string,
+  ): Promise<void> {
+    const existingLogin = this.loginPromiseByBase.get(baseOrigin);
+    if (existingLogin) {
+      await existingLogin;
       return;
     }
 
-    this.loginPromise = this.executeAutenticarSoftruck();
+    const loginPromise = this.executeAutenticarSoftruck(baseOrigin, publicKey);
+    this.loginPromiseByBase.set(baseOrigin, loginPromise);
+
     try {
-      await this.loginPromise;
+      await loginPromise;
     } finally {
-      this.loginPromise = null;
+      this.loginPromiseByBase.delete(baseOrigin);
     }
   }
 
-  private async executeAutenticarSoftruck(): Promise<void> {
+  private async executeAutenticarSoftruck(
+    baseOrigin: BaseOrigin,
+    publicKey: string,
+  ): Promise<void> {
     const username = process.env.USERNAME_SOFTRUCK;
     const password = process.env.PASSWORD_SOFTRUCK;
 
@@ -185,7 +210,9 @@ export class RastreamentoSoftruck {
     }
 
     const loginUrl = this.buildSoftruckUrl('/auth/login');
-    const publicKey = process.env.PUBLIC_KEY_SOFTRUCK;
+    this.logger.log(
+      `[${baseOrigin}] Iniciando autenticação Softruck com public-key=${this.maskSecret(publicKey)}`,
+    );
 
     try {
       const response = await axios.post<{
@@ -219,8 +246,10 @@ export class RastreamentoSoftruck {
         );
       }
 
-      this.softruckToken = token;
-      this.logger.log('Token da Softruck atualizado com sucesso');
+      this.softruckTokenByBase.set(baseOrigin, token);
+      this.logger.log(
+        `[${baseOrigin}] Token Softruck atualizado (token=${this.maskSecret(token)})`,
+      );
     } catch (error) {
       if (axios.isAxiosError(error)) {
         this.logger.error(
@@ -243,6 +272,8 @@ export class RastreamentoSoftruck {
 
   private async executarComReautenticacao<T>(
     request: () => Promise<T>,
+    baseOrigin: BaseOrigin,
+    publicKey: string,
   ): Promise<T> {
     try {
       return await request();
@@ -252,10 +283,10 @@ export class RastreamentoSoftruck {
       }
 
       this.logger.warn(
-        'Token da Softruck expirado/inválido. Realizando novo login.',
+        `[${baseOrigin}] Token Softruck expirado/inválido. Realizando novo login.`,
       );
 
-      await this.autenticarSoftruck();
+      await this.autenticarSoftruck(baseOrigin, publicKey);
       return request();
     }
   }
@@ -263,18 +294,42 @@ export class RastreamentoSoftruck {
   // Consultar a última posição do veículo via Softruck
   async ultimaPosicaoSoftruck(
     chassi: string,
+    baseOrigin: BaseOrigin,
+    publicKey: string,
+    tokenOverride?: string,
   ): Promise<UltimaPosicaoSoftruckResponse> {
     try {
+      this.logger.debug(
+        `[${baseOrigin}] ultimaPosicaoSoftruck chassi=${chassi} token=${this.maskSecret(tokenOverride ?? this.softruckTokenByBase.get(baseOrigin))} publicKey=${this.maskSecret(publicKey)}`,
+      );
+
+      if (!tokenOverride && !this.softruckTokenByBase.get(baseOrigin)) {
+        await this.autenticarSoftruck(baseOrigin, publicKey);
+      }
+
       // STEP 1: Obter vehicle_id e dados do veículo pelo chassi
-      const vehicleData = await this.obterVehicleId(chassi);
+      const vehicleData = await this.obterVehicleId(
+        chassi,
+        baseOrigin,
+        publicKey,
+        tokenOverride,
+      );
 
       // STEP 2: Obter device_id através da associação
-      const deviceId = await this.obterDeviceId(vehicleData.id);
+      const deviceId = await this.obterDeviceId(
+        vehicleData.id,
+        baseOrigin,
+        publicKey,
+        tokenOverride,
+      );
 
       // STEP 3: Obter dados de rastreamento
       const trackingData = await this.obterDadosRastreamento(
         vehicleData.id,
         deviceId,
+        baseOrigin,
+        publicKey,
+        tokenOverride,
       );
 
       // Retornar DTO formatado com dados do veículo e rastreamento
@@ -293,7 +348,12 @@ export class RastreamentoSoftruck {
   }
 
   // STEP 1: Obter vehicle_id pelo chassi
-  private async obterVehicleId(chassi: string): Promise<{
+  private async obterVehicleId(
+    chassi: string,
+    baseOrigin: BaseOrigin,
+    publicKey: string,
+    tokenOverride?: string,
+  ): Promise<{
     id: string;
     plate: string;
     brandName: string;
@@ -307,14 +367,24 @@ export class RastreamentoSoftruck {
     }
 
     try {
-      const response = await this.executarComReautenticacao(() =>
-        axios.get<SoftruckVehicleResponse>(this.buildSoftruckUrl('/vehicles'), {
-          params: {
-            search: chassi,
-          },
-          headers: this.getRequestHeaders(),
-          timeout: SOFTRUCK_REQUEST_TIMEOUT,
-        }),
+      const response = await this.executarComReautenticacao(
+        () =>
+          axios.get<SoftruckVehicleResponse>(
+            this.buildSoftruckUrl('/vehicles'),
+            {
+              params: {
+                search: chassi,
+              },
+              headers: this.getRequestHeaders(
+                baseOrigin,
+                publicKey,
+                tokenOverride,
+              ),
+              timeout: SOFTRUCK_REQUEST_TIMEOUT,
+            },
+          ),
+        baseOrigin,
+        publicKey,
       );
 
       if (
@@ -350,7 +420,12 @@ export class RastreamentoSoftruck {
   }
 
   // STEP 2: Obter device_id através da associação
-  private async obterDeviceId(vehicleId: string): Promise<string> {
+  private async obterDeviceId(
+    vehicleId: string,
+    baseOrigin: BaseOrigin,
+    publicKey: string,
+    tokenOverride?: string,
+  ): Promise<string> {
     // Verifica cache primeiro
     const cached = this.getCached(this.deviceCache, vehicleId);
     if (cached) {
@@ -359,14 +434,23 @@ export class RastreamentoSoftruck {
     }
 
     try {
-      const response = await this.executarComReautenticacao(() =>
-        axios.get<SoftruckDeviceAssociationResponse>(
-          this.buildSoftruckUrl(`/vehicles/${vehicleId}/associations/devices`),
-          {
-            headers: this.getRequestHeaders(),
-            timeout: SOFTRUCK_REQUEST_TIMEOUT,
-          },
-        ),
+      const response = await this.executarComReautenticacao(
+        () =>
+          axios.get<SoftruckDeviceAssociationResponse>(
+            this.buildSoftruckUrl(
+              `/vehicles/${vehicleId}/associations/devices`,
+            ),
+            {
+              headers: this.getRequestHeaders(
+                baseOrigin,
+                publicKey,
+                tokenOverride,
+              ),
+              timeout: SOFTRUCK_REQUEST_TIMEOUT,
+            },
+          ),
+        baseOrigin,
+        publicKey,
       );
 
       if (
@@ -400,16 +484,28 @@ export class RastreamentoSoftruck {
   private async obterDadosRastreamento(
     vehicleId: string,
     deviceId: string,
+    baseOrigin: BaseOrigin,
+    publicKey: string,
+    tokenOverride?: string,
   ): Promise<SoftruckTrackingResponse> {
     try {
-      const response = await this.executarComReautenticacao(() =>
-        axios.get<SoftruckTrackingResponse>(
-          this.buildSoftruckUrl(`/vehicles/${vehicleId}/tracking/${deviceId}`),
-          {
-            headers: this.getRequestHeaders(),
-            timeout: SOFTRUCK_REQUEST_TIMEOUT,
-          },
-        ),
+      const response = await this.executarComReautenticacao(
+        () =>
+          axios.get<SoftruckTrackingResponse>(
+            this.buildSoftruckUrl(
+              `/vehicles/${vehicleId}/tracking/${deviceId}`,
+            ),
+            {
+              headers: this.getRequestHeaders(
+                baseOrigin,
+                publicKey,
+                tokenOverride,
+              ),
+              timeout: SOFTRUCK_REQUEST_TIMEOUT,
+            },
+          ),
+        baseOrigin,
+        publicKey,
       );
 
       if (!response.data || !response.data.data) {

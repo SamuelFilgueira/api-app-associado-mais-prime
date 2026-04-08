@@ -44,6 +44,8 @@ export class BoletoService {
         },
       );
 
+      //his.logger.log(`Resposta da API de boletos para veículo ${codigo_veiculo}: status=${response.status} body=${JSON.stringify(response.data)}`);
+
       const boletos: Array<{
         nosso_numero?: any;
         linha_digitavel?: any;
@@ -59,6 +61,7 @@ export class BoletoService {
           boletos.push({
             nosso_numero: boleto.nosso_numero,
             linha_digitavel: boleto.linha_digitavel,
+            pix: boleto.pix?.copia_cola ?? null,
             link_boleto: boleto.link_boleto,
             valor_boleto: boleto.valor_boleto,
             situacao_boleto: boleto.situacao_boleto,
@@ -73,6 +76,7 @@ export class BoletoService {
       } else {
         boletos.push(response.data);
       }
+      this.logger.log(`Boletos processados para veículo ${codigo_veiculo}: ${JSON.stringify(boletos)}`);
       return boletos;
     } catch (error) {
       if (error.response && error.response.data) {

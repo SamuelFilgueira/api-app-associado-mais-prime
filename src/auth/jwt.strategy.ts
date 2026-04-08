@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
+import { UserBaseOrigin } from '@prisma/client';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 
 @Injectable()
@@ -16,8 +17,9 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     return {
       userId: payload.sub,
       email: payload.email,
-      username: payload.username, // ← agora disponível nas rotas
+      username: payload.username,
       role: payload.role,
+      baseOrigin: payload.baseOrigin as UserBaseOrigin,
     };
   }
 }

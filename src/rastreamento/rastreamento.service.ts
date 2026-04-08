@@ -16,7 +16,10 @@ import {
   RastreamentoSoftruck,
   UltimaPosicaoSoftruckResponse,
 } from './rastreamento-softruck';
+import { BaseOrigin, TokenResolverService } from 'src/shared/token-resolver.service';
+import { baseTag } from 'src/shared/log.util';
 import { NotificationsService } from '../notifications/notifications.service';
+import axios from 'axios';
 
 type RastreamentoUnificadoResponse =
   | UltimaPosicaoLogicaResponse
@@ -29,15 +32,23 @@ interface RastreamentoCandidato {
   timestamp: number;
 }
 
+interface RastreamentoBaseContext {
+  baseOrigin: BaseOrigin;
+  logicaToken: string;
+  logicaTokenKey: string;
+  softruckPublicKey: string;
+  softruckPublicKeyKey: string;
+}
+
 @Injectable()
 export class RastreamentoService {
   private m7: RastreamentoM7;
   private softruck: RastreamentoSoftruck;
   private readonly logger = new Logger(RastreamentoService.name);
-
   constructor(
     private readonly prisma: PrismaService,
     private readonly notificationsService: NotificationsService,
+    private readonly tokenResolver: TokenResolverService,
   ) {
     this.m7 = new RastreamentoM7();
     this.softruck = new RastreamentoSoftruck();
@@ -92,36 +103,49 @@ export class RastreamentoService {
   // Orquestrador: delega para o rastreador Lógica Soluções
   async ultimaPosicaoLogica(
     chassi: string,
+    token?: string,
+    context?: { baseOrigin?: BaseOrigin; tokenKey?: string },
   ): Promise<UltimaPosicaoLogicaResponse> {
-    return ultimaPosicaoLogica(chassi);
+    return ultimaPosicaoLogica(chassi, token, context);
   }
 
   async rastreamento(
     cnpj: string,
     chassi: string,
-  ): Promise<RastreamentoUnificadoResponse & { origem: "m7" | "logica" | "softruck" }> {
+    requestContext?: RastreamentoBaseContext,
+  ): Promise<
+    RastreamentoUnificadoResponse & { origem: 'm7' | 'logica' | 'softruck' }
+  > {
     const candidatos: Array<{
       data: any;
       dataOriginal: string;
       timestamp: number;
-      origem: "m7" | "logica" | "softruck";
+      origem: 'm7' | 'logica' | 'softruck';
     }> = [];
 
     try {
-      const logica = await this.ultimaPosicaoLogica(chassi);
+      const baseContext =
+        requestContext ?? (await this.resolveBaseContextFromDb(chassi));
+
+      this.logger.log(
+        `${baseTag(baseContext.baseOrigin)} usando token ${baseContext.logicaTokenKey} para consulta Lógica`,
+      );
+
+      const logica = await this.ultimaPosicaoLogica(chassi, baseContext.logicaToken, {
+        baseOrigin: baseContext.baseOrigin,
+        tokenKey: baseContext.logicaTokenKey,
+      });
       const timestamp = this.parseDateToTimestamp(logica.ultimaTrasmissao);
 
       candidatos.push({
         data: logica,
         dataOriginal: logica.ultimaTrasmissao,
         timestamp,
-        origem: "logica",
+        origem: 'logica',
       });
     } catch (error) {
       this.logger.warn(
-        `Falha no rastreamento Lógica para chassi ${chassi}: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
+        `Falha no rastreamento Lógica para chassi ${chassi}: ${this.descreverErroProvider(error)}`,
       );
     }
 
@@ -133,36 +157,43 @@ export class RastreamentoService {
         data: m7,
         dataOriginal: m7.data_gps,
         timestamp,
-        origem: "m7",
+        origem: 'm7',
       });
     } catch (error) {
       this.logger.warn(
-        `Falha no rastreamento M7 para chassi ${chassi}: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
+        `Falha no rastreamento M7 para chassi ${chassi}: ${this.descreverErroProvider(error)}`,
       );
     }
 
     try {
-      const softruck = await this.ultimaPosicaoSoftruck(chassi);
+      const baseContext =
+        requestContext ?? (await this.resolveBaseContextFromDb(chassi));
+
+      this.logger.log(
+        `${baseTag(baseContext.baseOrigin)} usando publicKey ${baseContext.softruckPublicKeyKey} para consulta Softruck (token via autenticação dinâmica)`,
+      );
+
+      const softruck = await this.ultimaPosicaoSoftruck(
+        chassi,
+        baseContext.baseOrigin,
+        baseContext.softruckPublicKey,
+      );
       const timestamp = this.parseDateToTimestamp(softruck.date);
 
       candidatos.push({
         data: softruck,
         dataOriginal: softruck.date,
         timestamp,
-        origem: "softruck",
+        origem: 'softruck',
       });
     } catch (error) {
       this.logger.warn(
-        `Falha no rastreamento Softruck para chassi ${chassi}: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
+        `Falha no rastreamento Softruck para chassi ${chassi}: ${this.descreverErroProvider(error)}`,
       );
     }
 
     if (candidatos.length === 0) {
-      throw new Error("Nenhum provedor de rastreamento retornou dados válidos");
+      throw new Error('Nenhum provedor de rastreamento retornou dados válidos');
     }
 
     const maisRecente = candidatos.reduce((atualMaisRecente, candidato) =>
@@ -185,6 +216,8 @@ export class RastreamentoService {
   async ultimaPosicaoM7(cnpj: string, chassi: string) {
     return this.m7.ultimaPosicaoM7(cnpj, chassi);
   }
+
+  
 
   /**
    * Obtém o estado atual do veículo (ancoraAtiva + notificacaoIgnicao).
@@ -406,11 +439,62 @@ export class RastreamentoService {
   // Orquestrador: delega para o rastreador Softruck
   async ultimaPosicaoSoftruck(
     chassi: string,
+    baseOrigin: BaseOrigin,
+    publicKey: string,
+    tokenOverride?: string,
   ): Promise<UltimaPosicaoSoftruckResponse> {
     this.logger.log(
-      `Consultando última posição Softruck para chassi: ${chassi}`,
+      `${baseTag(baseOrigin)} Consultando última posição Softruck para chassi: ${chassi} (tokenOverride=${!!tokenOverride})`,
     );
-    return this.softruck.ultimaPosicaoSoftruck(chassi);
+    return this.softruck.ultimaPosicaoSoftruck(
+      chassi,
+      baseOrigin,
+      publicKey,
+      tokenOverride,
+    );
+  }
+
+  private async resolveBaseContextFromDb(
+    chassi: string,
+  ): Promise<RastreamentoBaseContext> {
+    let baseOrigin: BaseOrigin = 'MAIS_PRIME';
+
+    try {
+      const userVehicle = await this.prisma.userVehicle.findFirst({
+        where: { chassi },
+        select: { user: { select: { baseOrigin: true } } },
+      });
+      if (userVehicle?.user?.baseOrigin) {
+        baseOrigin = userVehicle.user.baseOrigin as BaseOrigin;
+      }
+    } catch (err) {
+      this.logger.warn(
+        `Falha ao buscar baseOrigin no DB para chassi=${chassi}: ${err?.message}`,
+      );
+    }
+
+    return {
+      baseOrigin,
+      logicaToken: this.tokenResolver.resolveLogicaToken(baseOrigin),
+      logicaTokenKey: this.tokenResolver.getTokenKey(baseOrigin, 'logica'),
+      softruckPublicKey: this.tokenResolver.resolveSoftruckPublicKey(baseOrigin),
+      softruckPublicKeyKey: this.tokenResolver.getTokenKey(
+        baseOrigin,
+        'softruckPublicKey',
+      ),
+    };
+  }
+
+  private descreverErroProvider(error: unknown): string {
+    if (axios.isAxiosError(error)) {
+      return `HTTP ${error.response?.status ?? 'N/A'} | URL: ${error.config?.url ?? 'N/A'} | Body: ${JSON.stringify(error.response?.data ?? null)}`;
+    }
+
+    if (error instanceof Error) {
+      return error.message;
+    }
+
+    return String(error);
   }
 
   // Orquestrador: delega para o processador de webhook M7

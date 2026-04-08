@@ -19,7 +19,6 @@ export type NotificationData = {
   [key: string]: any;
 };
 
-
 @Injectable()
 export class NotificationsService {
   private expo = new Expo();
@@ -626,7 +625,6 @@ export class NotificationsService {
       this.logger.warn('[MARKETING] Nenhum recipiente válido encontrado');
       return { sentCount: 0, skippedCount: recipients.length };
     }
-
 
     const messages: ExpoPushMessage[] = validRecipients.map((recipient) =>
       this.buildExpoMessage(

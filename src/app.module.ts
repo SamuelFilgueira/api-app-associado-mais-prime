@@ -1,5 +1,7 @@
 import { BoletoController } from './sga/boleto/boleto.controller';
 import { BoletoService } from './sga/boleto/boleto.service';
+import { BeneficiosVeiculoController } from './sga/beneficios-veiculo/beneficios-veiculo/beneficios-veiculo.controller';
+import { BeneficiosVeiculoService } from './sga/beneficios-veiculo/beneficios-veiculo/beneficios-veiculo.service';
 import { Module } from '@nestjs/common';
 import { RastreamentoModule } from './rastreamento/rastreamento.module';
 import { AppController } from './app.controller';
@@ -44,6 +46,7 @@ import { SliderModule } from './slider/slider.module';
     EconomiaController,
     SgaController,
     BoletoController,
+    BeneficiosVeiculoController,
     AlloyalApiController,
   ],
   providers: [
@@ -54,6 +57,7 @@ import { SliderModule } from './slider/slider.module';
     EconomiaService,
     SgaService,
     BoletoService,
+    BeneficiosVeiculoService,
   ],
 })
 export class AppModule {}

@@ -13,6 +13,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { AssociadoService } from './associado.service';
+import { BaseContextService } from 'src/shared/base-context.service';
 import { UpdateAssociadoDto } from './DTOs/update-associado.dto';
 import { PrimeiroAcessoDto } from './DTOs/primeiro-acesso.dto';
 
@@ -20,7 +21,10 @@ import { PrimeiroAcessoDto } from './DTOs/primeiro-acesso.dto';
 export class AssociadoController {
   private readonly logger = new Logger(AssociadoController.name);
 
-  constructor(private readonly associadoService: AssociadoService) {}
+  constructor(
+    private readonly associadoService: AssociadoService,
+    private readonly baseContextService: BaseContextService,
+  ) {}
 
   @Post('primeiro-acesso')
   async primeiroAcesso(@Body() data: PrimeiroAcessoDto) {
@@ -37,6 +41,10 @@ export class AssociadoController {
     return resposta;
   }
 
+  // @Get('base-origin/:cpf')
+  // async findBaseOriginByCpf(@Param('cpf') cpf: string) {
+  //   return this.associadoService.findBaseOriginByCpf(cpf);
+  // }
 
   @Get('verificar-situacao/:cpf')
   async verificarSituacao(@Param('cpf') cpf: string) {
@@ -47,6 +55,13 @@ export class AssociadoController {
   @UseGuards(JwtAuthGuard)
   async findVehiclesByCpf(@Param('cpf') cpf: string) {
     this.logger.log(`Buscando veículos do associado pelo CPF: ${cpf}`);
+    // Exemplo de uso de BaseContextService em rota autenticada
+    try {
+      const sgaToken = this.baseContextService.getSgaToken();
+      this.logger.log(`SGA token disponível para request autenticada (hash): ${sgaToken?.slice?.(0, 8) ?? 'n/a'}`);
+    } catch (err) {
+      this.logger.error(`Erro ao obter token via BaseContextService: ${err?.message}`);
+    }
     return this.associadoService.findVehiclesByCpf(cpf);
   }
 

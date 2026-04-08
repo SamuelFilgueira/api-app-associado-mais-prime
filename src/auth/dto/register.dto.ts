@@ -1,10 +1,12 @@
 import {
   IsBoolean,
   IsEmail,
+  IsEnum,
   IsOptional,
   IsString,
   MinLength,
 } from 'class-validator';
+import { UserBaseOrigin } from '@prisma/client';
 
 export class RegisterDto {
   @IsString()
@@ -32,4 +34,8 @@ export class RegisterDto {
   @IsOptional()
   @IsBoolean()
   primeiroLogin?: boolean;
+
+  @IsOptional()
+  @IsEnum(UserBaseOrigin)
+  baseOrigin?: UserBaseOrigin;
 }

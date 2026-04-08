@@ -18,6 +18,7 @@ model user {
   name             String
   cpf              String         @unique(map: "User_cpf_key")
   email            String         @unique(map: "User_email_key")
+  baseOrigin UserBaseOrigin?
   passwordHash     String
   expoPushToken    String?        @db.VarChar(255)
   cep              String?
@@ -36,6 +37,19 @@ model user {
   updatedAt        DateTime
   notifications    Notification[]
   userVehicles     UserVehicle[]
+}
+
+// model BaseOrigin {
+//   id Int @id @default(autoincrement())
+//   nameOrigin UserBaseOrigin 
+//   userId             Int
+//   user               user     @relation(fields: [userId], references: [id], onDelete: Cascade)
+//   createdAt DateTime @default(now())
+// }
+
+enum UserBaseOrigin {
+  MAIS_PRIME
+  MAIS_PRIME_RS
 }
 
 model ReinspectionAnalyst {

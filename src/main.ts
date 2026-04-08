@@ -6,8 +6,19 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { join } from 'path';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { json, urlencoded } from 'express';
+import { validateEnvOrThrow } from './config/env.validator';
+import { Logger } from '@nestjs/common';
 
 async function bootstrap() {
+  // Validate required environment variables before starting the app
+  try {
+    validateEnvOrThrow();
+  } catch (err) {
+    const logger = new Logger('Bootstrap');
+    logger.error('App startup aborted due to missing env vars', err as any);
+    process.exit(1);
+  }
+
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
   app.enableCors({

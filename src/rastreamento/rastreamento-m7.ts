@@ -156,7 +156,7 @@ export class RastreamentoM7 {
         timeout: M7_REQUEST_TIMEOUT,
       }),
     );
-      this.logger.log(`Payload enviado para M7: ${JSON.stringify(payload)}`);
+    this.logger.log(`Payload enviado para M7: ${JSON.stringify(payload)}`);
     return this.mapearAncoraM7(data as Record<string, unknown>);
   }
 
@@ -331,7 +331,7 @@ export class RastreamentoM7 {
       if (response.data && response.data.sucesso) {
         this.token = response.data.token;
         this.tokenExpires = response.data.expires_in;
-        console.log('Token M7:', this.token);
+        // Token value is sensitive; do not log full value in production
         this.logger.log('Token M7 renovado com sucesso');
         return;
       }

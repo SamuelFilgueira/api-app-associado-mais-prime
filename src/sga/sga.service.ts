@@ -7,12 +7,14 @@ import {
 } from '@nestjs/common';
 import axios from 'axios';
 import { PrismaService } from '../prisma.service';
+import { TokenResolverService } from 'src/shared/token-resolver.service';
+import { baseTag } from 'src/shared/log.util';
 
 @Injectable()
 export class SgaService {
   private readonly logger = new Logger(SgaService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService, private tokenResolver: TokenResolverService) {}
 
   /**
    * Busca o CPF limpo (somente dígitos) de um usuário pelo ID
@@ -30,9 +32,22 @@ export class SgaService {
    */
   private async fetchSgaAssociado(cpf: string) {
     const url = `https://api.hinova.com.br/api/sga/v2/associado/buscar/${cpf}`;
+
+    // resolve baseOrigin from DB if possible
+    let baseOrigin: 'MAIS_PRIME' | 'MAIS_PRIME_RS' = 'MAIS_PRIME';
+    try {
+      const user = await this.prisma.user.findFirst({ where: { cpf } });
+      if (user?.baseOrigin) baseOrigin = user.baseOrigin as any;
+    } catch (err) {
+      this.logger.warn(`Falha ao resolver baseOrigin por cpf=${cpf}: ${err?.message}`);
+    }
+
+    const token = this.tokenResolver.resolveSgaToken(baseOrigin);
+    this.logger.log(`${baseTag(baseOrigin)} usando ${this.tokenResolver.getTokenKey(baseOrigin, 'sga')} para consultar associado`);
+
     return axios.get(url, {
       headers: {
-        Authorization: `Bearer ${process.env.SGA_TOKEN}`,
+        Authorization: `Bearer ${token}`,
       },
       validateStatus: () => true,
     });
@@ -40,9 +55,25 @@ export class SgaService {
 
   private async fetchSgaVeiculo(chassi: string) {
     const url = `https://api.hinova.com.br/api/sga/v2/veiculo/buscar/${chassi}`;
+
+    // try to determine baseOrigin from vehicle owner
+    let baseOrigin: 'MAIS_PRIME' | 'MAIS_PRIME_RS' = 'MAIS_PRIME';
+    try {
+      const userVehicle = await this.prisma.userVehicle.findFirst({
+        where: { chassi },
+        select: { user: { select: { baseOrigin: true } } },
+      });
+      if (userVehicle?.user?.baseOrigin) baseOrigin = userVehicle.user.baseOrigin as any;
+    } catch (err) {
+      this.logger.warn(`Falha ao resolver baseOrigin por chassi=${chassi}: ${err?.message}`);
+    }
+
+    const token = this.tokenResolver.resolveSgaToken(baseOrigin);
+    this.logger.log(`${baseTag(baseOrigin)} usando ${this.tokenResolver.getTokenKey(baseOrigin, 'sga')} para consultar veículo`);
+
     return axios.get(url, {
       headers: {
-        Authorization: `Bearer ${process.env.SGA_TOKEN}`,
+        Authorization: `Bearer ${token}`,
       },
       validateStatus: () => true,
     });

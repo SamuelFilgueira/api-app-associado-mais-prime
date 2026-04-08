@@ -10,6 +10,7 @@ import {
   Post,
   Query,
   Req,
+  Logger,
   UploadedFile,
   UseGuards,
   UseInterceptors,
@@ -27,6 +28,7 @@ import { ResendPhotoDto } from './dto/resend-photo.dto';
 @UseGuards(JwtAuthGuard)
 @Controller('reinspection')
 export class ReinspectionController {
+  private readonly logger = new Logger(ReinspectionController.name);
   constructor(private readonly reinspectionService: ReinspectionService) {}
 
   /**
@@ -140,9 +142,7 @@ export class ReinspectionController {
   finalizeByUserVehicleId(
     @Query('userVehicleId', ParseIntPipe) userVehicleId: number,
   ) {
-    console.log(
-      `Recebido pedido para finalizar revistoria do userVehicleId: ${userVehicleId}`,
-    );
+    this.logger.log(`Recebido pedido para finalizar revistoria do userVehicleId: ${userVehicleId}`);
     return this.reinspectionService.finalizeByUserVehicleId(userVehicleId);
   }
 

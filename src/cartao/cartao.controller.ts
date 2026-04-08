@@ -8,10 +8,7 @@ export class CartaoController {
   constructor(private readonly cartaoService: CartaoService) {}
 
   @Get('virtual')
-  async gerarCartao(
-    @Req() req,
-    @Query('chassi') chassi: string,
-  ) {
+  async gerarCartao(@Req() req, @Query('chassi') chassi: string) {
     const userId = req.user.userId;
     return this.cartaoService.gerarCartaoVirtual(userId, chassi);
   }

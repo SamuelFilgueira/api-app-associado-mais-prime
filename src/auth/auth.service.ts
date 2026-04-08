@@ -2,6 +2,7 @@ import {
   Injectable,
   BadRequestException,
   NotFoundException,
+  InternalServerErrorException,
 } from '@nestjs/common';
 import { RegisterDto } from './dto/register.dto';
 import { JwtService } from '@nestjs/jwt';
@@ -9,6 +10,8 @@ import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma.service';
 import { Prisma } from '@prisma/client';
 import { MailService } from '../common/services/mail.service';
+import { BaseContextService } from 'src/shared/base-context.service';
+import { TokenResolverService } from 'src/shared/token-resolver.service'; 
 
 @Injectable()
 export class AuthService {
@@ -16,6 +19,8 @@ export class AuthService {
     private prisma: PrismaService,
     private jwtService: JwtService,
     private mailService: MailService,
+    private baseContextService: BaseContextService,
+    private tokenResolverService: TokenResolverService,
   ) {}
 
   async getUserWithPlate(userId: number) {
@@ -54,18 +59,33 @@ export class AuthService {
         cpf: true,
         name: true,
         role: true,
+        baseOrigin: true,
       },
     });
+
 
     if (!dbUser) {
       throw new Error('Usuário não encontrado ao gerar JWT');
     }
+
+    if (!dbUser.baseOrigin) {
+      throw new InternalServerErrorException(
+        'Usuário sem baseOrigin definida',
+      );
+    }
+
+    // const token = this.tokenResolverService.resolveSgaToken(
+    //   dbUser.baseOrigin,
+    // );
+    
+    // console.log("Token resolvido para login:", token); // Log do token resolvido
 
     const payload = {
       sub: dbUser.id,
       cpf: dbUser.cpf,
       username: dbUser.name,
       role: dbUser.role,
+      baseOrigin: dbUser.baseOrigin,
     };
 
     return {
@@ -87,6 +107,7 @@ export class AuthService {
           address: data.address,
           plate: data.plate,
           primeiroLogin: data.primeiroLogin ?? false,
+          baseOrigin: data.baseOrigin,
           updatedAt: new Date(),
         },
       });
