@@ -13,10 +13,10 @@ export class BeneficiosVeiculoController {
 
   @Get(':codigoVeiculo')
   async getBeneficiosVeiculo(@Param('codigoVeiculo') codigoVeiculo: string) {
-    const sgaToken = this.baseContextService.getSgaToken();
+    const baseOrigin = this.baseContextService.getBaseOrigin();
 
     return this.beneficiosVeiculoService.getBeneficiosVeiculo(
-      sgaToken,
+      baseOrigin,
       codigoVeiculo,
     );
   }

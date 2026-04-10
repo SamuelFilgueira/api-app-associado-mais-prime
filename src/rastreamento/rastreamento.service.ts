@@ -150,7 +150,9 @@ export class RastreamentoService {
     }
 
     try {
-      const m7 = await this.ultimaPosicaoM7(cnpj, chassi);
+      const baseContext =
+        requestContext ?? (await this.resolveBaseContextFromDb(chassi));
+      const m7 = await this.ultimaPosicaoM7(cnpj, chassi, baseContext.baseOrigin);
       const timestamp = this.parseDateToTimestamp(m7.data_gps);
 
       candidatos.push({
@@ -213,8 +215,8 @@ export class RastreamentoService {
     };
   }
   // Orquestrador: delega para o rastreador M7
-  async ultimaPosicaoM7(cnpj: string, chassi: string) {
-    return this.m7.ultimaPosicaoM7(cnpj, chassi);
+  async ultimaPosicaoM7(cnpj: string, chassi: string, baseOrigin: BaseOrigin) {
+    return this.m7.ultimaPosicaoM7(cnpj, chassi, baseOrigin);
   }
 
   
@@ -226,6 +228,7 @@ export class RastreamentoService {
   private async getVehicleState(
     cnpj: string,
     chassi: string,
+    baseOrigin: BaseOrigin = 'MAIS_PRIME',
   ): Promise<{ ancoraAtiva: boolean; notificacaoIgnicao: boolean }> {
     const userVehicle = await this.prisma.userVehicle.findFirst({
       where: { chassi },
@@ -247,6 +250,7 @@ export class RastreamentoService {
     const estadoM7: EventoPadraoM7Response = await this.m7.getEventoPadraoM7(
       cnpj,
       chassi,
+      baseOrigin,
     );
     return {
       ancoraAtiva: estadoM7.ancoraAtiva,
@@ -258,14 +262,16 @@ export class RastreamentoService {
     cnpj: string,
     chassi: string,
     ancoraAtiva: boolean,
+    baseOrigin: BaseOrigin,
   ): Promise<AncoraM7Response> {
     // Preserva o estado de ignição atual para evitar reset acidental
-    const estado = await this.getVehicleState(cnpj, chassi);
+    const estado = await this.getVehicleState(cnpj, chassi, baseOrigin);
     const result = await this.m7.ancoraM7(
       cnpj,
       chassi,
       ancoraAtiva,
       estado.notificacaoIgnicao,
+      baseOrigin,
     );
 
     if (!('erro' in result)) {
@@ -303,26 +309,28 @@ export class RastreamentoService {
     cnpj: string,
     chassi: string,
     evtIgn: boolean,
+    baseOrigin: BaseOrigin,
   ): Promise<AncoraM7Response> {
     const evtIgnNormalizado = this.normalizarBooleanoEntrada(evtIgn, 'evt_ign');
 
     // Preserva o estado da âncora atual para evitar reset acidental
-    const estado = await this.getVehicleState(cnpj, chassi);
+    const estado = await this.getVehicleState(cnpj, chassi, baseOrigin);
 
-    if (evtIgnNormalizado && estado.ancoraAtiva) {
-      this.logger.warn(
-        `Tentativa inválida de ativar ignição com âncora ativa para chassi=${chassi}`,
-      );
-      throw new BadRequestException(
-        'Não é permitido ligar ignição com âncora ativa',
-      );
-    }
+    // if (evtIgnNormalizado && estado.ancoraAtiva) {
+    //   this.logger.warn(
+    //     `Tentativa inválida de ativar ignição com âncora ativa para chassi=${chassi}`,
+    //   );
+    //   throw new BadRequestException(
+    //     'Não é permitido ligar ignição com âncora ativa',
+    //   );
+    // }
 
     const result = await this.m7.ignicaoM7(
       cnpj,
       chassi,
       evtIgnNormalizado,
       estado.ancoraAtiva,
+      baseOrigin,
     );
 
     if (!('erro' in result)) {
@@ -409,7 +417,14 @@ export class RastreamentoService {
   }
 
   async renovarTokenM7() {
-    return this.m7.renovarToken();
+    const [mp, mprs] = await Promise.allSettled([
+      this.m7.renovarToken('MAIS_PRIME'),
+      this.m7.renovarToken('MAIS_PRIME_RS'),
+    ]);
+    return {
+      MAIS_PRIME: mp.status === 'fulfilled' ? mp.value : { erro: (mp as PromiseRejectedResult).reason?.message },
+      MAIS_PRIME_RS: mprs.status === 'fulfilled' ? mprs.value : { erro: (mprs as PromiseRejectedResult).reason?.message },
+    };
   }
 
   private normalizarBooleanoEntrada(

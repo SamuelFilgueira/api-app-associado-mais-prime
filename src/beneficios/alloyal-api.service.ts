@@ -21,6 +21,12 @@ import { AlloyalCashbackTransferRequestDto } from './DTOs/alloyal-cashback-trans
 import { AlloyalUserDto } from './DTOs/alloyal-user.dto';
 import { AlloyalCreateUserRequestDto } from './DTOs/alloyal-create-user.dto';
 import { AlloyalUpdateUserRequestDto } from './DTOs/alloyal-update-user.dto';
+import { BaseContextService } from 'src/shared/base-context.service';
+import { baseTag } from 'src/shared/log.util';
+import {
+  BaseOrigin,
+  TokenResolverService,
+} from 'src/shared/token-resolver.service';
 
 /**
  * Interface para armazenar os headers de autenticação da API Alloyal
@@ -42,6 +48,16 @@ export interface AlloyalSessionHeaders {
   accessToken: string;
 }
 
+interface AlloyalCredentialContext {
+  baseOrigin: BaseOrigin;
+  apiSecret: string;
+  businessId: string;
+  businessCnpj: string;
+  apiSecretEnv: string;
+  businessIdEnv: string;
+  businessCnpjEnv: string;
+}
+
 /**
  * Service responsável por gerenciar todas as interações com a API Alloyal
  * Implementa autenticação automática e cache de tokens
@@ -51,19 +67,58 @@ export class AlloyalApiService {
   private readonly logger = new Logger(AlloyalApiService.name);
   private axiosInstance: AxiosInstance;
 
-  constructor() {
+  constructor(
+    private readonly baseContextService: BaseContextService,
+    private readonly tokenResolverService: TokenResolverService,
+  ) {
     this.axiosInstance = axios.create({
       baseURL: process.env.BASE_URL_ALLOYAL,
     });
   }
 
-  private getApiSecret(): string {
-    const apiSecret = process.env.API_SECRET_ALLOYAL;
-    if (!apiSecret) {
-      this.logger.error('API_SECRET_ALLOYAL não configurado');
-      throw new Error('API_SECRET_ALLOYAL not set');
-    }
-    return apiSecret;
+  private resolveAlloyalCredentials(
+    operation: string,
+  ): AlloyalCredentialContext {
+    const baseOrigin = this.baseContextService.getBaseOrigin();
+    const apiSecretEnv = this.tokenResolverService.getTokenKey(
+      baseOrigin,
+      'apiSecretAlloyal',
+    );
+    const businessIdEnv = this.tokenResolverService.getTokenKey(
+      baseOrigin,
+      'alloyalBusinessId',
+    );
+    const businessCnpjEnv = this.tokenResolverService.getTokenKey(
+      baseOrigin,
+      'alloyalBusinessCnpj',
+    );
+    const credentials = {
+      baseOrigin,
+      apiSecret: this.baseContextService.getApiSecretAlloyal(),
+      businessId: this.baseContextService.getAlloyalBusinessId(),
+      businessCnpj: this.baseContextService.getAlloyalBusinessCnpj(),
+      apiSecretEnv,
+      businessIdEnv,
+      businessCnpjEnv,
+    };
+
+    this.logger.log(
+      `${baseTag(baseOrigin)} Alloyal credentials selected for ${operation}: apiSecretEnv=${apiSecretEnv}, businessIdEnv=${businessIdEnv}, businessCnpjEnv=${businessCnpjEnv}, businessId=${credentials.businessId}, businessCnpj=${credentials.businessCnpj}`,
+    );
+
+    return credentials;
+  }
+
+  private getAlloyalBaseUrlOrigin(baseOrigin: BaseOrigin): string {
+    const origin = new URL(
+      process.env.BASE_URL_ALLOYAL || 'https://api.lecupon.com',
+    ).origin;
+
+    this.logger.log(
+      `${baseTag(baseOrigin)} Alloyal base URL origin selected: ${origin}`,
+    );
+
+    return origin;
   }
 
   private buildAuthHeaders(session: AlloyalSessionHeaders): AuthHeaders {
@@ -71,7 +126,9 @@ export class AlloyalApiService {
       throw new Error('Missing Alloyal session headers');
     }
 
-    const apiSecret = this.getApiSecret();
+    const { apiSecret } = this.resolveAlloyalCredentials(
+      'authenticated request',
+    );
     return {
       uid: session.uid,
       client: session.client,
@@ -101,6 +158,7 @@ export class AlloyalApiService {
    */
   async login(cpf: string, password: string): Promise<AlloyalSessionHeaders> {
     try {
+      const { apiSecret } = this.resolveAlloyalCredentials('login');
       const body = {
         cpf,
         password,
@@ -112,7 +170,7 @@ export class AlloyalApiService {
         body,
         {
           headers: {
-            'api-secret': this.getApiSecret(),
+            'api-secret': apiSecret,
           },
         },
       );
@@ -454,8 +512,8 @@ export class AlloyalApiService {
     try {
       const clientEmployeeEmail = process.env.x_clientemployee_email;
       const clientEmployeeToken = process.env.x_clientemployee_token;
-      const businessId = process.env.ALLOYAL_BUSINESS_ID || '95';
-      const cnpj = process.env.ALLOYAL_BUSINESS_CNPJ || '29354995000170';
+      const { baseOrigin, businessId, businessCnpj } =
+        this.resolveAlloyalCredentials('searchUserByCpf');
 
       if (!clientEmployeeEmail || !clientEmployeeToken) {
         this.logger.error(
@@ -469,14 +527,14 @@ export class AlloyalApiService {
       // Remove caracteres especiais do CPF (apenas números)
       const cleanCpf = cpf.replace(/\D/g, '');
 
-      // Usa apenas a origem do BASE_URL_ALLOYAL, pois este endpoint tem caminho diferente
-      // ex: BASE_URL_ALLOYAL=https://api.lecupon.com/api/v1/public_integration/ → https://api.lecupon.com
-      const baseOrigin = new URL(
-        process.env.BASE_URL_ALLOYAL || 'https://api.lecupon.com',
-      ).origin;
+      const apiBaseOrigin = this.getAlloyalBaseUrlOrigin(baseOrigin);
+
+      this.logger.log(
+        `${baseTag(baseOrigin)} Searching Alloyal user by CPF with businessId=${businessId} and businessCnpj=${businessCnpj}`,
+      );
 
       const response = await axios.get(
-        `${baseOrigin}/client/v2/businesses/${cnpj}/users`,
+        `${apiBaseOrigin}/client/v2/businesses/${businessCnpj}/users`,
         {
           headers: {
             'x-clientemployee-email': clientEmployeeEmail,
@@ -857,7 +915,8 @@ export class AlloyalApiService {
     try {
       const clientEmployeeEmail = process.env.x_clientemployee_email;
       const clientEmployeeToken = process.env.x_clientemployee_token;
-      const cnpj = process.env.ALLOYAL_BUSINESS_CNPJ || '29354995000170';
+      const { baseOrigin, businessId, businessCnpj } =
+        this.resolveAlloyalCredentials('createUser');
 
       if (!clientEmployeeEmail || !clientEmployeeToken) {
         this.logger.error(
@@ -868,9 +927,7 @@ export class AlloyalApiService {
         );
       }
 
-      const baseOrigin = new URL(
-        process.env.BASE_URL_ALLOYAL || 'https://api.lecupon.com',
-      ).origin;
+      const apiBaseOrigin = this.getAlloyalBaseUrlOrigin(baseOrigin);
 
       const body = {
         name: dto.name,
@@ -881,16 +938,16 @@ export class AlloyalApiService {
       };
 
       this.logger.log(
-        `[createUser] Enviando para Alloyal: ${JSON.stringify(body)}`,
+        `${baseTag(baseOrigin)} [createUser] Enviando para Alloyal com businessId=${businessId} e businessCnpj=${businessCnpj}: ${JSON.stringify(body)}`,
       );
 
       const response = await axios.post(
-        `${baseOrigin}/client/v2/businesses/${cnpj}/users`,
+        `${apiBaseOrigin}/client/v2/businesses/${businessCnpj}/users`,
         body,
         {
           headers: {
             'Content-Type': 'application/json',
-            'Tentant-id': cnpj,
+            'Tentant-id': businessCnpj,
             'X-ClientEmployee-Email': clientEmployeeEmail,
             'X-ClientEmployee-Token': clientEmployeeToken,
           },
@@ -921,7 +978,8 @@ export class AlloyalApiService {
     try {
       const clientEmployeeEmail = process.env.x_clientemployee_email;
       const clientEmployeeToken = process.env.x_clientemployee_token;
-      const cnpj = process.env.ALLOYAL_BUSINESS_CNPJ || '29354995000170';
+      const { baseOrigin, businessId, businessCnpj } =
+        this.resolveAlloyalCredentials('updateUser');
 
       if (!clientEmployeeEmail || !clientEmployeeToken) {
         this.logger.error(
@@ -932,16 +990,18 @@ export class AlloyalApiService {
         );
       }
 
-      const baseOrigin = new URL(
-        process.env.BASE_URL_ALLOYAL || 'https://api.lecupon.com',
-      ).origin;
+      const apiBaseOrigin = this.getAlloyalBaseUrlOrigin(baseOrigin);
+
+      this.logger.log(
+        `${baseTag(baseOrigin)} Updating Alloyal user ${userId} with businessId=${businessId} and businessCnpj=${businessCnpj}`,
+      );
 
       const response = await axios.patch(
-        `${baseOrigin}/client/v2/businesses/${cnpj}/users/${userId}`,
+        `${apiBaseOrigin}/client/v2/businesses/${businessCnpj}/users/${userId}`,
         dto,
         {
           headers: {
-            'Tentant-id': cnpj,
+            'Tentant-id': businessCnpj,
             'X-ClientEmployee-Email': clientEmployeeEmail,
             'X-ClientEmployee-Token': clientEmployeeToken,
           },

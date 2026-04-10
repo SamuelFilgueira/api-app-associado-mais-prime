@@ -74,12 +74,6 @@ export class AuthService {
       );
     }
 
-    // const token = this.tokenResolverService.resolveSgaToken(
-    //   dbUser.baseOrigin,
-    // );
-    
-    // console.log("Token resolvido para login:", token); // Log do token resolvido
-
     const payload = {
       sub: dbUser.id,
       cpf: dbUser.cpf,

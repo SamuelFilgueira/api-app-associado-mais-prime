@@ -86,32 +86,40 @@ export class RastreamentoController {
     return this.rastreamentoService.renovarTokenM7();
   }
 
+  @UseGuards(JwtAuthGuard)
   @Post('ultima-posicao')
   async ultimaPosicaoM7(@Body() body: { cnpj: string; chassi: string }) {
+    const ctx = this.buildRastreamentoContext();
     this.logger.log(
       `Body recebido para ultimaPosicao: ${JSON.stringify(body)}`,
     );
-    return this.rastreamentoService.ultimaPosicaoM7(body.cnpj, body.chassi);
+    return this.rastreamentoService.ultimaPosicaoM7(body.cnpj, body.chassi, ctx.baseOrigin);
   }
 
+  @UseGuards(JwtAuthGuard)
   @Post('ancora-m7')
   async ancoraM7(
     @Body() body: { cnpj: string; chassi: string; ancora_ativa: boolean },
   ) {
+    const ctx = this.buildRastreamentoContext();
     return this.rastreamentoService.ancoraM7(
       body.cnpj,
       body.chassi,
       body.ancora_ativa,
+      ctx.baseOrigin,
     );
   }
 
+  @UseGuards(JwtAuthGuard)
   @Post('ignicao-m7')
   ignicaoM7(@Body() body: { cnpj: string; chassi: string; evt_ign: boolean }) {
+    const ctx = this.buildRastreamentoContext();
     this.logger.debug(`Body recebido para ignicaoM7: ${JSON.stringify(body)}`);
     return this.rastreamentoService.ignicaoM7(
       body.cnpj,
       body.chassi,
       body.evt_ign,
+      ctx.baseOrigin,
     );
   }
 

@@ -7,14 +7,28 @@ import {
 } from '@nestjs/common';
 import axios from 'axios';
 import { PrismaService } from '../prisma.service';
-import { TokenResolverService } from 'src/shared/token-resolver.service';
+import { BaseOrigin } from 'src/shared/token-resolver.service';
+import { SgaAuthService } from 'src/shared/sga-auth.service';
 import { baseTag } from 'src/shared/log.util';
+
+type SgaVeiculo = {
+  chassi?: string;
+  placa?: string;
+  codigo_veiculo?: string | number;
+};
+
+type SgaAssociadoResponse = {
+  veiculos?: SgaVeiculo[];
+};
 
 @Injectable()
 export class SgaService {
   private readonly logger = new Logger(SgaService.name);
 
-  constructor(private prisma: PrismaService, private tokenResolver: TokenResolverService) {}
+  constructor(
+    private prisma: PrismaService,
+    private sgaAuthService: SgaAuthService,
+  ) {}
 
   /**
    * Busca o CPF limpo (somente dígitos) de um usuário pelo ID
@@ -34,21 +48,24 @@ export class SgaService {
     const url = `https://api.hinova.com.br/api/sga/v2/associado/buscar/${cpf}`;
 
     // resolve baseOrigin from DB if possible
-    let baseOrigin: 'MAIS_PRIME' | 'MAIS_PRIME_RS' = 'MAIS_PRIME';
+    let baseOrigin: BaseOrigin = 'MAIS_PRIME';
     try {
       const user = await this.prisma.user.findFirst({ where: { cpf } });
-      if (user?.baseOrigin) baseOrigin = user.baseOrigin as any;
-    } catch (err) {
-      this.logger.warn(`Falha ao resolver baseOrigin por cpf=${cpf}: ${err?.message}`);
+      if (user?.baseOrigin) baseOrigin = user.baseOrigin as BaseOrigin;
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'erro desconhecido';
+      this.logger.warn(
+        `Falha ao resolver baseOrigin por cpf=${cpf}: ${message}`,
+      );
     }
 
-    const token = this.tokenResolver.resolveSgaToken(baseOrigin);
-    this.logger.log(`${baseTag(baseOrigin)} usando ${this.tokenResolver.getTokenKey(baseOrigin, 'sga')} para consultar associado`);
+    this.logger.log(
+      `${baseTag(baseOrigin)} consultando associado com autenticação dinâmica`,
+    );
 
-    return axios.get(url, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
+    return this.sgaAuthService.executeRequestWithAuth(baseOrigin, {
+      method: 'GET',
+      url,
       validateStatus: () => true,
     });
   }
@@ -57,24 +74,29 @@ export class SgaService {
     const url = `https://api.hinova.com.br/api/sga/v2/veiculo/buscar/${chassi}`;
 
     // try to determine baseOrigin from vehicle owner
-    let baseOrigin: 'MAIS_PRIME' | 'MAIS_PRIME_RS' = 'MAIS_PRIME';
+    let baseOrigin: BaseOrigin = 'MAIS_PRIME';
     try {
       const userVehicle = await this.prisma.userVehicle.findFirst({
         where: { chassi },
         select: { user: { select: { baseOrigin: true } } },
       });
-      if (userVehicle?.user?.baseOrigin) baseOrigin = userVehicle.user.baseOrigin as any;
-    } catch (err) {
-      this.logger.warn(`Falha ao resolver baseOrigin por chassi=${chassi}: ${err?.message}`);
+      if (userVehicle?.user?.baseOrigin) {
+        baseOrigin = userVehicle.user.baseOrigin as BaseOrigin;
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'erro desconhecido';
+      this.logger.warn(
+        `Falha ao resolver baseOrigin por chassi=${chassi}: ${message}`,
+      );
     }
 
-    const token = this.tokenResolver.resolveSgaToken(baseOrigin);
-    this.logger.log(`${baseTag(baseOrigin)} usando ${this.tokenResolver.getTokenKey(baseOrigin, 'sga')} para consultar veículo`);
+    this.logger.log(
+      `${baseTag(baseOrigin)} consultando veículo com autenticação dinâmica`,
+    );
 
-    return axios.get(url, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
+    return this.sgaAuthService.executeRequestWithAuth(baseOrigin, {
+      method: 'GET',
+      url,
       validateStatus: () => true,
     });
   }
@@ -95,8 +117,8 @@ export class SgaService {
         );
       }
       return response.data;
-    } catch (error) {
-      if (error.response && error.response.data) {
+    } catch (error: unknown) {
+      if (axios.isAxiosError(error) && error.response?.data) {
         return error.response.data;
       }
       throw new InternalServerErrorException('Erro ao consultar SGA');
@@ -117,9 +139,8 @@ export class SgaService {
       }
 
       // Persistência local dos veículos
-      const veiculos = Array.isArray(response.data?.veiculos)
-        ? response.data.veiculos
-        : [];
+      const data = response.data as SgaAssociadoResponse | null | undefined;
+      const veiculos = Array.isArray(data?.veiculos) ? data.veiculos : [];
       const now = new Date();
       const upsertedChassis = new Set<string>();
 
@@ -170,8 +191,8 @@ export class SgaService {
 
       // Retorna apenas o array de veículos (mantém resposta para frontend)
       return veiculos;
-    } catch (error) {
-      if (error.response && error.response.data) {
+    } catch (error: unknown) {
+      if (axios.isAxiosError(error) && error.response?.data) {
         return error.response.data;
       }
       throw new InternalServerErrorException(
@@ -212,8 +233,8 @@ export class SgaService {
         categoria: veiculo?.categoria ?? null,
         nome: veiculo?.nome ?? null,
       }));
-    } catch (error) {
-      if (error.response && error.response.data) {
+    } catch (error: unknown) {
+      if (axios.isAxiosError(error) && error.response?.data) {
         return error.response.data;
       }
       throw new InternalServerErrorException(

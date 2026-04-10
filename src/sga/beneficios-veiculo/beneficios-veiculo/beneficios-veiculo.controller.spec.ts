@@ -12,7 +12,7 @@ describe('BeneficiosVeiculoController', () => {
       providers: [
         {
           provide: BaseContextService,
-          useValue: { getSgaToken: jest.fn() },
+          useValue: { getBaseOrigin: jest.fn() },
         },
         {
           provide: BeneficiosVeiculoService,

@@ -2,11 +2,21 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import axios from 'axios';
 import { PrismaService } from '../prisma.service';
 
+type ClubgasPostosResponse = {
+  result: unknown[];
+};
+
 @Injectable()
 export class PostosService {
   private readonly logger = new Logger(PostosService.name);
 
   constructor(private prisma: PrismaService) {}
+
+  private maskSecret(value?: string): string {
+    if (!value) return '(vazio)';
+    if (value.length <= 8) return '***';
+    return `${value.slice(0, 4)}...${value.slice(-4)}`;
+  }
 
   async buscarPostos(
     latitude: number,
@@ -14,6 +24,9 @@ export class PostosService {
     userId: number,
     chassi: string,
     page: number = 1,
+    clubgasToken: string,
+    baseOrigin?: string,
+    clubgasTokenKey?: string,
   ) {
     const vehicle = await this.prisma.userVehicle.findFirst({
       where: {
@@ -31,21 +44,25 @@ export class PostosService {
     const url = `https://clubgas-api.azurewebsites.net/api/v1/Posto/obter-map-app?Latitude=${latitude}&Longitude=${longitude}&Placa=${vehicle.plate}`;
     this.logger.log(`URL chamada para API de postos: ${url}`);
     this.logger.log(
-      `TOKEN_API_CLUBGAS definido: ${!!process.env.TOKEN_API_CLUBGAS}`,
+      `[${baseOrigin ?? 'DESCONHECIDA'}] ClubGas postos usando tokenKey=${clubgasTokenKey ?? '(não informado)'} token=${this.maskSecret(clubgasToken)}`,
     );
 
-    let data: any;
+    let data: ClubgasPostosResponse;
     try {
       const response = await axios.get(url, {
         headers: {
-          Authorization: `Bearer ${process.env.TOKEN_API_CLUBGAS}`,
+          Authorization: `Bearer ${clubgasToken}`,
         },
       });
       data = response.data;
-    } catch (error) {
+    } catch (error: unknown) {
+      const axiosError = error as {
+        message?: string;
+        response?: { data?: unknown };
+      };
       this.logger.error(
-        `Erro ao chamar API de postos: ${error?.message}`,
-        error?.response?.data,
+        `Erro ao chamar API de postos: ${axiosError.message ?? 'erro desconhecido'}`,
+        axiosError.response?.data,
       );
       throw error;
     }

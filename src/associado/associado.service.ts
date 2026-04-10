@@ -8,12 +8,12 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import axios from 'axios';
 import { AuthService } from 'src/auth/auth.service';
 import { FileUploadService } from 'src/common/services/file-upload.service';
 import { PrismaService } from 'src/prisma.service';
 import { UpdateAssociadoDto } from './DTOs/update-associado.dto';
-import { TokenResolverService, BaseOrigin } from 'src/shared/token-resolver.service';
+import { BaseOrigin } from 'src/shared/token-resolver.service';
+import { SgaAuthService } from 'src/shared/sga-auth.service';
 import { baseTag } from 'src/shared/log.util';
 
 @Injectable()
@@ -24,7 +24,7 @@ export class AssociadoService {
     private readonly prisma: PrismaService,
     private readonly authService: AuthService,
     private readonly fileUploadService: FileUploadService,
-    private readonly tokenResolver: TokenResolverService,
+    private readonly sgaAuthService: SgaAuthService,
   ) {}
 
   /**
@@ -77,20 +77,18 @@ export class AssociadoService {
 
     const baseOrigin = await this.detectBaseOrigin(cpf);
     this.logger.log(`${baseTag(baseOrigin)} Base origin detected for CPF ${cpf}`);
-    const sgaToken = this.tokenResolver.resolveSgaToken(baseOrigin);
 
     const url = `https://api.hinova.com.br/api/sga/v2/associado/buscar/${cpf}`;
 
     let response;
     try {
-      response = await axios.get(url, {
-        headers: {
-          Authorization: `Bearer ${sgaToken}`,
-        },
+      response = await this.sgaAuthService.executeRequestWithAuth(baseOrigin, {
+        method: 'GET',
+        url,
         validateStatus: () => true,
       });
 
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Erro ao consultar SGA: ${err?.message}`);
       throw new InternalServerErrorException('Erro ao consultar SGA');
     }
@@ -159,31 +157,37 @@ export class AssociadoService {
         this.logger.log(`Base origin found in DB for cpf ${cpf}: ${existing.baseOrigin}`);
         return existing.baseOrigin as BaseOrigin;
       }
-    } catch (err) {
-      this.logger.warn(`Falha ao buscar baseOrigin no banco para cpf ${cpf}: ${err?.message}`);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'erro desconhecido';
+      this.logger.warn(
+        `Falha ao buscar baseOrigin no banco para cpf ${cpf}: ${message}`,
+      );
       // continue to try external calls
     }
 
     // Try sequentially to avoid duplicate calls
     try {
-      const tokenMaisPrime = this.tokenResolver.resolveSgaToken('MAIS_PRIME');
-      const response = await axios.get(url, {
-        headers: { Authorization: `Bearer ${tokenMaisPrime}` },
+      const response = await this.sgaAuthService.executeRequestWithAuth('MAIS_PRIME', {
+        method: 'GET',
+        url,
         validateStatus: () => true,
         timeout: 10000,
       });
       if (response.status === 200) return 'MAIS_PRIME';
 
-      const tokenMaisPrimeRs = this.tokenResolver.resolveSgaToken('MAIS_PRIME_RS');
-      const responseRS = await axios.get(url, {
-        headers: { Authorization: `Bearer ${tokenMaisPrimeRs}` },
+      const responseRS = await this.sgaAuthService.executeRequestWithAuth('MAIS_PRIME_RS', {
+        method: 'GET',
+        url,
         validateStatus: () => true,
         timeout: 10000,
       });
       if (responseRS.status === 200) return 'MAIS_PRIME_RS';
 
       throw new NotFoundException('Usuário não encontrado em nenhuma base');
-    } catch (error) {
+    } catch (error: any) {
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
       this.logger.error(`Erro ao detectar base: ${error?.message}`);
       throw new InternalServerErrorException('Erro ao consultar API SGA');
     }
@@ -197,17 +201,17 @@ export class AssociadoService {
     }
 
     const baseOrigin = await this.detectBaseOrigin(cpf);
-    const sgaToken = this.tokenResolver.resolveSgaToken(baseOrigin);
     const url = `https://api.hinova.com.br/api/sga/v2/buscar/situacao-associado/${cpf}`;
 
     let response;
     try {
-      response = await axios.get(url, {
-        headers: { Authorization: `Bearer ${sgaToken}` },
+      response = await this.sgaAuthService.executeRequestWithAuth(baseOrigin, {
+        method: 'GET',
+        url,
         validateStatus: () => true,
       });
       this.logger.log(`Resposta da API SGA para verificar situação: status=${response.status}`);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Erro ao consultar SGA para verificar situação: ${err?.message}`);
       throw new InternalServerErrorException('Erro ao consultar SGA');
     }

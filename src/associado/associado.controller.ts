@@ -57,10 +57,13 @@ export class AssociadoController {
     this.logger.log(`Buscando veículos do associado pelo CPF: ${cpf}`);
     // Exemplo de uso de BaseContextService em rota autenticada
     try {
-      const sgaToken = this.baseContextService.getSgaToken();
-      this.logger.log(`SGA token disponível para request autenticada (hash): ${sgaToken?.slice?.(0, 8) ?? 'n/a'}`);
-    } catch (err) {
-      this.logger.error(`Erro ao obter token via BaseContextService: ${err?.message}`);
+      const baseOrigin = this.baseContextService.getBaseOrigin();
+      this.logger.log(`Base origin da request autenticada: ${baseOrigin}`);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'erro desconhecido';
+      this.logger.error(
+        `Erro ao obter token via BaseContextService: ${message}`,
+      );
     }
     return this.associadoService.findVehiclesByCpf(cpf);
   }

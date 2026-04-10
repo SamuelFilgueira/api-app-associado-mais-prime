@@ -5,6 +5,8 @@ import {
   Logger,
 } from '@nestjs/common';
 import axios from 'axios';
+import { SgaAuthService } from 'src/shared/sga-auth.service';
+import { BaseOrigin } from 'src/shared/token-resolver.service';
 
 export interface Produto {
   codigo_produto: string;
@@ -37,8 +39,10 @@ export interface BeneficiosResponse {
 export class BeneficiosVeiculoService {
   private readonly logger = new Logger(BeneficiosVeiculoService.name);
 
+  constructor(private readonly sgaAuthService: SgaAuthService) {}
+
   async getBeneficiosVeiculo(
-    sgaToken: string,
+    baseOrigin: BaseOrigin,
     codigoVeiculo: string,
   ): Promise<BeneficiosResponse> {
     const normalizedCodigoVeiculo = codigoVeiculo?.trim();
@@ -50,9 +54,10 @@ export class BeneficiosVeiculoService {
     const baseUrl = `https://api.hinova.com.br/api/sga/v2/produto-vinculado-veiculo/listar/${normalizedCodigoVeiculo}`;
 
     try {
-      const response = await axios.get<BeneficiosResponse>(baseUrl, {
+      const response = await this.sgaAuthService.executeRequestWithAuth<BeneficiosResponse>(baseOrigin, {
+        method: 'GET',
+        url: baseUrl,
         headers: {
-          Authorization: `Bearer ${sgaToken}`,
           'Content-Type': 'application/json',
         },
         validateStatus: () => true,

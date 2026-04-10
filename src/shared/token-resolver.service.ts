@@ -4,26 +4,56 @@ import { baseTag } from './log.util';
 export type BaseOrigin = 'MAIS_PRIME' | 'MAIS_PRIME_RS';
 
 type TokenNames = {
-  sga: string;
+  sgaUser: string;
+  sgaPassword: string;
+  sgaBaseToken: string;
   logica: string;
   softruck: string;
   softruckPublicKey: string;
+  clubgas: string;
+  m7Token: string;
+  m7Codigo: string;
+  apiSecretAlloyal: string;
+  alloyalBusinessId: string;
+  alloyalBusinessCnpj: string;
 };
 
 const TOKEN_MAP: Record<BaseOrigin, TokenNames> = {
   MAIS_PRIME: {
-    sga: 'SGA_TOKEN',
+    sgaUser: 'USER_SGA_MAIS_PRIME',
+    sgaPassword: 'PASSWORD_SGA_MAIS_PRIME',
+    sgaBaseToken: 'TOKEN_BASE_SGA_MAIS_PRIME',
     logica: 'LOGICA_TOKEN',
     softruck: 'SOFTRUCK_TOKEN',
     softruckPublicKey: 'PUBLIC_KEY_SOFTRUCK',
+    clubgas: 'TOKEN_API_CLUBGAS',
+    m7Token: 'MO7_TOKEN',
+    m7Codigo: 'M07_CODIGO',
+    apiSecretAlloyal: 'API_SECRET_ALLOYAL',
+    alloyalBusinessId: 'ALLOYAL_BUSINESS_ID',
+    alloyalBusinessCnpj: 'ALLOYAL_BUSINESS_CNPJ',
   },
   MAIS_PRIME_RS: {
-    sga: 'SGA_TOKEN_RS',
+    sgaUser: 'USER_SGA_MAIS_PRIME_RS',
+    sgaPassword: 'PASSWORD_SGA_MAIS_PRIME_RS',
+    sgaBaseToken: 'TOKEN_BASE_SGA_MAIS_PRIME_RS',
     logica: 'LOGICA_TOKEN_RS',
     softruck: 'SOFTRUCK_TOKEN_RS',
     softruckPublicKey: 'PUBLIC_KEY_SOFTRUCK_RS',
+    clubgas: 'TOKEN_API_CLUBGAS_RS',
+    m7Token: 'MO7_TOKEN_RS',
+    m7Codigo: 'M07_CODIGO_RS',
+    apiSecretAlloyal: 'API_SECRET_ALLOYAL_RS',
+    alloyalBusinessId: 'ALLOYAL_BUSINESS_ID_RS',
+    alloyalBusinessCnpj: 'ALLOYAL_BUSINESS_CNPJ_RS',
   },
 };
+
+export interface SgaAuthCredentials {
+  user: string;
+  password: string;
+  baseToken: string;
+}
 
 @Injectable()
 export class TokenResolverService {
@@ -40,9 +70,27 @@ export class TokenResolverService {
     return val;
   }
 
-  resolveSgaToken(baseOrigin: BaseOrigin): string {
-    const name = TOKEN_MAP[baseOrigin].sga;
+  resolveSgaUser(baseOrigin: BaseOrigin): string {
+    const name = TOKEN_MAP[baseOrigin].sgaUser;
     return this.resolveEnv(name, baseOrigin);
+  }
+
+  resolveSgaPassword(baseOrigin: BaseOrigin): string {
+    const name = TOKEN_MAP[baseOrigin].sgaPassword;
+    return this.resolveEnv(name, baseOrigin);
+  }
+
+  resolveSgaBaseToken(baseOrigin: BaseOrigin): string {
+    const name = TOKEN_MAP[baseOrigin].sgaBaseToken;
+    return this.resolveEnv(name, baseOrigin);
+  }
+
+  resolveSgaAuthCredentials(baseOrigin: BaseOrigin): SgaAuthCredentials {
+    return {
+      user: this.resolveSgaUser(baseOrigin),
+      password: this.resolveSgaPassword(baseOrigin),
+      baseToken: this.resolveSgaBaseToken(baseOrigin),
+    };
   }
 
   resolveLogicaToken(baseOrigin: BaseOrigin): string {
@@ -60,7 +108,52 @@ export class TokenResolverService {
     return this.resolveEnv(name, baseOrigin);
   }
 
-  getTokenKey(baseOrigin: BaseOrigin, kind: 'sga' | 'logica' | 'softruck' | 'softruckPublicKey'): string {
+  resolveClubgasToken(baseOrigin: BaseOrigin): string {
+    const name = TOKEN_MAP[baseOrigin].clubgas;
+    return this.resolveEnv(name, baseOrigin);
+  }
+
+  resolveM7Token(baseOrigin: BaseOrigin): string {
+    const name = TOKEN_MAP[baseOrigin].m7Token;
+    return this.resolveEnv(name, baseOrigin);
+  }
+
+  resolveM7Codigo(baseOrigin: BaseOrigin): string {
+    const name = TOKEN_MAP[baseOrigin].m7Codigo;
+    return this.resolveEnv(name, baseOrigin);
+  }
+
+  resolveApiSecretAlloyal(baseOrigin: BaseOrigin): string {
+    const name = TOKEN_MAP[baseOrigin].apiSecretAlloyal;
+    return this.resolveEnv(name, baseOrigin);
+  }
+
+  resolveAlloyalBusinessId(baseOrigin: BaseOrigin): string {
+    const name = TOKEN_MAP[baseOrigin].alloyalBusinessId;
+    return this.resolveEnv(name, baseOrigin);
+  }
+
+  resolveAlloyalBusinessCnpj(baseOrigin: BaseOrigin): string {
+    const name = TOKEN_MAP[baseOrigin].alloyalBusinessCnpj;
+    return this.resolveEnv(name, baseOrigin);
+  }
+
+  getTokenKey(
+    baseOrigin: BaseOrigin,
+    kind:
+      | 'sgaUser'
+      | 'sgaPassword'
+      | 'sgaBaseToken'
+      | 'logica'
+      | 'softruck'
+      | 'softruckPublicKey'
+      | 'clubgas'
+      | 'm7Token'
+      | 'm7Codigo'
+      | 'apiSecretAlloyal'
+      | 'alloyalBusinessId'
+      | 'alloyalBusinessCnpj',
+  ): string {
     return TOKEN_MAP[baseOrigin][kind];
   }
 }

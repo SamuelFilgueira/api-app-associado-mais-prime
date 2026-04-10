@@ -18,6 +18,8 @@ import { CreateReinspectionDto } from './dto/create-reinspection.dto';
 import { AddPhotosDto } from './dto/add-photos.dto';
 import { UpsertTemplatePhotoDto } from './dto/upsert-template-photo.dto';
 import { MailService } from 'src/common/services/mail.service';
+import { BaseOrigin } from 'src/shared/token-resolver.service';
+import { SgaAuthService } from 'src/shared/sga-auth.service';
 
 @Injectable()
 export class ReinspectionService {
@@ -27,6 +29,7 @@ export class ReinspectionService {
     private readonly prisma: PrismaService,
     private readonly mailService: MailService,
     private readonly fileUploadService: FileUploadService,
+    private readonly sgaAuthService: SgaAuthService,
   ) {}
 
   async create(dto: CreateReinspectionDto, _userId: unknown) {
@@ -585,6 +588,15 @@ export class ReinspectionService {
       select: {
         id: true,
         codigoVeiculo: true,
+        userVehicle: {
+          select: {
+            user: {
+              select: {
+                baseOrigin: true,
+              },
+            },
+          },
+        },
         photos: {
           orderBy: { id: 'asc' },
           select: {
@@ -625,18 +637,26 @@ export class ReinspectionService {
     }
 
     const hinovaUrl = `https://api.hinova.com.br/api/sga/v2/veiculo/foto/cadastrar`;
+    const baseOrigin =
+      (reinspection.userVehicle?.user?.baseOrigin as BaseOrigin | null) ??
+      'MAIS_PRIME';
 
     this.logger.debug(
       `Enviando revistoria aprovada para Hinova | reinspectionId=${reinspection.id} | fotos=${payloadPhotos.length} | codigoVeiculo=${reinspection.codigoVeiculo ?? 'N/A'}`,
     );
 
-    const response = await axios.post(hinovaUrl, payload, {
-      headers: {
-        Authorization: `Bearer ${process.env.SGA_TOKEN}`,
-        'Content-Type': 'application/json',
+    const response = await this.sgaAuthService.executeRequestWithAuth(
+      baseOrigin,
+      {
+        method: 'POST',
+        url: hinovaUrl,
+        data: payload,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        validateStatus: () => true,
       },
-      validateStatus: () => true,
-    });
+    );
 
     this.logger.log(
       `Resposta da Hinova recebida | reinspectionId=${reinspection.id} | status=${response.status}`,

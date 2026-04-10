@@ -16,6 +16,7 @@ import {
   Logger,
   HttpException,
   HttpStatus,
+  UseGuards,
 } from '@nestjs/common';
 import { AlloyalApiService } from './alloyal-api.service';
 import { AlloyalCategoryDto } from './DTOs/alloyal-category.dto';
@@ -37,12 +38,14 @@ import {
   AlloyalLoginResponseDto,
 } from './DTOs/alloyal-login.dto';
 import { AlloyalSessionHeaders } from './alloyal-api.service';
+import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
 
 /**
  * Controller responsável por expor endpoints da API Alloyal de benefícios
  * Gerencia categorias, organizações, filiais e cupons de desconto
  */
 @Controller('alloyal')
+@UseGuards(JwtAuthGuard)
 export class AlloyalApiController {
   private readonly logger = new Logger(AlloyalApiController.name);
   constructor(private readonly alloyalApiService: AlloyalApiService) {}
