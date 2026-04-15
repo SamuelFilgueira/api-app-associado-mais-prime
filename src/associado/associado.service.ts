@@ -171,7 +171,7 @@ export class AssociadoService {
         method: 'GET',
         url,
         validateStatus: () => true,
-        timeout: 10000,
+        timeout: 20000,
       });
       if (response.status === 200) return 'MAIS_PRIME';
 
@@ -179,7 +179,7 @@ export class AssociadoService {
         method: 'GET',
         url,
         validateStatus: () => true,
-        timeout: 10000,
+        timeout: 20000,
       });
       if (responseRS.status === 200) return 'MAIS_PRIME_RS';
 

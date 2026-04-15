@@ -37,7 +37,6 @@ interface RastreamentoBaseContext {
   logicaToken: string;
   logicaTokenKey: string;
   softruckPublicKey: string;
-  softruckPublicKeyKey: string;
 }
 
 @Injectable()
@@ -170,9 +169,13 @@ export class RastreamentoService {
     try {
       const baseContext =
         requestContext ?? (await this.resolveBaseContextFromDb(chassi));
+      const softruckPublicKeyKey = this.tokenResolver.getTokenKey(
+        baseContext.baseOrigin,
+        'softruckPublicKey',
+      );
 
       this.logger.log(
-        `${baseTag(baseContext.baseOrigin)} usando publicKey ${baseContext.softruckPublicKeyKey} para consulta Softruck (token via autenticação dinâmica)`,
+        `${baseTag(baseContext.baseOrigin)} usando publicKey ${softruckPublicKeyKey} para consulta Softruck (token via autenticação dinâmica)`,
       );
 
       const softruck = await this.ultimaPosicaoSoftruck(
@@ -493,10 +496,6 @@ export class RastreamentoService {
       logicaToken: this.tokenResolver.resolveLogicaToken(baseOrigin),
       logicaTokenKey: this.tokenResolver.getTokenKey(baseOrigin, 'logica'),
       softruckPublicKey: this.tokenResolver.resolveSoftruckPublicKey(baseOrigin),
-      softruckPublicKeyKey: this.tokenResolver.getTokenKey(
-        baseOrigin,
-        'softruckPublicKey',
-      ),
     };
   }
 

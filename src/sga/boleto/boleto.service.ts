@@ -49,10 +49,9 @@ export class BoletoService {
     const baseOrigin = await this.resolveBaseOriginByCodigoVeiculo(codigo_veiculo);
     const now = new Date();
     const dataInicial = new Date(now);
-    dataInicial.setDate(now.getDate() - 90);
+    dataInicial.setDate(now.getDate() - 45);
     const dataFinal = new Date(now);
-    dataFinal.setDate(dataFinal.getDate() + 30);
-    dataFinal.setDate(now.getDate());
+    dataFinal.setDate(dataFinal.getDate() + 45);
     const dataInicialStr = formatDateBR(dataInicial);
     const dataFinalStr = formatDateBR(dataFinal);
     const body = {
@@ -61,6 +60,7 @@ export class BoletoService {
       data_vencimento_original_inicial: dataInicialStr,
       data_vencimento_original_final: dataFinalStr,
     };
+
     try {
       const response = await this.sgaAuthService.executeRequestWithAuth<any>(
         baseOrigin,

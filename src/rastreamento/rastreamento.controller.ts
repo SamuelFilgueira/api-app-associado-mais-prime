@@ -24,7 +24,6 @@ interface RastreamentoRequestContext {
   logicaToken: string;
   logicaTokenKey: string;
   softruckPublicKey: string;
-  softruckPublicKeyKey: string;
 }
 
 @Controller('rastreamento')
@@ -47,10 +46,6 @@ export class RastreamentoController {
   private buildRastreamentoContext(): RastreamentoRequestContext {
     const baseOrigin = this.baseContextService.getBaseOrigin();
     const logicaTokenKey = this.tokenResolver.getTokenKey(baseOrigin, 'logica');
-    const softruckPublicKeyKey = this.tokenResolver.getTokenKey(
-      baseOrigin,
-      'softruckPublicKey',
-    );
 
     return {
       baseOrigin,
@@ -58,7 +53,6 @@ export class RastreamentoController {
       logicaTokenKey,
       softruckPublicKey:
         this.tokenResolver.resolveSoftruckPublicKey(baseOrigin),
-      softruckPublicKeyKey,
     };
   }
 
@@ -67,9 +61,13 @@ export class RastreamentoController {
   @Post()
   rastreamento(@Body() body: { cnpj: string; chassi: string }) {
     const ctx = this.buildRastreamentoContext();
+    const softruckPublicKeyKey = this.tokenResolver.getTokenKey(
+      ctx.baseOrigin,
+      'softruckPublicKey',
+    );
 
     this.logger.log(
-      `[${ctx.baseOrigin}] rastreamento chassi=${body.chassi} tokenKey=${ctx.logicaTokenKey} token=${this.maskSecret(ctx.logicaToken)} apiKey=${ctx.softruckPublicKeyKey} apiKeyValue=${this.maskSecret(ctx.softruckPublicKey)}`,
+      `[${ctx.baseOrigin}] rastreamento chassi=${body.chassi} tokenKey=${ctx.logicaTokenKey} token=${this.maskSecret(ctx.logicaToken)} apiKey=${softruckPublicKeyKey} apiKeyValue=${this.maskSecret(ctx.softruckPublicKey)}`,
     );
 
     return this.rastreamentoService.rastreamento(body.cnpj, body.chassi, {
@@ -77,7 +75,6 @@ export class RastreamentoController {
       logicaToken: ctx.logicaToken,
       logicaTokenKey: ctx.logicaTokenKey,
       softruckPublicKey: ctx.softruckPublicKey,
-      softruckPublicKeyKey: ctx.softruckPublicKeyKey,
     });
   }
 
@@ -93,7 +90,11 @@ export class RastreamentoController {
     this.logger.log(
       `Body recebido para ultimaPosicao: ${JSON.stringify(body)}`,
     );
-    return this.rastreamentoService.ultimaPosicaoM7(body.cnpj, body.chassi, ctx.baseOrigin);
+    return this.rastreamentoService.ultimaPosicaoM7(
+      body.cnpj,
+      body.chassi,
+      ctx.baseOrigin,
+    );
   }
 
   @UseGuards(JwtAuthGuard)
@@ -160,9 +161,13 @@ export class RastreamentoController {
   @Post('ultima-posicao-softruck')
   async ultimaPosicaoSoftruck(@Body() body: { chassi: string }) {
     const ctx = this.buildRastreamentoContext();
+    const softruckPublicKeyKey = this.tokenResolver.getTokenKey(
+      ctx.baseOrigin,
+      'softruckPublicKey',
+    );
 
     this.logger.log(
-      `[${ctx.baseOrigin}] ultima-posicao-softruck chassi=${body.chassi} apiKey=${ctx.softruckPublicKeyKey} apiKeyValue=${this.maskSecret(ctx.softruckPublicKey)} token=dinamico-via-auth`,
+      `[${ctx.baseOrigin}] ultima-posicao-softruck chassi=${body.chassi} apiKey=${softruckPublicKeyKey} apiKeyValue=${this.maskSecret(ctx.softruckPublicKey)} token=dinamico-via-auth`,
     );
 
     return this.rastreamentoService.ultimaPosicaoSoftruck(

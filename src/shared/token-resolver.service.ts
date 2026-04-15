@@ -9,6 +9,8 @@ type TokenNames = {
   sgaBaseToken: string;
   logica: string;
   softruck: string;
+  softruckUsername: string;
+  softruckPassword: string;
   softruckPublicKey: string;
   clubgas: string;
   m7Token: string;
@@ -25,6 +27,8 @@ const TOKEN_MAP: Record<BaseOrigin, TokenNames> = {
     sgaBaseToken: 'TOKEN_BASE_SGA_MAIS_PRIME',
     logica: 'LOGICA_TOKEN',
     softruck: 'SOFTRUCK_TOKEN',
+    softruckUsername: 'USERNAME_SOFTRUCK',
+    softruckPassword: 'PASSWORD_SOFTRUCK',
     softruckPublicKey: 'PUBLIC_KEY_SOFTRUCK',
     clubgas: 'TOKEN_API_CLUBGAS',
     m7Token: 'MO7_TOKEN',
@@ -39,6 +43,8 @@ const TOKEN_MAP: Record<BaseOrigin, TokenNames> = {
     sgaBaseToken: 'TOKEN_BASE_SGA_MAIS_PRIME_RS',
     logica: 'LOGICA_TOKEN_RS',
     softruck: 'SOFTRUCK_TOKEN_RS',
+    softruckUsername: 'USERNAME_SOFTRUCK_RS',
+    softruckPassword: 'PASSWORD_SOFTRUCK_RS',
     softruckPublicKey: 'PUBLIC_KEY_SOFTRUCK_RS',
     clubgas: 'TOKEN_API_CLUBGAS_RS',
     m7Token: 'MO7_TOKEN_RS',
@@ -103,6 +109,16 @@ export class TokenResolverService {
     return this.resolveEnv(name, baseOrigin);
   }
 
+  resolveSoftruckUsername(baseOrigin: BaseOrigin): string {
+    const name = TOKEN_MAP[baseOrigin].softruckUsername;
+    return this.resolveEnv(name, baseOrigin);
+  }
+
+  resolveSoftruckPassword(baseOrigin: BaseOrigin): string {
+    const name = TOKEN_MAP[baseOrigin].softruckPassword;
+    return this.resolveEnv(name, baseOrigin);
+  }
+
   resolveSoftruckPublicKey(baseOrigin: BaseOrigin): string {
     const name = TOKEN_MAP[baseOrigin].softruckPublicKey;
     return this.resolveEnv(name, baseOrigin);
@@ -146,6 +162,8 @@ export class TokenResolverService {
       | 'sgaBaseToken'
       | 'logica'
       | 'softruck'
+      | 'softruckUsername'
+      | 'softruckPassword'
       | 'softruckPublicKey'
       | 'clubgas'
       | 'm7Token'

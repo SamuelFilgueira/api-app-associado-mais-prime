@@ -66,6 +66,20 @@ export class BaseContextService {
     return token;
   }
 
+  getSoftruckUsername(): string {
+    const base = this.getBaseOrigin();
+    const username = this.tokenResolver.resolveSoftruckUsername(base);
+    this.logger.log(`${baseTag(base)} SOFTRUCK username resolved`);
+    return username;
+  }
+
+  getSoftruckPassword(): string {
+    const base = this.getBaseOrigin();
+    const password = this.tokenResolver.resolveSoftruckPassword(base);
+    this.logger.log(`${baseTag(base)} SOFTRUCK password resolved`);
+    return password;
+  }
+
   getSoftruckPublicKey(): string {
     const base = this.getBaseOrigin();
     const key = this.tokenResolver.resolveSoftruckPublicKey(base);

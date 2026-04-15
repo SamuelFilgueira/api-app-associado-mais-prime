@@ -1,6 +1,9 @@
 import { InternalServerErrorException, Logger } from '@nestjs/common';
 import axios from 'axios';
-import { BaseOrigin } from 'src/shared/token-resolver.service';
+import {
+  BaseOrigin,
+  TokenResolverService,
+} from 'src/shared/token-resolver.service';
 
 /** Timeout padrão para chamadas HTTP à API Softruck (em ms) */
 const SOFTRUCK_REQUEST_TIMEOUT = 15_000;
@@ -40,11 +43,12 @@ interface SoftruckVehicleResponse {
 
 interface SoftruckDeviceAssociationResponse {
   data: Array<{
+    id: string;
     relationships: {
-      devices: {
+      device: {
         id: string;
       };
-      vehicles: {
+      vehicle: {
         id: string;
       };
     };
@@ -59,7 +63,7 @@ interface SoftruckTrackingResponse {
       act: number;
       spd: number;
       geometry: {
-        coordinates: [number, number];
+        coordinates: [number | string, number | string];
       };
     };
   };
@@ -67,6 +71,7 @@ interface SoftruckTrackingResponse {
 
 export class RastreamentoSoftruck {
   private readonly logger = new Logger(RastreamentoSoftruck.name);
+  private readonly tokenResolver: TokenResolverService;
   private softruckTokenByBase = new Map<BaseOrigin, string>();
 
   /** Mutex por base para evitar logins simultâneos */
@@ -83,10 +88,18 @@ export class RastreamentoSoftruck {
     }>
   >();
 
-  /** Cache de device ID por vehicle ID */
-  private deviceCache = new Map<string, CacheEntry<string>>();
+  /** Cache de IDs de tracking por vehicle ID */
+  private deviceCache = new Map<
+    string,
+    CacheEntry<{
+      vehicleId: string;
+      deviceId: string;
+    }>
+  >();
 
-  constructor() {}
+  constructor(tokenResolver?: TokenResolverService) {
+    this.tokenResolver = tokenResolver ?? new TokenResolverService();
+  }
 
   private getCached<T>(
     cache: Map<string, CacheEntry<T>>,
@@ -197,15 +210,23 @@ export class RastreamentoSoftruck {
     baseOrigin: BaseOrigin,
     publicKey: string,
   ): Promise<void> {
-    const username = process.env.USERNAME_SOFTRUCK;
-    const password = process.env.PASSWORD_SOFTRUCK;
+    const usernameKey = this.tokenResolver.getTokenKey(
+      baseOrigin,
+      'softruckUsername',
+    );
+    const passwordKey = this.tokenResolver.getTokenKey(
+      baseOrigin,
+      'softruckPassword',
+    );
+    const username = process.env[usernameKey];
+    const password = process.env[passwordKey];
 
     if (!username || !password) {
       this.logger.error(
-        `Credenciais ausentes — USERNAME="${username ?? '(vazio)'}" PASSWORD="${password ? '***' : '(vazio)'}"`,
+        `[${baseOrigin}] Credenciais ausentes — ${usernameKey}="${username ?? '(vazio)'}" ${passwordKey}="${password ? '***' : '(vazio)'}"`,
       );
       throw new InternalServerErrorException(
-        'Credenciais USERNAME/PASSWORD da Softruck não configuradas',
+        `Credenciais ${usernameKey}/${passwordKey} da Softruck não configuradas`,
       );
     }
 
@@ -325,8 +346,8 @@ export class RastreamentoSoftruck {
 
       // STEP 3: Obter dados de rastreamento
       const trackingData = await this.obterDadosRastreamento(
-        vehicleData.id,
-        deviceId,
+        deviceId.vehicleId,
+        deviceId.deviceId,
         baseOrigin,
         publicKey,
         tokenOverride,
@@ -397,6 +418,10 @@ export class RastreamentoSoftruck {
         );
       }
 
+      this.logger.log(
+        `Vehicle encontrado para chassi ${chassi}: ${JSON.stringify(response.data.data[0])}`,
+      );
+
       const vehicleData = response.data.data[0];
       const vehicleId = vehicleData.id;
       const plate = vehicleData.attributes.plate;
@@ -425,7 +450,7 @@ export class RastreamentoSoftruck {
     baseOrigin: BaseOrigin,
     publicKey: string,
     tokenOverride?: string,
-  ): Promise<string> {
+  ): Promise<{ vehicleId: string; deviceId: string }> {
     // Verifica cache primeiro
     const cached = this.getCached(this.deviceCache, vehicleId);
     if (cached) {
@@ -463,12 +488,25 @@ export class RastreamentoSoftruck {
         );
       }
 
-      const deviceId = response.data.data[0].relationships.devices.id;
       this.logger.log(
-        `Device ID obtido: ${deviceId} para vehicle: ${vehicleId}`,
+        `Associação de dispositivo obtida para vehicle: ${vehicleId}: ${JSON.stringify(response.data.data[0])}`,
       );
-      this.setCache(this.deviceCache, vehicleId, deviceId);
-      return deviceId;
+
+      const trackingVehicleId = response.data.data[0].id;
+      const deviceId = response.data.data[0].relationships.device.id;
+
+      if (!trackingVehicleId || !deviceId) {
+        throw new InternalServerErrorException(
+          'IDs de associação/dispositivo inválidos na resposta da Softruck',
+        );
+      }
+
+      this.logger.log(
+        `IDs de tracking obtidos: trackingVehicleId=${trackingVehicleId} deviceId=${deviceId} para vehicle: ${vehicleId}`,
+      );
+      const result = { vehicleId: trackingVehicleId, deviceId };
+      this.setCache(this.deviceCache, vehicleId, result);
+      return result;
     } catch (error) {
       if (error instanceof InternalServerErrorException) {
         throw error;
@@ -547,7 +585,15 @@ export class RastreamentoSoftruck {
     const date = this.formatarData(attributes.act);
 
     // Extrair coordenadas [longitude, latitude]
-    const [longitude, latitude] = attributes.geometry.coordinates;
+    const [longitudeRaw, latitudeRaw] = attributes.geometry.coordinates;
+    const longitude = Number(longitudeRaw);
+    const latitude = Number(latitudeRaw);
+
+    if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) {
+      throw new InternalServerErrorException(
+        'Coordenadas inválidas retornadas pela Softruck',
+      );
+    }
 
     return {
       date,
