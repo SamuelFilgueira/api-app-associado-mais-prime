@@ -37,6 +37,7 @@ export class AuthService {
         primeiroLogin: true,
         role: true,
         expoPushToken: true,
+        baseOrigin: true,
       },
     });
   }
