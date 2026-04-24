@@ -13,6 +13,12 @@ enum UserRole {
   ADMIN
 }
 
+enum AdminPanelRole {
+  REVISTORIA
+  EVENTOS
+  MARKETING
+}
+
 model user {
   id               Int            @id @default(autoincrement())
   name             String
@@ -37,6 +43,18 @@ model user {
   updatedAt        DateTime
   notifications    Notification[]
   userVehicles     UserVehicle[]
+}
+
+model AdminPanelUser {
+  id        Int            @id @default(autoincrement())
+  name      String         @db.VarChar(150)
+  password  String         @db.VarChar(255)
+  email     String         @unique(map: "AdminPanelUser_email_key") @db.VarChar(150)
+  role      AdminPanelRole
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  @@index([role], map: "AdminPanelUser_role_idx")
 }
 
 // model BaseOrigin {

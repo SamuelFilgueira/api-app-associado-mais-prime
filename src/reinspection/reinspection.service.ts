@@ -10,6 +10,7 @@ import { promises as fs } from 'fs';
 import { join } from 'path';
 import {
   ReinspectionPhotoStatus,
+  ReinspectionStatus,
   ReinspectionVehicleType,
 } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
@@ -64,6 +65,29 @@ export class ReinspectionService {
       reinspectionId: reinspection.id,
       status: reinspection.status,
       createdAt: reinspection.createdAt,
+    };
+  }
+
+  async getDashboardTotals() {
+    const [aprovadas, emAnalise, reprovadas, totalRevistorias] =
+      await this.prisma.$transaction([
+        this.prisma.reinspection.count({
+          where: { status: ReinspectionStatus.APROVADA },
+        }),
+        this.prisma.reinspection.count({
+          where: { status: ReinspectionStatus.EM_ANALISE },
+        }),
+        this.prisma.reinspection.count({
+          where: { status: ReinspectionStatus.REPROVADA },
+        }),
+        this.prisma.reinspection.count(),
+      ]);
+
+    return {
+      aprovadas,
+      emAnalise,
+      reprovadas,
+      totalRevistorias,
     };
   }
 

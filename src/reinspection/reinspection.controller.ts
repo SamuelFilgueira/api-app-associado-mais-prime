@@ -24,6 +24,12 @@ import { AddPhotosDto } from './dto/add-photos.dto';
 import { UpsertTemplatePhotoDto } from './dto/upsert-template-photo.dto';
 import { ListReinspectionsDto } from './dto/list-reinspections.dto';
 import { ResendPhotoDto } from './dto/resend-photo.dto';
+import { AdminPanelRoleGuard } from '../admin-panel/admin-panel-role.guard';
+import { AdminPanelRoles } from '../admin-panel/admin-panel-roles.decorator';
+import {
+  AdminPanelRole,
+  ALL_ADMIN_PANEL_ROLES,
+} from '../admin-panel/admin-panel-role.enum';
 
 @UseGuards(JwtAuthGuard)
 @Controller('reinspection')
@@ -67,15 +73,27 @@ export class ReinspectionController {
    * Query param opcional: limit (padrão 20)
    */
   @Get()
+  @UseGuards(AdminPanelRoleGuard)
+  @AdminPanelRoles(AdminPanelRole.REVISTORIA)
   @HttpCode(HttpStatus.OK)
   listRecent(@Query() query: ListReinspectionsDto) {
     return this.reinspectionService.listRecent(query.limit);
   }
 
   @Get('all')
+  @UseGuards(AdminPanelRoleGuard)
+  @AdminPanelRoles(AdminPanelRole.REVISTORIA)
   @HttpCode(HttpStatus.OK)
   listAll() {
     return this.reinspectionService.listAll();
+  }
+
+  @Get('totals')
+  @UseGuards(AdminPanelRoleGuard)
+  @AdminPanelRoles(...ALL_ADMIN_PANEL_ROLES)
+  @HttpCode(HttpStatus.OK)
+  getDashboardTotals() {
+    return this.reinspectionService.getDashboardTotals();
   }
 
   /**
@@ -84,7 +102,8 @@ export class ReinspectionController {
    * Body (multipart/form-data): vehicleType, ordem, photo (arquivo)
    */
   @Patch('template')
-  @UseGuards(AdminRoleGuard)
+  @UseGuards(AdminRoleGuard, AdminPanelRoleGuard)
+  @AdminPanelRoles(AdminPanelRole.REVISTORIA)
   @HttpCode(HttpStatus.OK)
   @UseInterceptors(FileInterceptor('photo'))
   async upsertTemplatePhoto(
@@ -99,6 +118,8 @@ export class ReinspectionController {
    * Query param opcional: vehicleType (VEICULOS_LEVES | MOTOS | CAMINHOES)
    */
   @Get('template')
+  @UseGuards(AdminPanelRoleGuard)
+  @AdminPanelRoles(AdminPanelRole.REVISTORIA)
   @HttpCode(HttpStatus.OK)
   getTemplatePhotos(@Query('vehicleType') vehicleType?: string) {
     return this.reinspectionService.getTemplatePhotos(vehicleType);
@@ -109,6 +130,8 @@ export class ReinspectionController {
    * Query param obrigatório: userVehicleId
    */
   @Get('status')
+  @UseGuards(AdminPanelRoleGuard)
+  @AdminPanelRoles(AdminPanelRole.REVISTORIA)
   @HttpCode(HttpStatus.OK)
   getStatusByUserVehicleId(
     @Query('userVehicleId', ParseIntPipe) userVehicleId: number,
@@ -117,6 +140,8 @@ export class ReinspectionController {
   }
 
   @Get('search')
+  @UseGuards(AdminPanelRoleGuard)
+  @AdminPanelRoles(AdminPanelRole.REVISTORIA)
   @HttpCode(HttpStatus.OK)
   searchByChassiOrPlate(
     @Query('chassi') chassi?: string,
@@ -137,6 +162,8 @@ export class ReinspectionController {
    * Retorna as fotos de uma revistoria específica.
    */
   @Get(':id/photos')
+  @UseGuards(AdminPanelRoleGuard)
+  @AdminPanelRoles(AdminPanelRole.REVISTORIA)
   @HttpCode(HttpStatus.OK)
   getPhotosByReinspectionId(@Param('id', ParseIntPipe) id: number) {
     return this.reinspectionService.getPhotosByReinspectionId(id);
@@ -191,6 +218,8 @@ export class ReinspectionController {
    * Query param obrigatório: userVehicleId
    */
   @Get('rejected-photos')
+  @UseGuards(AdminPanelRoleGuard)
+  @AdminPanelRoles(AdminPanelRole.REVISTORIA)
   @HttpCode(HttpStatus.OK)
   getRejectedPhotos(
     @Query('userVehicleId', ParseIntPipe) userVehicleId: number,

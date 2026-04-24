@@ -16,7 +16,7 @@ export class DocumentosService {
   ) {}
 
   private readonly urlBase =
-    'https://concerned-wedding-strings-ram.trycloudflare.com';
+    'http://localhost:3001';
 
   private buildDocumentUrl(url: string): string {
     if (/^https?:\/\//i.test(url)) {
@@ -63,6 +63,14 @@ export class DocumentosService {
       ...document,
       documentUrl: this.buildDocumentUrl(document.documentUrl),
     }));
+  }
+
+  async getTotalDocuments() {
+    const totalDocumentos = await this.prisma.document.count();
+
+    return {
+      totalDocumentos,
+    };
   }
 
   async findOne(id: number) {

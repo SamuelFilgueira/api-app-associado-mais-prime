@@ -18,6 +18,9 @@ import { SliderService } from './slider.service';
 import { CreateSliderDto } from './DTOs/create-slider.dto';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { UpdateSliderDto } from './DTOs/update-slider.dto';
+import { AdminPanelRoleGuard } from '../admin-panel/admin-panel-role.guard';
+import { AdminPanelRoles } from '../admin-panel/admin-panel-roles.decorator';
+import { AdminPanelRole } from '../admin-panel/admin-panel-role.enum';
 
 @UseGuards(JwtAuthGuard)
 @Controller('slider')
@@ -25,6 +28,8 @@ export class SliderController {
   constructor(private readonly sliderService: SliderService) {}
 
   @Get()
+  @UseGuards(AdminPanelRoleGuard)
+  @AdminPanelRoles(AdminPanelRole.MARKETING)
   getSliders(@Query('isActive') isActive?: string) {
     const parsedIsActive =
       typeof isActive === 'string'
@@ -35,6 +40,8 @@ export class SliderController {
   }
 
   @Post()
+  @UseGuards(AdminPanelRoleGuard)
+  @AdminPanelRoles(AdminPanelRole.MARKETING)
   @UseInterceptors(FileInterceptor('image'))
   async createSlider(
     @Body() body: CreateSliderDto,
@@ -44,6 +51,8 @@ export class SliderController {
   }
 
   @Patch(':id')
+  @UseGuards(AdminPanelRoleGuard)
+  @AdminPanelRoles(AdminPanelRole.MARKETING)
   @UseInterceptors(FileInterceptor('image'))
   updateSlider(
     @Param('id', ParseIntPipe) id: number,
@@ -54,6 +63,8 @@ export class SliderController {
   }
 
   @Delete(':id')
+  @UseGuards(AdminPanelRoleGuard)
+  @AdminPanelRoles(AdminPanelRole.MARKETING)
   deleteSlider(@Param('id', ParseIntPipe) id: number) {
     return this.sliderService.deleteSlider(id);
   }

@@ -4,6 +4,7 @@ import { ReinspectionService } from './reinspection.service';
 import { PrismaService } from '../prisma.service';
 import { FileUploadService } from '../common/services/file-upload.service';
 import { MailService } from 'src/common/services/mail.service';
+import { AdminPanelRoleGuard } from '../admin-panel/admin-panel-role.guard';
 
 @Module({
   controllers: [ReinspectionController],
@@ -12,6 +13,7 @@ import { MailService } from 'src/common/services/mail.service';
     PrismaService,
     FileUploadService,
     MailService,
+    AdminPanelRoleGuard,
   ],
 })
 export class ReinspectionModule {}

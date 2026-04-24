@@ -224,6 +224,14 @@ export class OficinaService {
     return { deleted: true };
   }
 
+  async getTotalWorkshops() {
+    const totalOficinas = await this.prisma.workshop.count();
+
+    return {
+      totalOficinas,
+    };
+  }
+
   //Retorna todas as oficinas com paginação
   async findAllWorkshops(
     page = 1,

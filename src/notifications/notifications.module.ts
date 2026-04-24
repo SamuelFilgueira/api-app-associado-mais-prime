@@ -4,6 +4,7 @@ import { NotificationsController } from './notifications.controller';
 import { PrismaService } from '../prisma.service';
 import { AdminTokenGuard } from './admin-token.guard';
 import { NotificationProcessor } from './notification.processor';
+import { AdminPanelRoleGuard } from '../admin-panel/admin-panel-role.guard';
 
 @Module({
   controllers: [NotificationsController],
@@ -11,6 +12,7 @@ import { NotificationProcessor } from './notification.processor';
     NotificationsService,
     PrismaService,
     AdminTokenGuard,
+    AdminPanelRoleGuard,
     NotificationProcessor,
   ],
   exports: [NotificationsService],

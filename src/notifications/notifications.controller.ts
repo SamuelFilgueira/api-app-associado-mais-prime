@@ -23,6 +23,9 @@ import { SendMarketingNotificationDto } from './DTOs/send-marketing-notification
 import { NOTIFICATION_QUEUE } from '../queue/queue.module';
 import { AdminRoleGuard } from '../auth/admin-role.guard';
 import { RegisterExpoTokenDto } from './DTOs/register-expo-token.dto';
+import { AdminPanelRoleGuard } from '../admin-panel/admin-panel-role.guard';
+import { AdminPanelRoles } from '../admin-panel/admin-panel-roles.decorator';
+import { AdminPanelRole } from '../admin-panel/admin-panel-role.enum';
 
 @Controller('notifications')
 export class NotificationsController {
@@ -251,7 +254,8 @@ export class NotificationsController {
    * POST /notifications/admin/marketing
    * Envia notificacoes de marketing em massa (painel administrativo)
    */
-  @UseGuards(JwtAuthGuard, AdminRoleGuard)
+  @UseGuards(JwtAuthGuard, AdminRoleGuard, AdminPanelRoleGuard)
+  @AdminPanelRoles(AdminPanelRole.MARKETING)
   @Post('admin/marketing')
   @HttpCode(HttpStatus.OK)
   async sendMarketingNotification(
