@@ -116,6 +116,15 @@ export class ReinspectionController {
     return this.reinspectionService.getStatusByUserVehicleId(userVehicleId);
   }
 
+  @Get('search')
+  @HttpCode(HttpStatus.OK)
+  searchByChassiOrPlate(
+    @Query('chassi') chassi?: string,
+    @Query('plate') plate?: string,
+  ) {
+    return this.reinspectionService.searchByChassiOrPlate(chassi, plate);
+  }
+
   @Patch('status')
   @HttpCode(HttpStatus.OK)
   updateStatusByUserVehicleId(

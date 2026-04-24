@@ -227,6 +227,12 @@ export class ReinspectionService {
         status: true,
         createdAt: true,
         updatedAt: true,
+        userVehicle: {
+          select: {
+            chassi: true,
+            plate: true,
+          },
+        },
         _count: {
           select: {
             photos: true,
@@ -235,7 +241,11 @@ export class ReinspectionService {
       },
     });
 
-    return reinspections;
+    return reinspections.map(({ userVehicle, ...reinspection }) => ({
+      ...reinspection,
+      chassi: userVehicle.chassi,
+      plate: userVehicle.plate,
+    }));
   }
 
   async upsertTemplatePhoto(
@@ -324,6 +334,12 @@ export class ReinspectionService {
         status: true,
         createdAt: true,
         updatedAt: true,
+        userVehicle: {
+          select: {
+            chassi: true,
+            plate: true,
+          },
+        },
         _count: {
           select: {
             photos: true,
@@ -332,13 +348,25 @@ export class ReinspectionService {
       },
     });
 
-    return reinspections;
+    return reinspections.map(({ userVehicle, ...reinspection }) => ({
+      ...reinspection,
+      chassi: userVehicle.chassi,
+      plate: userVehicle.plate,
+    }));
   }
 
   async getPhotosByReinspectionId(reinspectionId: number) {
     const reinspection = await this.prisma.reinspection.findUnique({
       where: { id: reinspectionId },
-      select: { id: true },
+      select: {
+        id: true,
+        userVehicle: {
+          select: {
+            chassi: true,
+            plate: true,
+          },
+        },
+      },
     });
 
     if (!reinspection) {
@@ -363,6 +391,8 @@ export class ReinspectionService {
 
     return {
       reinspectionId,
+      chassi: reinspection.userVehicle.chassi,
+      plate: reinspection.userVehicle.plate,
       totalPhotos: photos.length,
       photos: photos.map((p) => ({
         ...p,
@@ -374,7 +404,7 @@ export class ReinspectionService {
   async getStatusByUserVehicleId(userVehicleId: number) {
     const vehicle = await this.prisma.userVehicle.findUnique({
       where: { id: userVehicleId },
-      select: { id: true },
+      select: { id: true, chassi: true, plate: true },
     });
 
     if (!vehicle) {
@@ -395,6 +425,8 @@ export class ReinspectionService {
     if (!latestReinspection) {
       return {
         userVehicleId,
+        chassi: vehicle.chassi,
+        plate: vehicle.plate,
         hasReinspection: false,
         status: null,
       };
@@ -402,6 +434,8 @@ export class ReinspectionService {
 
     return {
       userVehicleId,
+      chassi: vehicle.chassi,
+      plate: vehicle.plate,
       hasReinspection: true,
       reinspectionId: latestReinspection.id,
       status: latestReinspection.status,
@@ -713,7 +747,7 @@ export class ReinspectionService {
   async getRejectedPhotos(userVehicleId: number) {
     const vehicle = await this.prisma.userVehicle.findUnique({
       where: { id: userVehicleId },
-      select: { id: true },
+      select: { id: true, chassi: true, plate: true },
     });
 
     if (!vehicle) {
@@ -755,6 +789,8 @@ export class ReinspectionService {
 
     return {
       reinspectionId: latestReinspection.id,
+      chassi: vehicle.chassi,
+      plate: vehicle.plate,
       reinspectionStatus: latestReinspection.status,
       rejectedPhotos: rejectedPhotos.map((p) => ({
         photoId: p.id,
@@ -776,6 +812,74 @@ export class ReinspectionService {
           : null,
       })),
     };
+  }
+
+  async searchByChassiOrPlate(chassi?: string, plate?: string) {
+    const normalizedChassi = chassi?.trim();
+    const normalizedPlate = plate?.trim();
+
+    if (!normalizedChassi && !normalizedPlate) {
+      throw new BadRequestException(
+        'Informe ao menos um parâmetro de busca: chassi ou plate',
+      );
+    }
+
+    const vehicleFilters = [
+      ...(normalizedChassi
+        ? [
+            {
+              userVehicle: {
+                chassi: {
+                  contains: normalizedChassi,
+                },
+              },
+            },
+          ]
+        : []),
+      ...(normalizedPlate
+        ? [
+            {
+              userVehicle: {
+                plate: {
+                  contains: normalizedPlate,
+                },
+              },
+            },
+          ]
+        : []),
+    ];
+
+    const reinspections = await this.prisma.reinspection.findMany({
+      where: {
+        OR: vehicleFilters,
+      },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        userVehicleId: true,
+        vehicleType: true,
+        status: true,
+        createdAt: true,
+        updatedAt: true,
+        userVehicle: {
+          select: {
+            chassi: true,
+            plate: true,
+          },
+        },
+        _count: {
+          select: {
+            photos: true,
+          },
+        },
+      },
+    });
+
+    return reinspections.map(({ userVehicle, ...reinspection }) => ({
+      ...reinspection,
+      chassi: userVehicle.chassi,
+      plate: userVehicle.plate,
+    }));
   }
 
   async resendPhoto(photoId: number, base64: string) {
