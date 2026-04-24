@@ -14,7 +14,7 @@
 
 const TOTAL = parseInt(process.argv[2] ?? '10', 10);
 const MODE  = process.argv[3] === 'test' ? 'test' : 'queue-test';
-const BASE  = process.env.API_URL ?? 'http://localhost:3001/api';
+const BASE  = process.env.API_URL ?? 'https://app-dev.texvngroup.com.br/api';
 const URL   = `${BASE}/notifications/${MODE}`;
 
 const PAYLOAD = {

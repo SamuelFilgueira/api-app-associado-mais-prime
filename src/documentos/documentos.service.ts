@@ -16,7 +16,7 @@ export class DocumentosService {
   ) {}
 
   private readonly urlBase =
-    'http://localhost:3001';
+    'https://app-dev.texvngroup.com.br';
 
   private buildDocumentUrl(url: string): string {
     if (/^https?:\/\//i.test(url)) {
