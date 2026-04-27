@@ -6,7 +6,9 @@ import {
   Query,
   UseGuards,
   Logger,
+  Res,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { RastreamentoService } from './rastreamento.service';
 import { M7WebhookGuard } from './guards/m7.guard';
 import { InjectQueue } from '@nestjs/bullmq';
@@ -95,6 +97,32 @@ export class RastreamentoController {
       body.chassi,
       ctx.baseOrigin,
     );
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('historico/pdf')
+  async gerarRelatorioHistoricoM7PDF(
+    @Query('dataInicial') dataInicial: string,
+    @Query('dataFinal') dataFinal: string,
+    @Query('placa') placa: string,
+    @Res() res: Response,
+  ) {
+    const ctx = this.buildRastreamentoContext();
+    const pdfBuffer =
+      await this.rastreamentoService.gerarRelatorioHistoricoM7PDF(
+        dataInicial,
+        dataFinal,
+        placa,
+        ctx.baseOrigin,
+      );
+
+    const safePlaca = (placa || 'veiculo').replace(/[^A-Za-z0-9_-]/g, '');
+    const fileName = `historico-${safePlaca || 'veiculo'}-${dataInicial}-${dataFinal}.pdf`;
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${fileName}"`);
+    res.setHeader('Content-Length', String(pdfBuffer.length));
+    res.send(pdfBuffer);
   }
 
   @UseGuards(JwtAuthGuard)

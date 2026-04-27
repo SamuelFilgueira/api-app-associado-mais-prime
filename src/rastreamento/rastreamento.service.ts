@@ -222,6 +222,50 @@ export class RastreamentoService {
     return this.m7.ultimaPosicaoM7(cnpj, chassi, baseOrigin);
   }
 
+  /**
+   * Orquestrador: gera PDF do histórico M7.
+   * Toda validação de entrada é centralizada aqui para manter o controller enxuto.
+   */
+  async gerarRelatorioHistoricoM7PDF(
+    dataInicial: string,
+    dataFinal: string,
+    placa: string,
+    baseOrigin: BaseOrigin,
+  ): Promise<Buffer> {
+    const placaNormalizada = placa?.trim()?.toUpperCase();
+    const dataInicialNormalizada = dataInicial?.trim();
+    const dataFinalNormalizada = dataFinal?.trim();
+
+    if (!placaNormalizada) {
+      throw new BadRequestException('Parâmetro placa é obrigatório');
+    }
+
+    if (!this.isDataIsoValida(dataInicialNormalizada)) {
+      throw new BadRequestException(
+        'Parâmetro dataInicial inválido. Use o formato yyyy-mm-dd',
+      );
+    }
+
+    if (!this.isDataIsoValida(dataFinalNormalizada)) {
+      throw new BadRequestException(
+        'Parâmetro dataFinal inválido. Use o formato yyyy-mm-dd',
+      );
+    }
+
+    if (dataInicialNormalizada > dataFinalNormalizada) {
+      throw new BadRequestException(
+        'Parâmetro dataInicial não pode ser maior que dataFinal',
+      );
+    }
+
+    return this.m7.gerarRelatorioHistoricoPDFPorBase(
+      dataInicialNormalizada,
+      dataFinalNormalizada,
+      placaNormalizada,
+      baseOrigin,
+    );
+  }
+
   
 
   /**
@@ -451,6 +495,21 @@ export class RastreamentoService {
 
     throw new BadRequestException(
       `Campo ${fieldName} inválido. Use true/false ou 1/0.`,
+    );
+  }
+
+  /** Valida formato yyyy-mm-dd com data real de calendário. */
+  private isDataIsoValida(value?: string): boolean {
+    if (!value) return false;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+
+    const [year, month, day] = value.split('-').map(Number);
+    const date = new Date(Date.UTC(year, month - 1, day));
+
+    return (
+      date.getUTCFullYear() === year &&
+      date.getUTCMonth() === month - 1 &&
+      date.getUTCDate() === day
     );
   }
 
