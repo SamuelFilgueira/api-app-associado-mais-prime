@@ -118,8 +118,8 @@ export class ReinspectionController {
    * Query param opcional: vehicleType (VEICULOS_LEVES | MOTOS | CAMINHOES)
    */
   @Get('template')
-  @UseGuards(AdminPanelRoleGuard)
-  @AdminPanelRoles(AdminPanelRole.REVISTORIA)
+  // @UseGuards(AdminPanelRoleGuard)
+  // @AdminPanelRoles(AdminPanelRole.REVISTORIA)
   @HttpCode(HttpStatus.OK)
   getTemplatePhotos(@Query('vehicleType') vehicleType?: string) {
     return this.reinspectionService.getTemplatePhotos(vehicleType);
@@ -130,8 +130,8 @@ export class ReinspectionController {
    * Query param obrigatório: userVehicleId
    */
   @Get('status')
-  @UseGuards(AdminPanelRoleGuard)
-  @AdminPanelRoles(AdminPanelRole.REVISTORIA)
+  // @UseGuards(AdminPanelRoleGuard)
+  // @AdminPanelRoles(AdminPanelRole.REVISTORIA)
   @HttpCode(HttpStatus.OK)
   getStatusByUserVehicleId(
     @Query('userVehicleId', ParseIntPipe) userVehicleId: number,
@@ -218,7 +218,7 @@ export class ReinspectionController {
    * Query param obrigatório: userVehicleId
    */
   @Get('rejected-photos')
-  @UseGuards(AdminPanelRoleGuard)
+  //@UseGuards(AdminPanelRoleGuard)
   @AdminPanelRoles(AdminPanelRole.REVISTORIA)
   @HttpCode(HttpStatus.OK)
   getRejectedPhotos(
