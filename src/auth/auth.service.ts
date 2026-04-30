@@ -136,7 +136,7 @@ export class AuthService {
    * Gera uma senha aleatória, salva no banco (hash) e envia por e-mail ao usuário
    * @param cpf CPF do usuário
    */
-  async resetPassword(cpf: string): Promise<{ message: string }> {
+  async resetPassword(cpf: string): Promise<{ message: string; email: string }> {
     const user = await this.prisma.user.findUnique({ where: { cpf } });
 
     if (!user) {
@@ -161,6 +161,6 @@ export class AuthService {
 
     await this.mailService.sendPasswordReset(user.email, newPassword);
 
-    return { message: 'Nova senha enviada para o e-mail informado' };
+    return { message: 'Nova senha enviada para o e-mail informado', email: user.email };
   }
 }
