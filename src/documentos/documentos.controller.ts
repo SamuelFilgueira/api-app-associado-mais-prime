@@ -41,8 +41,8 @@ export class DocumentosController {
   }
 
   @Get()
-  @UseGuards(AdminPanelRoleGuard)
-  @AdminPanelRoles(AdminPanelRole.EVENTOS)
+  //@UseGuards(AdminPanelRoleGuard)
+  //@AdminPanelRoles(AdminPanelRole.EVENTOS)
   findAll() {
     return this.documentosService.findAll();
   }
@@ -55,8 +55,8 @@ export class DocumentosController {
   }
 
   @Get(':id')
-  @UseGuards(AdminPanelRoleGuard)
-  @AdminPanelRoles(AdminPanelRole.EVENTOS)
+  //@UseGuards(AdminPanelRoleGuard)
+  //@AdminPanelRoles(AdminPanelRole.EVENTOS)
   findOne(@Param('id', ParseIntPipe) id: number) {
     return this.documentosService.findOne(id);
   }
