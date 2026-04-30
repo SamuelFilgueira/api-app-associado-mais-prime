@@ -107,7 +107,7 @@ export class BoletoService {
       } else {
         boletos.push(response.data as any);
       }
-      this.logger.log(`Boletos processados para veículo ${codigo_veiculo}: ${JSON.stringify(boletos)}`);
+      //this.logger.log(`Boletos processados para veículo ${codigo_veiculo}: ${JSON.stringify(boletos)}`);
       return boletos;
     } catch (error: unknown) {
       if (axios.isAxiosError(error) && error.response?.data) {

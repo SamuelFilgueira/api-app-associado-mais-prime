@@ -134,13 +134,13 @@ export class AuthService {
 
   /**
    * Gera uma senha aleatória, salva no banco (hash) e envia por e-mail ao usuário
-   * @param email E-mail do usuário
+   * @param cpf CPF do usuário
    */
-  async resetPassword(email: string): Promise<{ message: string }> {
-    const user = await this.prisma.user.findUnique({ where: { email } });
+  async resetPassword(cpf: string): Promise<{ message: string }> {
+    const user = await this.prisma.user.findUnique({ where: { cpf } });
 
     if (!user) {
-      throw new NotFoundException('Nenhuma conta encontrada com este e-mail');
+      throw new NotFoundException('Nenhuma conta encontrada com este CPF');
     }
 
     // Gera senha aleatória de 10 caracteres (letras + números)
@@ -151,7 +151,7 @@ export class AuthService {
     const passwordHash = await bcrypt.hash(newPassword, 10);
 
     await this.prisma.user.update({
-      where: { email },
+      where: { cpf },
       data: {
         passwordHash,
         primeiroLogin: true, // força troca de senha no próximo acesso
@@ -159,7 +159,7 @@ export class AuthService {
       },
     });
 
-    await this.mailService.sendPasswordReset(email, newPassword);
+    await this.mailService.sendPasswordReset(user.email, newPassword);
 
     return { message: 'Nova senha enviada para o e-mail informado' };
   }
