@@ -21,6 +21,12 @@ export class CartaoController {
     return `${value.slice(0, 4)}...${value.slice(-4)}`;
   }
 
+  /** TODO: remover após testes — dispara verificação de economia sem delay */
+  // @Get('test-fuel-notification')
+  // async testFuelNotification(@Req() req) {
+  //   return this.cartaoService.testFuelEconomyCheck(req.user.userId);
+  // }
+
   @Get('virtual')
   async gerarCartao(@Req() req, @Query('chassi') chassi: string) {
     const userId = req.user.userId;

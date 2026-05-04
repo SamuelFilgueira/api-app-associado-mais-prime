@@ -38,11 +38,13 @@ model user {
   acceptsMarketingNotifications Boolean @default(true)
   notificacaoIgnicao Boolean @default(false)
   ancoraAtiva      Boolean        @default(false)
+  totalEconomizado Float          @default(0)
   role             UserRole       @default(USER)
   createdAt        DateTime       @default(now())
   updatedAt        DateTime
   notifications    Notification[]
   userVehicles     UserVehicle[]
+  fuelSessions     FuelSession[]
 }
 
 model AdminPanelUser {
@@ -334,4 +336,19 @@ model Notification {
   @@index([userId, read], map: "Notification_userId_read_idx")
   @@index([sentAt], map: "Notification_sentAt_idx")
   @@index([createdAt], map: "Notification_createdAt_idx")
+}
+
+model FuelSession {
+  id          String   @id @default(uuid())
+  userId      Int
+  valorAntes  Float
+  valorDepois Float?
+  diferenca   Float?
+  status      String   // PENDING | COMPLETED | EXPIRED
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user        user     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status], map: "FuelSession_userId_status_idx")
 }
