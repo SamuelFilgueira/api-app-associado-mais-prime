@@ -18,6 +18,17 @@ export class EconomiaService {
         Authorization: `Bearer ${process.env.TOKEN_API_CLUBGAS}`,
       },
     });
+
+    // Persistir o valor atual para que o gatilho de abastecimento
+    // use a diferença real e não o total acumulado histórico.
+    const novoValor = parseFloat(data?.totalEconomizado);
+    if (!isNaN(novoValor) && novoValor > user.totalEconomizado) {
+      await this.prisma.user.update({
+        where: { id: userId },
+        data: { totalEconomizado: novoValor },
+      });
+    }
+
     return data;
   }
 }
