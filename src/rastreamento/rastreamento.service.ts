@@ -21,10 +21,16 @@ import { baseTag } from 'src/shared/log.util';
 import { NotificationsService } from '../notifications/notifications.service';
 import axios from 'axios';
 
+const DEFAULT_LOGICA_STALE_THRESHOLD_MINUTES = 20;
+
 type RastreamentoUnificadoResponse =
   | UltimaPosicaoLogicaResponse
   | Awaited<ReturnType<RastreamentoM7['ultimaPosicaoM7']>>
   | UltimaPosicaoSoftruckResponse;
+
+type RastreamentoUnificadoControllerResponse = Record<string, unknown> & {
+  origem: 'm7' | 'logica' | 'softruck';
+};
 
 interface RastreamentoCandidato {
   data: RastreamentoUnificadoResponse;
@@ -112,9 +118,7 @@ export class RastreamentoService {
     cnpj: string,
     chassi: string,
     requestContext?: RastreamentoBaseContext,
-  ): Promise<
-    RastreamentoUnificadoResponse & { origem: 'm7' | 'logica' | 'softruck' }
-  > {
+  ): Promise<RastreamentoUnificadoControllerResponse> {
     const candidatos: Array<{
       data: any;
       dataOriginal: string;
@@ -207,14 +211,34 @@ export class RastreamentoService {
         : atualMaisRecente,
     );
 
-    this.logger.log(
-      `Rastreamento unificado retornando registro mais recente em ${maisRecente.dataOriginal} (${maisRecente.origem})`,
+    const candidatoLogica = candidatos.find(
+      (candidato) => candidato.origem === 'logica',
     );
 
-    // 🔥 Aqui está o pulo do gato
+    let selecionado = maisRecente;
+    if (candidatoLogica) {
+      selecionado = candidatoLogica;
+
+      if (
+        maisRecente.origem !== 'logica' &&
+        this.deveUsarFallbackPorDefasagemLogica(candidatoLogica, maisRecente)
+      ) {
+        selecionado = maisRecente;
+      }
+    }
+
+    this.logger.log(
+      `Rastreamento unificado retornando registro em ${selecionado.dataOriginal} (${selecionado.origem})`,
+    );
+
+    const payload = this.normalizarRespostaRastreamento(
+      selecionado.data,
+      selecionado.origem,
+    );
+
     return {
-      ...maisRecente.data,
-      origem: maisRecente.origem,
+      ...payload,
+      origem: selecionado.origem,
     };
   }
   // Orquestrador: delega para o rastreador M7
@@ -611,6 +635,80 @@ export class RastreamentoService {
     }
 
     throw new Error(`Formato de data inválido: ${dateValue}`);
+  }
+
+  private normalizarRespostaRastreamento(
+    data: RastreamentoUnificadoResponse,
+    origem: 'm7' | 'logica' | 'softruck',
+  ): Record<string, unknown> {
+    if (origem === 'softruck') {
+      const softruck = data as UltimaPosicaoSoftruckResponse;
+
+      return {
+        ...softruck,
+        placa: softruck.plate,
+        marca: softruck.brandName,
+        modelo: softruck.modelName,
+        ultimaTrasmissao: softruck.date,
+        data_gps: softruck.date,
+        velocidade: softruck.speed,
+        ignicao: softruck.ign ?? false,
+        condutorNome: null,
+        alertaIgnicao: false,
+        cidade: null,
+        endereco: null,
+        bairro: null,
+        estado: null,
+        direcao: null,
+        hodometro: null,
+        voltagem: null,
+        identificador: softruck.plate,
+      };
+    }
+
+    return data as unknown as Record<string, unknown>;
+  }
+
+  private deveUsarFallbackPorDefasagemLogica(
+    candidatoLogica: { timestamp: number; dataOriginal: string },
+    candidatoMaisRecente: {
+      timestamp: number;
+      dataOriginal: string;
+      origem: 'm7' | 'softruck' | 'logica';
+    },
+  ): boolean {
+    if (candidatoMaisRecente.origem === 'logica') {
+      return false;
+    }
+
+    const thresholdMs = this.getLogicaStaleThresholdMs();
+    const diferencaMs = candidatoMaisRecente.timestamp - candidatoLogica.timestamp;
+
+    if (diferencaMs < thresholdMs) {
+      this.logger.log(
+        `Lógica priorizada: diferença de recência (${Math.round(diferencaMs / 60000)} min) abaixo do limite (${Math.round(thresholdMs / 60000)} min)`,
+      );
+      return false;
+    }
+
+    this.logger.warn(
+      `Fallback por defasagem da Lógica: lógica=${candidatoLogica.dataOriginal} provedor=${candidatoMaisRecente.origem} data=${candidatoMaisRecente.dataOriginal} diferença=${Math.round(diferencaMs / 60000)} min limite=${Math.round(thresholdMs / 60000)} min`,
+    );
+    return true;
+  }
+
+  private getLogicaStaleThresholdMs(): number {
+    const rawValue = process.env.RASTREAMENTO_LOGICA_STALE_THRESHOLD_MINUTES;
+    const parsedMinutes = Number(rawValue);
+
+    if (
+      Number.isFinite(parsedMinutes) &&
+      parsedMinutes > 0
+    ) {
+      return parsedMinutes * 60_000;
+    }
+
+    return DEFAULT_LOGICA_STALE_THRESHOLD_MINUTES * 60_000;
   }
 
   /**

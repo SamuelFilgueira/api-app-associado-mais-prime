@@ -20,6 +20,8 @@ export interface UltimaPosicaoSoftruckResponse {
   date: string;
   ign?: boolean;
   speed: number;
+  latitude: number;
+  longitude: number;
   coordinates: {
     latitude: number;
     longitude: number;
@@ -73,6 +75,7 @@ export class RastreamentoSoftruck {
   private readonly logger = new Logger(RastreamentoSoftruck.name);
   private readonly tokenResolver: TokenResolverService;
   private softruckTokenByBase = new Map<BaseOrigin, string>();
+  private static readonly MAX_LOG_PAYLOAD_LENGTH = 1500;
 
   /** Mutex por base para evitar logins simultâneos */
   private loginPromiseByBase = new Map<BaseOrigin, Promise<void>>();
@@ -134,6 +137,22 @@ export class RastreamentoSoftruck {
       return error.message;
     }
     return String(error);
+  }
+
+  private stringifyForLog(data: unknown): string {
+    const serialized = JSON.stringify(data);
+
+    if (!serialized) {
+      return '(vazio)';
+    }
+
+    if (
+      serialized.length <= RastreamentoSoftruck.MAX_LOG_PAYLOAD_LENGTH
+    ) {
+      return serialized;
+    }
+
+    return `${serialized.slice(0, RastreamentoSoftruck.MAX_LOG_PAYLOAD_LENGTH)}... [truncated ${serialized.length - RastreamentoSoftruck.MAX_LOG_PAYLOAD_LENGTH} chars]`;
   }
 
   private buildSoftruckUrl(path: string): string {
@@ -408,6 +427,10 @@ export class RastreamentoSoftruck {
         publicKey,
       );
 
+      this.logger.debug(
+        `[${baseOrigin}] Softruck /vehicles response status=${response.status} chassi=${chassi} body=${this.stringifyForLog(response.data)}`,
+      );
+
       if (
         !response.data ||
         !response.data.data ||
@@ -478,6 +501,10 @@ export class RastreamentoSoftruck {
         publicKey,
       );
 
+      this.logger.debug(
+        `[${baseOrigin}] Softruck /vehicles/${vehicleId}/associations/devices response status=${response.status} body=${this.stringifyForLog(response.data)}`,
+      );
+
       if (
         !response.data ||
         !response.data.data ||
@@ -546,6 +573,10 @@ export class RastreamentoSoftruck {
         publicKey,
       );
 
+      this.logger.debug(
+        `[${baseOrigin}] Softruck /vehicles/${vehicleId}/tracking/${deviceId} response status=${response.status} body=${this.stringifyForLog(response.data)}`,
+      );
+
       if (!response.data || !response.data.data) {
         throw new InternalServerErrorException(
           'Dados de rastreamento não disponíveis',
@@ -586,8 +617,8 @@ export class RastreamentoSoftruck {
 
     // Extrair coordenadas [longitude, latitude]
     const [longitudeRaw, latitudeRaw] = attributes.geometry.coordinates;
-    const longitude = Number(longitudeRaw);
-    const latitude = Number(latitudeRaw);
+    const longitude = this.parseCoordinate(longitudeRaw);
+    const latitude = this.parseCoordinate(latitudeRaw);
 
     if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) {
       throw new InternalServerErrorException(
@@ -595,10 +626,12 @@ export class RastreamentoSoftruck {
       );
     }
 
-    return {
+    const mapped = {
       date,
       ign: attributes.ign,
       speed: attributes.spd,
+      latitude,
+      longitude,
       coordinates: {
         latitude,
         longitude,
@@ -607,6 +640,12 @@ export class RastreamentoSoftruck {
       brandName: vehicleData.brandName,
       modelName: vehicleData.modelName,
     };
+
+    this.logger.debug(
+      `Softruck payload mapeado vehicleId=${vehicleData.id} body=${this.stringifyForLog(mapped)}`,
+    );
+
+    return mapped;
   }
 
   // Formatar timestamp Unix para dd/MM/yyyy HH:mm
@@ -620,5 +659,14 @@ export class RastreamentoSoftruck {
     const minutes = String(date.getMinutes()).padStart(2, '0');
 
     return `${day}/${month}/${year} ${hours}:${minutes}`;
+  }
+
+  private parseCoordinate(value: number | string): number {
+    if (typeof value === 'number') {
+      return value;
+    }
+
+    const normalized = value.trim().replace(',', '.');
+    return Number(normalized);
   }
 }
