@@ -1,5 +1,7 @@
 import { InternalServerErrorException, Logger } from '@nestjs/common';
-import axios from 'axios';
+import axios, { AxiosInstance } from 'axios';
+import { Agent as HttpAgent } from 'http';
+import { Agent as HttpsAgent } from 'https';
 import {
   BaseOrigin,
   TokenResolverService,
@@ -11,9 +13,23 @@ const SOFTRUCK_REQUEST_TIMEOUT = 15_000;
 /** TTL do cache de vehicle/device em ms (10 minutos) */
 const CACHE_TTL = 10 * 60 * 1000;
 
+/** TTL do token JWT em ms (menos buffer para renovar antecipadamente) */
+const TOKEN_TTL_BUFFER_MS = 60_000; // 1 minuto antes de expirar
+
 interface CacheEntry<T> {
   data: T;
   expiresAt: number;
+}
+
+interface TokenEntry {
+  token: string;
+  expiresAt: number;
+}
+
+interface JwtPayload {
+  exp?: number;
+  iat?: number;
+  [key: string]: unknown;
 }
 
 export interface UltimaPosicaoSoftruckResponse {
@@ -74,8 +90,11 @@ interface SoftruckTrackingResponse {
 export class RastreamentoSoftruck {
   private readonly logger = new Logger(RastreamentoSoftruck.name);
   private readonly tokenResolver: TokenResolverService;
-  private softruckTokenByBase = new Map<BaseOrigin, string>();
+  private softruckTokenByBase = new Map<BaseOrigin, TokenEntry>();
   private static readonly MAX_LOG_PAYLOAD_LENGTH = 1500;
+
+  /** Axios instance com HTTP/HTTPS agents configurados */
+  private axiosInstance: AxiosInstance;
 
   /** Mutex por base para evitar logins simultâneos */
   private loginPromiseByBase = new Map<BaseOrigin, Promise<void>>();
@@ -102,6 +121,22 @@ export class RastreamentoSoftruck {
 
   constructor(tokenResolver?: TokenResolverService) {
     this.tokenResolver = tokenResolver ?? new TokenResolverService();
+    
+    // Configurar axios com agents para melhor gerenciamento de conexões
+    this.axiosInstance = axios.create({
+      httpAgent: new HttpAgent({
+        keepAlive: true,
+        maxSockets: 10,
+        maxFreeSockets: 5,
+        timeout: SOFTRUCK_REQUEST_TIMEOUT,
+      }),
+      httpsAgent: new HttpsAgent({
+        keepAlive: true,
+        maxSockets: 10,
+        maxFreeSockets: 5,
+        timeout: SOFTRUCK_REQUEST_TIMEOUT,
+      }),
+    });
   }
 
   private getCached<T>(
@@ -182,18 +217,77 @@ export class RastreamentoSoftruck {
     publicKey: string,
     overrideToken?: string,
   ) {
-    const token = overrideToken ?? this.softruckTokenByBase.get(baseOrigin);
+    let token: string;
 
-    if (!token) {
-      throw new InternalServerErrorException(
-        `Token Softruck não disponível para base ${baseOrigin}`,
-      );
+    if (overrideToken) {
+      token = overrideToken;
+    } else {
+      const tokenEntry = this.softruckTokenByBase.get(baseOrigin);
+      if (!tokenEntry) {
+        throw new InternalServerErrorException(
+          `Token Softruck não disponível para base ${baseOrigin}`,
+        );
+      }
+      token = tokenEntry.token;
     }
 
     return {
       Authorization: `Bearer ${token}`,
       'public-key': publicKey,
     };
+  }
+
+  /**
+   * Decodificar JWT sem validar assinatura para extrair claims
+   * Útil para verificar expiração (exp) antes de fazer requisição
+   */
+  private decodeJwt(token: string): JwtPayload | null {
+    try {
+      const parts = token.split('.');
+      if (parts.length !== 3) return null;
+
+      // Decodificar payload (segunda parte)
+      const payload = Buffer.from(parts[1], 'base64').toString('utf-8');
+      return JSON.parse(payload) as JwtPayload;
+    } catch (error) {
+      this.logger.debug(`Falha ao decodificar JWT: ${error}`);
+      return null;
+    }
+  }
+
+  /**
+   * Verificar se token JWT está expirado ou próximo de expirar
+   * Usa buffer de TOKEN_TTL_BUFFER_MS para renovar antecipadamente
+   */
+  private isTokenExpired(token: string): boolean {
+    const payload = this.decodeJwt(token);
+    if (!payload?.exp) return false; // Sem exp → assume válido
+
+    const expiresAtMs = payload.exp * 1000;
+    const now = Date.now();
+    const bufferMs = TOKEN_TTL_BUFFER_MS;
+
+    return now > expiresAtMs - bufferMs;
+  }
+
+  /**
+   * Obter token válido para base, renovando se necessário
+   */
+  private getValidToken(
+    baseOrigin: BaseOrigin,
+  ): string | null {
+    const tokenEntry = this.softruckTokenByBase.get(baseOrigin);
+    if (!tokenEntry) return null;
+
+    // Verificar se token ainda é válido
+    if (!this.isTokenExpired(tokenEntry.token)) {
+      return tokenEntry.token;
+    }
+
+    // Token expirou → remover do cache para forçar novo login
+    this.logger.debug(`[${baseOrigin}] Token expirado, será renovado no próximo login`);
+    this.softruckTokenByBase.delete(baseOrigin);
+    return null;
   }
 
   private isAuthError(error: unknown): boolean {
@@ -255,7 +349,7 @@ export class RastreamentoSoftruck {
     );
 
     try {
-      const response = await axios.post<{
+      const response = await this.axiosInstance.post<{
         data?: {
           token?: string;
           refresh_token?: string;
@@ -286,9 +380,13 @@ export class RastreamentoSoftruck {
         );
       }
 
-      this.softruckTokenByBase.set(baseOrigin, token);
+      // Decodificar para descobrir expiração real
+      const payload = this.decodeJwt(token);
+      const expiresAt = payload?.exp ? payload.exp * 1000 : Date.now() + CACHE_TTL;
+
+      this.softruckTokenByBase.set(baseOrigin, { token, expiresAt });
       this.logger.log(
-        `[${baseOrigin}] Token Softruck atualizado (token=${this.maskSecret(token)})`,
+        `[${baseOrigin}] Token Softruck atualizado (token=${this.maskSecret(token)}, exp=${new Date(expiresAt).toISOString()})`,
       );
     } catch (error) {
       if (axios.isAxiosError(error)) {
@@ -339,11 +437,21 @@ export class RastreamentoSoftruck {
     tokenOverride?: string,
   ): Promise<UltimaPosicaoSoftruckResponse> {
     try {
+      const storedToken = this.softruckTokenByBase.get(baseOrigin);
       this.logger.debug(
-        `[${baseOrigin}] ultimaPosicaoSoftruck chassi=${chassi} token=${this.maskSecret(tokenOverride ?? this.softruckTokenByBase.get(baseOrigin))} publicKey=${this.maskSecret(publicKey)}`,
+        `[${baseOrigin}] ultimaPosicaoSoftruck chassi=${chassi} token=${this.maskSecret(tokenOverride ?? storedToken?.token)} publicKey=${this.maskSecret(publicKey)}`,
       );
 
-      if (!tokenOverride && !this.softruckTokenByBase.get(baseOrigin)) {
+      // Verificar se token precisa ser renovado (expirado ou próximo de expirar)
+      if (!tokenOverride && storedToken) {
+        const validToken = this.getValidToken(baseOrigin);
+        if (!validToken) {
+          this.logger.debug(
+            `[${baseOrigin}] Token expirado ou próximo de expirar. Fazendo novo login.`,
+          );
+          await this.autenticarSoftruck(baseOrigin, publicKey);
+        }
+      } else if (!tokenOverride && !storedToken) {
         await this.autenticarSoftruck(baseOrigin, publicKey);
       }
 
@@ -409,7 +517,7 @@ export class RastreamentoSoftruck {
     try {
       const response = await this.executarComReautenticacao(
         () =>
-          axios.get<SoftruckVehicleResponse>(
+          this.axiosInstance.get<SoftruckVehicleResponse>(
             this.buildSoftruckUrl('/vehicles'),
             {
               params: {
@@ -484,7 +592,7 @@ export class RastreamentoSoftruck {
     try {
       const response = await this.executarComReautenticacao(
         () =>
-          axios.get<SoftruckDeviceAssociationResponse>(
+          this.axiosInstance.get<SoftruckDeviceAssociationResponse>(
             this.buildSoftruckUrl(
               `/vehicles/${vehicleId}/associations/devices`,
             ),
@@ -515,12 +623,17 @@ export class RastreamentoSoftruck {
         );
       }
 
+      const selectedAssociation =
+        response.data.data.length >= 2
+          ? response.data.data[1]
+          : response.data.data[0];
+
       this.logger.log(
-        `Associação de dispositivo obtida para vehicle: ${vehicleId}: ${JSON.stringify(response.data.data[0])}`,
+        `Associação de dispositivo obtida para vehicle: ${vehicleId}: ${JSON.stringify(selectedAssociation)}`,
       );
 
-      const trackingVehicleId = response.data.data[0].id;
-      const deviceId = response.data.data[0].relationships.device.id;
+      const trackingVehicleId = selectedAssociation.id;
+      const deviceId = selectedAssociation.relationships.device.id;
 
       if (!trackingVehicleId || !deviceId) {
         throw new InternalServerErrorException(
@@ -556,7 +669,7 @@ export class RastreamentoSoftruck {
     try {
       const response = await this.executarComReautenticacao(
         () =>
-          axios.get<SoftruckTrackingResponse>(
+          this.axiosInstance.get<SoftruckTrackingResponse>(
             this.buildSoftruckUrl(
               `/vehicles/${vehicleId}/tracking/${deviceId}`,
             ),
