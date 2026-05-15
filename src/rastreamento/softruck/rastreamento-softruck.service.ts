@@ -6,6 +6,20 @@ import {
   BaseOrigin,
   TokenResolverService,
 } from 'src/shared/token-resolver.service';
+import { UltimaPosicaoSoftruckResponse } from './dto/ultima-posicao.dto';
+import { TrajetoriasSoftruckResponse } from './dto/trajetorias.dto';
+import {
+  CacheEntry,
+  JwtPayload,
+  SoftruckDeviceAssociationResponse,
+  SoftruckTrajectoriesApiResponse,
+  SoftruckTrackingResponse,
+  SoftruckVehicleResponse,
+  TokenEntry,
+} from './interfaces/softruck-api.interface';
+import { mapearUltimaPosicaoSoftruck } from './mappers/ultima-posicao.mapper';
+import { mapearTrajetoriasSoftruck } from './mappers/trajetorias.mapper';
+import { gerarPdfTrajetorias } from './pdf/trajetorias-pdf.generator';
 
 /** Timeout padrão para chamadas HTTP à API Softruck (em ms) */
 const SOFTRUCK_REQUEST_TIMEOUT = 15_000;
@@ -16,82 +30,17 @@ const CACHE_TTL = 10 * 60 * 1000;
 /** TTL do token JWT em ms (menos buffer para renovar antecipadamente) */
 const TOKEN_TTL_BUFFER_MS = 60_000; // 1 minuto antes de expirar
 
-interface CacheEntry<T> {
-  data: T;
-  expiresAt: number;
-}
-
-interface TokenEntry {
-  token: string;
-  expiresAt: number;
-}
-
-interface JwtPayload {
-  exp?: number;
-  iat?: number;
-  [key: string]: unknown;
-}
-
-export interface UltimaPosicaoSoftruckResponse {
-  date: string;
-  ign?: boolean;
-  speed: number;
-  latitude: number;
-  longitude: number;
-  coordinates: {
-    latitude: number;
-    longitude: number;
-  };
-  plate: string;
-  brandName: string;
-  modelName: string;
-}
-
-interface SoftruckVehicleResponse {
-  data: Array<{
-    id: string;
-    type: string;
-    attributes: {
-      plate: string;
-      brand_name: string;
-      model_name: string;
-    };
-  }>;
-}
-
-interface SoftruckDeviceAssociationResponse {
-  data: Array<{
-    id: string;
-    relationships: {
-      device: {
-        id: string;
-      };
-      vehicle: {
-        id: string;
-      };
-    };
-  }>;
-}
-
-interface SoftruckTrackingResponse {
-  data: {
-    type: string;
-    attributes: {
-      ign: boolean;
-      act: number;
-      spd: number;
-      geometry: {
-        coordinates: [number | string, number | string];
-      };
-    };
-  };
-}
-
 export class RastreamentoSoftruck {
   private readonly logger = new Logger(RastreamentoSoftruck.name);
   private readonly tokenResolver: TokenResolverService;
   private softruckTokenByBase = new Map<BaseOrigin, TokenEntry>();
   private static readonly MAX_LOG_PAYLOAD_LENGTH = 1500;
+
+  /** Limite de chamadas ao Nominatim por geração de PDF */
+  private static readonly MAX_GEOCODING = 40;
+
+  /** Intervalo de segurança entre chamadas ao Nominatim (ms) */
+  private static readonly GEOCODING_DELAY_MS = 1100;
 
   /** Axios instance com HTTP/HTTPS agents configurados */
   private axiosInstance: AxiosInstance;
@@ -121,8 +70,7 @@ export class RastreamentoSoftruck {
 
   constructor(tokenResolver?: TokenResolverService) {
     this.tokenResolver = tokenResolver ?? new TokenResolverService();
-    
-    // Configurar axios com agents para melhor gerenciamento de conexões
+
     this.axiosInstance = axios.create({
       httpAgent: new HttpAgent({
         keepAlive: true,
@@ -181,9 +129,7 @@ export class RastreamentoSoftruck {
       return '(vazio)';
     }
 
-    if (
-      serialized.length <= RastreamentoSoftruck.MAX_LOG_PAYLOAD_LENGTH
-    ) {
+    if (serialized.length <= RastreamentoSoftruck.MAX_LOG_PAYLOAD_LENGTH) {
       return serialized;
     }
 
@@ -239,14 +185,12 @@ export class RastreamentoSoftruck {
 
   /**
    * Decodificar JWT sem validar assinatura para extrair claims
-   * Útil para verificar expiração (exp) antes de fazer requisição
    */
   private decodeJwt(token: string): JwtPayload | null {
     try {
       const parts = token.split('.');
       if (parts.length !== 3) return null;
 
-      // Decodificar payload (segunda parte)
       const payload = Buffer.from(parts[1], 'base64').toString('utf-8');
       return JSON.parse(payload) as JwtPayload;
     } catch (error) {
@@ -257,35 +201,31 @@ export class RastreamentoSoftruck {
 
   /**
    * Verificar se token JWT está expirado ou próximo de expirar
-   * Usa buffer de TOKEN_TTL_BUFFER_MS para renovar antecipadamente
    */
   private isTokenExpired(token: string): boolean {
     const payload = this.decodeJwt(token);
-    if (!payload?.exp) return false; // Sem exp → assume válido
+    if (!payload?.exp) return false;
 
     const expiresAtMs = payload.exp * 1000;
     const now = Date.now();
-    const bufferMs = TOKEN_TTL_BUFFER_MS;
 
-    return now > expiresAtMs - bufferMs;
+    return now > expiresAtMs - TOKEN_TTL_BUFFER_MS;
   }
 
   /**
    * Obter token válido para base, renovando se necessário
    */
-  private getValidToken(
-    baseOrigin: BaseOrigin,
-  ): string | null {
+  private getValidToken(baseOrigin: BaseOrigin): string | null {
     const tokenEntry = this.softruckTokenByBase.get(baseOrigin);
     if (!tokenEntry) return null;
 
-    // Verificar se token ainda é válido
     if (!this.isTokenExpired(tokenEntry.token)) {
       return tokenEntry.token;
     }
 
-    // Token expirou → remover do cache para forçar novo login
-    this.logger.debug(`[${baseOrigin}] Token expirado, será renovado no próximo login`);
+    this.logger.debug(
+      `[${baseOrigin}] Token expirado, será renovado no próximo login`,
+    );
     this.softruckTokenByBase.delete(baseOrigin);
     return null;
   }
@@ -380,9 +320,9 @@ export class RastreamentoSoftruck {
         );
       }
 
-      // Decodificar para descobrir expiração real
       const payload = this.decodeJwt(token);
-      const expiresAt = payload?.exp ? payload.exp * 1000 : Date.now() + CACHE_TTL;
+      const expiresAt =
+        payload?.exp ? payload.exp * 1000 : Date.now() + CACHE_TTL;
 
       this.softruckTokenByBase.set(baseOrigin, { token, expiresAt });
       this.logger.log(
@@ -429,85 +369,13 @@ export class RastreamentoSoftruck {
     }
   }
 
-  // Consultar a última posição do veículo via Softruck
-  async ultimaPosicaoSoftruck(
-    chassi: string,
-    baseOrigin: BaseOrigin,
-    publicKey: string,
-    tokenOverride?: string,
-  ): Promise<UltimaPosicaoSoftruckResponse> {
-    try {
-      const storedToken = this.softruckTokenByBase.get(baseOrigin);
-      this.logger.debug(
-        `[${baseOrigin}] ultimaPosicaoSoftruck chassi=${chassi} token=${this.maskSecret(tokenOverride ?? storedToken?.token)} publicKey=${this.maskSecret(publicKey)}`,
-      );
-
-      // Verificar se token precisa ser renovado (expirado ou próximo de expirar)
-      if (!tokenOverride && storedToken) {
-        const validToken = this.getValidToken(baseOrigin);
-        if (!validToken) {
-          this.logger.debug(
-            `[${baseOrigin}] Token expirado ou próximo de expirar. Fazendo novo login.`,
-          );
-          await this.autenticarSoftruck(baseOrigin, publicKey);
-        }
-      } else if (!tokenOverride && !storedToken) {
-        await this.autenticarSoftruck(baseOrigin, publicKey);
-      }
-
-      // STEP 1: Obter vehicle_id e dados do veículo pelo chassi
-      const vehicleData = await this.obterVehicleId(
-        chassi,
-        baseOrigin,
-        publicKey,
-        tokenOverride,
-      );
-
-      // STEP 2: Obter device_id através da associação
-      const deviceId = await this.obterDeviceId(
-        vehicleData.id,
-        baseOrigin,
-        publicKey,
-        tokenOverride,
-      );
-
-      // STEP 3: Obter dados de rastreamento
-      const trackingData = await this.obterDadosRastreamento(
-        deviceId.vehicleId,
-        deviceId.deviceId,
-        baseOrigin,
-        publicKey,
-        tokenOverride,
-      );
-
-      // Retornar DTO formatado com dados do veículo e rastreamento
-      return this.mapearUltimaPosicaoSoftruck(trackingData, vehicleData);
-    } catch (error) {
-      if (error instanceof InternalServerErrorException) {
-        throw error;
-      }
-      this.logger.error(
-        `Erro ao consultar última posição: ${this.formatError(error)}`,
-      );
-      throw new InternalServerErrorException(
-        'Erro ao consultar última posição do veículo',
-      );
-    }
-  }
-
   // STEP 1: Obter vehicle_id pelo chassi
   private async obterVehicleId(
     chassi: string,
     baseOrigin: BaseOrigin,
     publicKey: string,
     tokenOverride?: string,
-  ): Promise<{
-    id: string;
-    plate: string;
-    brandName: string;
-    modelName: string;
-  }> {
-    // Verifica cache primeiro
+  ): Promise<{ id: string; plate: string; brandName: string; modelName: string }> {
     const cached = this.getCached(this.vehicleCache, chassi);
     if (cached) {
       this.logger.debug(`[Cache HIT] Vehicle data para chassi: ${chassi}`);
@@ -520,14 +388,8 @@ export class RastreamentoSoftruck {
           this.axiosInstance.get<SoftruckVehicleResponse>(
             this.buildSoftruckUrl('/vehicles'),
             {
-              params: {
-                search: chassi,
-              },
-              headers: this.getRequestHeaders(
-                baseOrigin,
-                publicKey,
-                tokenOverride,
-              ),
+              params: { search: chassi },
+              headers: this.getRequestHeaders(baseOrigin, publicKey, tokenOverride),
               timeout: SOFTRUCK_REQUEST_TIMEOUT,
             },
           ),
@@ -539,11 +401,7 @@ export class RastreamentoSoftruck {
         `[${baseOrigin}] Softruck /vehicles response status=${response.status} chassi=${chassi} body=${this.stringifyForLog(response.data)}`,
       );
 
-      if (
-        !response.data ||
-        !response.data.data ||
-        response.data.data.length === 0
-      ) {
+      if (!response.data?.data?.length) {
         throw new InternalServerErrorException(
           'Veículo não encontrado na base Softruck',
         );
@@ -554,24 +412,20 @@ export class RastreamentoSoftruck {
       );
 
       const vehicleData = response.data.data[0];
-      const vehicleId = vehicleData.id;
-      const plate = vehicleData.attributes.plate;
-      const brandName = vehicleData.attributes.brand_name;
-      const modelName = vehicleData.attributes.model_name;
+      const result = {
+        id: vehicleData.id,
+        plate: vehicleData.attributes.plate,
+        brandName: vehicleData.attributes.brand_name,
+        modelName: vehicleData.attributes.model_name,
+      };
 
-      this.logger.log(`Vehicle ID obtido: ${vehicleId} para chassi: ${chassi}`);
-
-      const result = { id: vehicleId, plate, brandName, modelName };
+      this.logger.log(`Vehicle ID obtido: ${result.id} para chassi: ${chassi}`);
       this.setCache(this.vehicleCache, chassi, result);
       return result;
     } catch (error) {
-      if (error instanceof InternalServerErrorException) {
-        throw error;
-      }
+      if (error instanceof InternalServerErrorException) throw error;
       this.logger.error(`Erro ao obter vehicle_id: ${this.formatError(error)}`);
-      throw new InternalServerErrorException(
-        'Erro ao buscar veículo pelo chassi',
-      );
+      throw new InternalServerErrorException('Erro ao buscar veículo pelo chassi');
     }
   }
 
@@ -582,7 +436,6 @@ export class RastreamentoSoftruck {
     publicKey: string,
     tokenOverride?: string,
   ): Promise<{ vehicleId: string; deviceId: string }> {
-    // Verifica cache primeiro
     const cached = this.getCached(this.deviceCache, vehicleId);
     if (cached) {
       this.logger.debug(`[Cache HIT] Device ID para vehicle: ${vehicleId}`);
@@ -593,15 +446,9 @@ export class RastreamentoSoftruck {
       const response = await this.executarComReautenticacao(
         () =>
           this.axiosInstance.get<SoftruckDeviceAssociationResponse>(
-            this.buildSoftruckUrl(
-              `/vehicles/${vehicleId}/associations/devices`,
-            ),
+            this.buildSoftruckUrl(`/vehicles/${vehicleId}/associations/devices`),
             {
-              headers: this.getRequestHeaders(
-                baseOrigin,
-                publicKey,
-                tokenOverride,
-              ),
+              headers: this.getRequestHeaders(baseOrigin, publicKey, tokenOverride),
               timeout: SOFTRUCK_REQUEST_TIMEOUT,
             },
           ),
@@ -613,11 +460,7 @@ export class RastreamentoSoftruck {
         `[${baseOrigin}] Softruck /vehicles/${vehicleId}/associations/devices response status=${response.status} body=${this.stringifyForLog(response.data)}`,
       );
 
-      if (
-        !response.data ||
-        !response.data.data ||
-        response.data.data.length === 0
-      ) {
+      if (!response.data?.data?.length) {
         throw new InternalServerErrorException(
           'Dispositivo não associado ao veículo',
         );
@@ -646,9 +489,7 @@ export class RastreamentoSoftruck {
       this.setCache(this.deviceCache, vehicleId, result);
       return result;
     } catch (error) {
-      if (error instanceof InternalServerErrorException) {
-        throw error;
-      }
+      if (error instanceof InternalServerErrorException) throw error;
       this.logger.error(`Erro ao obter device_id: ${this.formatError(error)}`);
       throw new InternalServerErrorException(
         'Erro ao buscar dispositivo associado ao veículo',
@@ -668,15 +509,9 @@ export class RastreamentoSoftruck {
       const response = await this.executarComReautenticacao(
         () =>
           this.axiosInstance.get<SoftruckTrackingResponse>(
-            this.buildSoftruckUrl(
-              `/vehicles/${vehicleId}/tracking/${deviceId}`,
-            ),
+            this.buildSoftruckUrl(`/vehicles/${vehicleId}/tracking/${deviceId}`),
             {
-              headers: this.getRequestHeaders(
-                baseOrigin,
-                publicKey,
-                tokenOverride,
-              ),
+              headers: this.getRequestHeaders(baseOrigin, publicKey, tokenOverride),
               timeout: SOFTRUCK_REQUEST_TIMEOUT,
             },
           ),
@@ -688,7 +523,7 @@ export class RastreamentoSoftruck {
         `[${baseOrigin}] Softruck /vehicles/${vehicleId}/tracking/${deviceId} response status=${response.status} body=${this.stringifyForLog(response.data)}`,
       );
 
-      if (!response.data || !response.data.data) {
+      if (!response.data?.data) {
         throw new InternalServerErrorException(
           'Dados de rastreamento não disponíveis',
         );
@@ -699,9 +534,7 @@ export class RastreamentoSoftruck {
       );
       return response.data;
     } catch (error) {
-      if (error instanceof InternalServerErrorException) {
-        throw error;
-      }
+      if (error instanceof InternalServerErrorException) throw error;
       this.logger.error(
         `Erro ao obter dados de rastreamento: ${this.formatError(error)}`,
       );
@@ -711,73 +544,182 @@ export class RastreamentoSoftruck {
     }
   }
 
-  // Mapear resposta para DTO
-  private mapearUltimaPosicaoSoftruck(
-    data: SoftruckTrackingResponse,
-    vehicleData: {
-      id: string;
-      plate: string;
-      brandName: string;
-      modelName: string;
-    },
-  ): UltimaPosicaoSoftruckResponse {
-    const attributes = data.data.attributes;
+  // STEP 3 (trajetórias): Consultar endpoint de trajetórias pelo trackingVehicleId
+  private async obterDadosTrajetorias(
+    trackingVehicleId: string,
+    startDate: string,
+    endDate: string,
+    baseOrigin: BaseOrigin,
+    publicKey: string,
+    tokenOverride?: string,
+  ): Promise<SoftruckTrajectoriesApiResponse> {
+    try {
+      const trajectoriesUrl = `${this.buildSoftruckUrl(`vehicles/${trackingVehicleId}/trajectories`)}?filters[acc][btw][0]=${startDate}&filters[acc][btw][1]=${endDate}`;
+      this.logger.debug('Construindo URL de trajetórias: ' + trajectoriesUrl);
 
-    // Converter timestamp (act) para formato dd/MM/yyyy HH:mm
-    const date = this.formatarData(attributes.act);
+      const response = await this.executarComReautenticacao(
+        () =>
+          this.axiosInstance.get<SoftruckTrajectoriesApiResponse>(
+            trajectoriesUrl,
+            {
+              headers: this.getRequestHeaders(baseOrigin, publicKey, tokenOverride),
+              timeout: SOFTRUCK_REQUEST_TIMEOUT,
+            },
+          ),
+        baseOrigin,
+        publicKey,
+      );
 
-    // Extrair coordenadas [longitude, latitude]
-    const [longitudeRaw, latitudeRaw] = attributes.geometry.coordinates;
-    const longitude = this.parseCoordinate(longitudeRaw);
-    const latitude = this.parseCoordinate(latitudeRaw);
+      this.logger.debug(
+        `[${baseOrigin}] Resposta de trajetórias para trackingVehicleId=${trackingVehicleId} status=${response.status} body=${this.stringifyForLog(response.data)}`,
+      );
 
-    if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) {
+      if (!response.data?.data) {
+        throw new InternalServerErrorException(
+          'Dados de trajetória não disponíveis',
+        );
+      }
+
+      this.logger.log(
+        `[${baseOrigin}] Trajetórias obtidas para trackingVehicleId=${trackingVehicleId}: ${response.data.data.length} registros`,
+      );
+
+      return response.data;
+    } catch (error) {
+      if (error instanceof InternalServerErrorException) throw error;
+      this.logger.error(
+        `[${baseOrigin}] Erro ao obter trajetórias: ${this.formatError(error)}`,
+      );
       throw new InternalServerErrorException(
-        'Coordenadas inválidas retornadas pela Softruck',
+        'Erro ao buscar trajetórias do veículo',
       );
     }
-
-    const mapped = {
-      date,
-      ign: attributes.ign,
-      speed: attributes.spd,
-      latitude,
-      longitude,
-      coordinates: {
-        latitude,
-        longitude,
-      },
-      plate: vehicleData.plate,
-      brandName: vehicleData.brandName,
-      modelName: vehicleData.modelName,
-    };
-
-    this.logger.debug(
-      `Softruck payload mapeado vehicleId=${vehicleData.id} body=${this.stringifyForLog(mapped)}`,
-    );
-
-    return mapped;
   }
 
-  // Formatar timestamp Unix para dd/MM/yyyy HH:mm
-  private formatarData(timestamp: number): string {
-    const date = new Date(timestamp * 1000); // Converter de segundos para milissegundos
+  // Consultar a última posição do veículo via Softruck
+  async ultimaPosicaoSoftruck(
+    chassi: string,
+    baseOrigin: BaseOrigin,
+    publicKey: string,
+    tokenOverride?: string,
+  ): Promise<UltimaPosicaoSoftruckResponse> {
+    try {
+      const storedToken = this.softruckTokenByBase.get(baseOrigin);
+      this.logger.debug(
+        `[${baseOrigin}] ultimaPosicaoSoftruck chassi=${chassi} token=${this.maskSecret(tokenOverride ?? storedToken?.token)} publicKey=${this.maskSecret(publicKey)}`,
+      );
 
-    const day = String(date.getDate()).padStart(2, '0');
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const year = date.getFullYear();
-    const hours = String(date.getHours()).padStart(2, '0');
-    const minutes = String(date.getMinutes()).padStart(2, '0');
+      if (!tokenOverride && storedToken) {
+        const validToken = this.getValidToken(baseOrigin);
+        if (!validToken) {
+          this.logger.debug(
+            `[${baseOrigin}] Token expirado ou próximo de expirar. Fazendo novo login.`,
+          );
+          await this.autenticarSoftruck(baseOrigin, publicKey);
+        }
+      } else if (!tokenOverride && !storedToken) {
+        await this.autenticarSoftruck(baseOrigin, publicKey);
+      }
 
-    return `${day}/${month}/${year} ${hours}:${minutes}`;
-  }
+      const vehicleData = await this.obterVehicleId(
+        chassi,
+        baseOrigin,
+        publicKey,
+        tokenOverride,
+      );
 
-  private parseCoordinate(value: number | string): number {
-    if (typeof value === 'number') {
-      return value;
+      const deviceId = await this.obterDeviceId(
+        vehicleData.id,
+        baseOrigin,
+        publicKey,
+        tokenOverride,
+      );
+
+      const trackingData = await this.obterDadosRastreamento(
+        deviceId.vehicleId,
+        deviceId.deviceId,
+        baseOrigin,
+        publicKey,
+        tokenOverride,
+      );
+
+      const mapped = mapearUltimaPosicaoSoftruck(trackingData, vehicleData);
+      this.logger.debug(
+        `Softruck payload mapeado vehicleId=${vehicleData.id} body=${this.stringifyForLog(mapped)}`,
+      );
+      return mapped;
+    } catch (error) {
+      if (error instanceof InternalServerErrorException) throw error;
+      this.logger.error(
+        `Erro ao consultar última posição: ${this.formatError(error)}`,
+      );
+      throw new InternalServerErrorException(
+        'Erro ao consultar última posição do veículo',
+      );
     }
+  }
 
-    const normalized = value.trim().replace(',', '.');
-    return Number(normalized);
+  // Buscar trajetórias do veículo por intervalo de datas e gerar relatório em PDF
+  async obterTrajetoriasSoftruck(
+    chassi: string,
+    startDate: string,
+    endDate: string,
+    baseOrigin: BaseOrigin,
+    publicKey: string,
+    tokenOverride?: string,
+  ): Promise<Buffer> {
+    try {
+      const storedToken = this.softruckTokenByBase.get(baseOrigin);
+
+      if (!tokenOverride && storedToken) {
+        const validToken = this.getValidToken(baseOrigin);
+        if (!validToken) {
+          this.logger.debug(
+            `[${baseOrigin}] Token expirado ou próximo de expirar. Fazendo novo login.`,
+          );
+          await this.autenticarSoftruck(baseOrigin, publicKey);
+        }
+      } else if (!tokenOverride && !storedToken) {
+        await this.autenticarSoftruck(baseOrigin, publicKey);
+      }
+
+      const vehicleData = await this.obterVehicleId(
+        chassi,
+        baseOrigin,
+        publicKey,
+        tokenOverride,
+      );
+
+      const trajectoriesData = await this.obterDadosTrajetorias(
+        vehicleData.id,
+        startDate,
+        endDate,
+        baseOrigin,
+        publicKey,
+        tokenOverride,
+      );
+
+      const trajetoriasMapeadas = mapearTrajetoriasSoftruck(
+        trajectoriesData,
+        vehicleData,
+      );
+
+      return gerarPdfTrajetorias(trajetoriasMapeadas, startDate, endDate);
+    } catch (error) {
+      if (error instanceof InternalServerErrorException) throw error;
+      this.logger.error(
+        `[${baseOrigin}] Erro ao obter trajetórias: ${this.formatError(error)}`,
+      );
+      throw new InternalServerErrorException(
+        'Erro ao consultar trajetórias do veículo',
+      );
+    }
   }
 }
+
+// Re-export public types for convenience
+export type { UltimaPosicaoSoftruckResponse } from './dto/ultima-posicao.dto';
+export type {
+  TrajetoriaSoftruckRota,
+  TrajetoriasSoftruckResponse,
+} from './dto/trajetorias.dto';

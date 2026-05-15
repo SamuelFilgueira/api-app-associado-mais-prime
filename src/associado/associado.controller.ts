@@ -8,6 +8,7 @@ import {
   Patch,
   ParseIntPipe,
   Post,
+  Query,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
@@ -32,6 +33,13 @@ export class AssociadoController {
       `Dados recebido no primeiro acesso: ${JSON.stringify(data)}`,
     );
     return this.associadoService.primeiroAcesso(data.cpf);
+  }
+
+  @Get('cpf')
+  async findByCpf(@Query('cpf') cpf: string) {
+    this.logger.log(`Buscando associado com CPF: ${cpf}`);
+    const resposta = await this.associadoService.findByCpf(cpf);
+    return resposta;
   }
 
   @Get(':id')

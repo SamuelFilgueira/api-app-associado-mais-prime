@@ -15,7 +15,7 @@ import {
 import {
   RastreamentoSoftruck,
   UltimaPosicaoSoftruckResponse,
-} from './rastreamento-softruck';
+} from './softruck/rastreamento-softruck.service';
 import { BaseOrigin, TokenResolverService } from 'src/shared/token-resolver.service';
 import { baseTag } from 'src/shared/log.util';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -552,6 +552,57 @@ export class RastreamentoService {
       baseOrigin,
       publicKey,
       tokenOverride,
+    );
+  }
+
+  // Orquestrador: gera PDF de trajetórias Softruck por intervalo de datas
+  async obterTrajetoriasSoftruck(
+    chassi: string,
+    dataInicial: string,
+    dataFinal: string,
+    baseOrigin: BaseOrigin,
+    publicKey: string,
+  ): Promise<Buffer> {
+    const chassiNormalizado = chassi?.trim();
+    const dataInicialNormalizada = dataInicial?.trim();
+    const dataFinalNormalizada = dataFinal?.trim();
+
+    if (!chassiNormalizado) {
+      throw new BadRequestException('Parâmetro chassi é obrigatório');
+    }
+
+    if (!this.isDataIsoValida(dataInicialNormalizada)) {
+      throw new BadRequestException(
+        'Parâmetro dataInicial inválido. Use o formato yyyy-mm-dd',
+      );
+    }
+
+    if (!this.isDataIsoValida(dataFinalNormalizada)) {
+      throw new BadRequestException(
+        'Parâmetro dataFinal inválido. Use o formato yyyy-mm-dd',
+      );
+    }
+
+    if (dataInicialNormalizada > dataFinalNormalizada) {
+      throw new BadRequestException(
+        'Parâmetro dataInicial não pode ser maior que dataFinal',
+      );
+    }
+
+    // Softruck espera datas no formato YYYYMMDD
+    const startDate = dataInicialNormalizada.replace(/-/g, '');
+    const endDate = dataFinalNormalizada.replace(/-/g, '');
+
+    this.logger.log(
+      `${baseTag(baseOrigin)} Gerando PDF de trajetórias Softruck para chassi=${chassiNormalizado} período=${startDate}-${endDate}`,
+    );
+
+    return this.softruck.obterTrajetoriasSoftruck(
+      chassiNormalizado,
+      startDate,
+      endDate,
+      baseOrigin,
+      publicKey,
     );
   }
 

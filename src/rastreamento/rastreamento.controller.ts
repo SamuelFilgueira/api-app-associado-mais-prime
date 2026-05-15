@@ -205,6 +205,33 @@ export class RastreamentoController {
     );
   }
 
+  @UseGuards(JwtAuthGuard)
+  @Get('trajetorias-softruck/pdf')
+  async gerarRelatorioTrajetoriasSoftruckPDF(
+    @Query('chassi') chassi: string,
+    @Query('dataInicial') dataInicial: string,
+    @Query('dataFinal') dataFinal: string,
+    @Res() res: Response,
+  ) {
+    const ctx = this.buildRastreamentoContext();
+
+    const pdfBuffer = await this.rastreamentoService.obterTrajetoriasSoftruck(
+      chassi,
+      dataInicial,
+      dataFinal,
+      ctx.baseOrigin,
+      ctx.softruckPublicKey,
+    );
+
+    const safeChassi = (chassi || 'veiculo').replace(/[^A-Za-z0-9_-]/g, '');
+    const fileName = `trajetorias-${safeChassi || 'veiculo'}-${dataInicial}-${dataFinal}.pdf`;
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${fileName}"`);
+    res.setHeader('Content-Length', String(pdfBuffer.length));
+    res.send(pdfBuffer);
+  }
+
   //WEBHOOKS
 
   // Webhook M7 para eventos de rastreamento
