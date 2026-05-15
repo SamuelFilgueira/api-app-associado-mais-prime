@@ -88,15 +88,18 @@ export class AssociadoController {
   }
 
   /**
-   * Rota para troca de senha do usuário autenticado
-   * PATCH /associado/password
+   * Rota para troca de senha
+   * PATCH /associado/:id/password
    * Body: { newPassword: string }
    * Header: Authorization: Bearer <token>
    */
   @UseGuards(JwtAuthGuard)
   @Patch(':id/password')
-  async changePassword(@Request() req, @Body() body: { newPassword: string }) {
-    const userId = req.user.userId as number;
-    return this.associadoService.changePassword(userId, body.newPassword);
+  async changePassword(
+    @Param('id', ParseIntPipe) id: number,
+    @Request() req,
+    @Body() body: { newPassword: string },
+  ) {
+    return this.associadoService.changePassword(id, body.newPassword);
   }
 }
