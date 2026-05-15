@@ -1,3 +1,5 @@
+process.env.TZ = 'America/Sao_Paulo';
+
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import helmet from 'helmet';

@@ -62,6 +62,10 @@ interface SoftruckVehicleResponse {
 interface SoftruckDeviceAssociationResponse {
   data: Array<{
     id: string;
+    attributes: {
+      created_at: string;
+      deleted_at: string | null;
+    };
     relationships: {
       device: {
         id: string;
@@ -623,12 +627,27 @@ export class RastreamentoSoftruck {
         );
       }
 
+      // Preferir associação ativa (sem deleted_at); se todas deletadas, pegar a criada mais recentemente
+      const associations = response.data.data;
+      const ativa = associations.find((a) => !a.attributes.deleted_at);
       const selectedAssociation =
-        response.data.data[response.data.data.length - 1];
+        ativa ??
+        associations.reduce((maisRecente, atual) =>
+          new Date(atual.attributes.created_at) >
+          new Date(maisRecente.attributes.created_at)
+            ? atual
+            : maisRecente,
+        );
 
-      this.logger.log(
-        `Associação de dispositivo obtida para vehicle: ${vehicleId}: ${JSON.stringify(selectedAssociation)}`,
-      );
+      if (ativa) {
+        this.logger.log(
+          `Associação ativa selecionada para vehicle: ${vehicleId}: ${selectedAssociation.id}`,
+        );
+      } else {
+        this.logger.warn(
+          `Nenhuma associação ativa para vehicle: ${vehicleId} — usando a mais recente (created_at=${selectedAssociation.attributes.created_at})`,
+        );
+      }
 
       const trackingVehicleId = selectedAssociation.id;
       const deviceId = selectedAssociation.relationships.device.id;
