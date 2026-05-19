@@ -1,8 +1,11 @@
 import { InternalServerErrorException, Logger } from '@nestjs/common';
 import puppeteer from 'puppeteer';
-import { TrajetoriasSoftruckResponse } from '../dto/trajetorias.dto';
+import {
+  TrajetoriaSoftruckRota,
+  TrajetoriasSoftruckResponse,
+} from '../dto/trajetorias.dto';
 import { escapeHtml, formatarDataYYYYMMDDParaBR } from '../utils/formatters';
-import { geocodificarCoordenadas, normalizarCoord } from '../utils/geo.utils';
+import { normalizarCoord } from '../utils/geo.utils';
 
 export interface RotaComEndereco {
   startDate: string;
@@ -29,32 +32,37 @@ export async function gerarPdfTrajetorias(
   trajetoriasData: TrajetoriasSoftruckResponse,
   startDate: string,
   endDate: string,
+  resolverEnderecos: (
+    rotas: TrajetoriaSoftruckRota[],
+  ) => Promise<Map<string, string>>,
 ): Promise<Buffer> {
-  const enderecoMap = await geocodificarCoordenadas(trajetoriasData.routes);
+  const enderecoMap = await resolverEnderecos(trajetoriasData.routes);
 
-  const rotasComEndereco: RotaComEndereco[] = trajetoriasData.routes.map((rota) => {
-    const chaveOrigem = normalizarCoord(
-      rota.startPosition.latitude,
-      rota.startPosition.longitude,
-    );
-    const chaveDestino = normalizarCoord(
-      rota.endPosition.latitude,
-      rota.endPosition.longitude,
-    );
-    const fallbackOrigem = `${rota.startPosition.latitude.toFixed(5)}, ${rota.startPosition.longitude.toFixed(5)}`;
-    const fallbackDestino = `${rota.endPosition.latitude.toFixed(5)}, ${rota.endPosition.longitude.toFixed(5)}`;
+  const rotasComEndereco: RotaComEndereco[] = trajetoriasData.routes.map(
+    (rota) => {
+      const chaveOrigem = normalizarCoord(
+        rota.startPosition.latitude,
+        rota.startPosition.longitude,
+      );
+      const chaveDestino = normalizarCoord(
+        rota.endPosition.latitude,
+        rota.endPosition.longitude,
+      );
+      const fallbackOrigem = `Endereço não identificado (${rota.startPosition.latitude.toFixed(5)}, ${rota.startPosition.longitude.toFixed(5)})`;
+      const fallbackDestino = `Endereço não identificado (${rota.endPosition.latitude.toFixed(5)}, ${rota.endPosition.longitude.toFixed(5)})`;
 
-    return {
-      startDate: rota.startDate,
-      endDate: rota.endDate,
-      durationFormatted: rota.durationFormatted,
-      distanceInKm: rota.distanceInKm,
-      maxSpeed: rota.maxSpeed,
-      averageSpeed: rota.averageSpeed,
-      startAddress: enderecoMap.get(chaveOrigem) ?? fallbackOrigem,
-      endAddress: enderecoMap.get(chaveDestino) ?? fallbackDestino,
-    };
-  });
+      return {
+        startDate: rota.startDate,
+        endDate: rota.endDate,
+        durationFormatted: rota.durationFormatted,
+        distanceInKm: rota.distanceInKm,
+        maxSpeed: rota.maxSpeed,
+        averageSpeed: rota.averageSpeed,
+        startAddress: enderecoMap.get(chaveOrigem) ?? fallbackOrigem,
+        endAddress: enderecoMap.get(chaveDestino) ?? fallbackDestino,
+      };
+    },
+  );
 
   const dadosPdf: RelatorioTrajetoriaPdfData = {
     placa: trajetoriasData.vehicle.plate,

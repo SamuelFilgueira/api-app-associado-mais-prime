@@ -211,25 +211,44 @@ export class RastreamentoController {
     @Query('chassi') chassi: string,
     @Query('dataInicial') dataInicial: string,
     @Query('dataFinal') dataFinal: string,
-    @Res() res: Response,
   ) {
     const ctx = this.buildRastreamentoContext();
 
-    const pdfBuffer = await this.rastreamentoService.obterTrajetoriasSoftruck(
+    return this.rastreamentoService.solicitarRelatorioTrajetoriasSoftruck(
       chassi,
       dataInicial,
       dataFinal,
       ctx.baseOrigin,
       ctx.softruckPublicKey,
     );
+  }
 
-    const safeChassi = (chassi || 'veiculo').replace(/[^A-Za-z0-9_-]/g, '');
-    const fileName = `trajetorias-${safeChassi || 'veiculo'}-${dataInicial}-${dataFinal}.pdf`;
+  @UseGuards(JwtAuthGuard)
+  @Get('trajetorias-softruck/pdf/status')
+  async consultarRelatorioTrajetoriasSoftruckPDF(
+    @Query('jobId') jobId: string,
+  ) {
+    return this.rastreamentoService.consultarRelatorioTrajetoriasSoftruck(jobId);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('trajetorias-softruck/pdf/download')
+  async baixarRelatorioTrajetoriasSoftruckPDF(
+    @Query('jobId') jobId: string,
+    @Res() res: Response,
+  ) {
+    const { record, buffer } =
+      await this.rastreamentoService.obterArquivoRelatorioTrajetoriasSoftruck(
+        jobId,
+      );
 
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename="${fileName}"`);
-    res.setHeader('Content-Length', String(pdfBuffer.length));
-    res.send(pdfBuffer);
+    res.setHeader(
+      'Content-Disposition',
+      `inline; filename="${record.fileName ?? `${jobId}.pdf`}"`,
+    );
+    res.setHeader('Content-Length', String(buffer.length));
+    res.send(buffer);
   }
 
   //WEBHOOKS

@@ -1,4 +1,4 @@
-import { InternalServerErrorException, Logger } from '@nestjs/common';
+import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
 import axios, { AxiosInstance } from 'axios';
 import { Agent as HttpAgent } from 'http';
 import { Agent as HttpsAgent } from 'https';
@@ -19,7 +19,8 @@ import {
 } from './interfaces/softruck-api.interface';
 import { mapearUltimaPosicaoSoftruck } from './mappers/ultima-posicao.mapper';
 import { mapearTrajetoriasSoftruck } from './mappers/trajetorias.mapper';
-import { gerarPdfTrajetorias } from './pdf/trajetorias-pdf.generator';
+import { gerarPdfTrajetorias } from './pdf/trajetorias-pdf-generator';
+import { GeoCodingService } from './services/geocoding.service';
 
 /** Timeout padrão para chamadas HTTP à API Softruck (em ms) */
 const SOFTRUCK_REQUEST_TIMEOUT = 15_000;
@@ -30,17 +31,12 @@ const CACHE_TTL = 10 * 60 * 1000;
 /** TTL do token JWT em ms (menos buffer para renovar antecipadamente) */
 const TOKEN_TTL_BUFFER_MS = 60_000; // 1 minuto antes de expirar
 
+@Injectable()
 export class RastreamentoSoftruck {
   private readonly logger = new Logger(RastreamentoSoftruck.name);
   private readonly tokenResolver: TokenResolverService;
   private softruckTokenByBase = new Map<BaseOrigin, TokenEntry>();
   private static readonly MAX_LOG_PAYLOAD_LENGTH = 1500;
-
-  /** Limite de chamadas ao Nominatim por geração de PDF */
-  private static readonly MAX_GEOCODING = 40;
-
-  /** Intervalo de segurança entre chamadas ao Nominatim (ms) */
-  private static readonly GEOCODING_DELAY_MS = 1100;
 
   /** Axios instance com HTTP/HTTPS agents configurados */
   private axiosInstance: AxiosInstance;
@@ -68,8 +64,11 @@ export class RastreamentoSoftruck {
     }>
   >();
 
-  constructor(tokenResolver?: TokenResolverService) {
-    this.tokenResolver = tokenResolver ?? new TokenResolverService();
+  constructor(
+    private readonly geoCodingService: GeoCodingService,
+    tokenResolver: TokenResolverService,
+  ) {
+    this.tokenResolver = tokenResolver;
 
     this.axiosInstance = axios.create({
       httpAgent: new HttpAgent({
@@ -436,12 +435,6 @@ export class RastreamentoSoftruck {
     publicKey: string,
     tokenOverride?: string,
   ): Promise<{ vehicleId: string; deviceId: string }> {
-    const cached = this.getCached(this.deviceCache, vehicleId);
-    if (cached) {
-      this.logger.debug(`[Cache HIT] Device ID para vehicle: ${vehicleId}`);
-      return cached;
-    }
-
     try {
       const response = await this.executarComReautenticacao(
         () =>
@@ -466,11 +459,18 @@ export class RastreamentoSoftruck {
         );
       }
 
-      const selectedAssociation =
-        response.data.data[response.data.data.length - 1];
+      const selectedAssociation = response.data.data.find(
+        (a) => a.attributes.is_main_device === true,
+      );
+
+      if (!selectedAssociation) {
+        throw new InternalServerErrorException(
+          'Associação principal (is_main_device=true) não encontrada para o veículo',
+        );
+      }
 
       this.logger.log(
-        `Associação de dispositivo obtida para vehicle: ${vehicleId}: ${JSON.stringify(selectedAssociation)}`,
+        `Associação principal selecionada para vehicle: ${vehicleId}: ${selectedAssociation.id}`,
       );
 
       const trackingVehicleId = selectedAssociation.id;
@@ -486,7 +486,6 @@ export class RastreamentoSoftruck {
         `IDs de tracking obtidos: trackingVehicleId=${trackingVehicleId} deviceId=${deviceId} para vehicle: ${vehicleId}`,
       );
       const result = { vehicleId: trackingVehicleId, deviceId };
-      this.setCache(this.deviceCache, vehicleId, result);
       return result;
     } catch (error) {
       if (error instanceof InternalServerErrorException) throw error;
@@ -704,7 +703,12 @@ export class RastreamentoSoftruck {
         vehicleData,
       );
 
-      return gerarPdfTrajetorias(trajetoriasMapeadas, startDate, endDate);
+      return gerarPdfTrajetorias(
+        trajetoriasMapeadas,
+        startDate,
+        endDate,
+        this.geoCodingService.geocodificarCoordenadas.bind(this.geoCodingService),
+      );
     } catch (error) {
       if (error instanceof InternalServerErrorException) throw error;
       this.logger.error(

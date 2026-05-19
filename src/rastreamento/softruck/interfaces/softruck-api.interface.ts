@@ -29,6 +29,10 @@ export interface SoftruckVehicleResponse {
 export interface SoftruckDeviceAssociationResponse {
   data: Array<{
     id: string;
+    attributes: {
+      is_main_device: boolean;
+      deleted_at: string | null;
+    };
     relationships: {
       device: {
         id: string;

@@ -65,6 +65,7 @@ interface SoftruckDeviceAssociationResponse {
     attributes: {
       created_at: string;
       deleted_at: string | null;
+      is_main_device?: boolean;
     };
     relationships: {
       device: {
@@ -369,9 +370,9 @@ export class RastreamentoSoftruck {
         },
       );
 
-      this.logger.debug(
-        `[LOGIN] Resposta HTTP ${response.status}: ${JSON.stringify(response.data)}`,
-      );
+      // this.logger.debug(
+      //   `[LOGIN] Resposta HTTP ${response.status}: ${JSON.stringify(response.data)}`,
+      // );
 
       const token = response.data?.data?.token;
 
@@ -442,9 +443,9 @@ export class RastreamentoSoftruck {
   ): Promise<UltimaPosicaoSoftruckResponse> {
     try {
       const storedToken = this.softruckTokenByBase.get(baseOrigin);
-      this.logger.debug(
-        `[${baseOrigin}] ultimaPosicaoSoftruck chassi=${chassi} token=${this.maskSecret(tokenOverride ?? storedToken?.token)} publicKey=${this.maskSecret(publicKey)}`,
-      );
+      // this.logger.debug(
+      //   `[${baseOrigin}] ultimaPosicaoSoftruck chassi=${chassi} token=${this.maskSecret(tokenOverride ?? storedToken?.token)} publicKey=${this.maskSecret(publicKey)}`,
+      // );
 
       // Verificar se token precisa ser renovado (expirado ou próximo de expirar)
       if (!tokenOverride && storedToken) {
@@ -586,13 +587,6 @@ export class RastreamentoSoftruck {
     publicKey: string,
     tokenOverride?: string,
   ): Promise<{ vehicleId: string; deviceId: string }> {
-    // Verifica cache primeiro
-    const cached = this.getCached(this.deviceCache, vehicleId);
-    if (cached) {
-      this.logger.debug(`[Cache HIT] Device ID para vehicle: ${vehicleId}`);
-      return cached;
-    }
-
     try {
       const response = await this.executarComReautenticacao(
         () =>
@@ -627,27 +621,21 @@ export class RastreamentoSoftruck {
         );
       }
 
-      // Preferir associação ativa (sem deleted_at); se todas deletadas, pegar a criada mais recentemente
+      // is_main_device é a fonte de verdade para seleção do device
       const associations = response.data.data;
-      const ativa = associations.find((a) => !a.attributes.deleted_at);
-      const selectedAssociation =
-        ativa ??
-        associations.reduce((maisRecente, atual) =>
-          new Date(atual.attributes.created_at) >
-          new Date(maisRecente.attributes.created_at)
-            ? atual
-            : maisRecente,
-        );
+      const selectedAssociation = associations.find(
+        (a) => a.attributes.is_main_device === true,
+      );
 
-      if (ativa) {
-        this.logger.log(
-          `Associação ativa selecionada para vehicle: ${vehicleId}: ${selectedAssociation.id}`,
-        );
-      } else {
-        this.logger.warn(
-          `Nenhuma associação ativa para vehicle: ${vehicleId} — usando a mais recente (created_at=${selectedAssociation.attributes.created_at})`,
+      if (!selectedAssociation) {
+        throw new InternalServerErrorException(
+          'Associação principal (is_main_device=true) não encontrada para o veículo',
         );
       }
+
+      this.logger.log(
+        `Associação principal selecionada para vehicle: ${vehicleId}: ${selectedAssociation.id}`,
+      );
 
       const trackingVehicleId = selectedAssociation.id;
       const deviceId = selectedAssociation.relationships.device.id;
@@ -662,7 +650,6 @@ export class RastreamentoSoftruck {
         `IDs de tracking obtidos: trackingVehicleId=${trackingVehicleId} deviceId=${deviceId} para vehicle: ${vehicleId}`,
       );
       const result = { vehicleId: trackingVehicleId, deviceId };
-      this.setCache(this.deviceCache, vehicleId, result);
       return result;
     } catch (error) {
       if (error instanceof InternalServerErrorException) {
