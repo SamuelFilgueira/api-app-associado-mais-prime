@@ -4,7 +4,6 @@ import { BullModule } from '@nestjs/bullmq';
 export const WEBHOOK_QUEUE = 'webhook-events';
 export const NOTIFICATION_QUEUE = 'notifications';
 export const FUEL_ECONOMY_QUEUE = 'fuel-economy';
-export const TRACKING_REPORT_QUEUE = 'tracking-report-queue';
 
 /**
  * Módulo global que configura o BullMQ com Redis.
@@ -31,7 +30,6 @@ export const TRACKING_REPORT_QUEUE = 'tracking-report-queue';
       { name: WEBHOOK_QUEUE },
       { name: NOTIFICATION_QUEUE },
       { name: FUEL_ECONOMY_QUEUE },
-      { name: TRACKING_REPORT_QUEUE },
     ),
   ],
   exports: [BullModule],

@@ -1,9 +1,7 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
-import { InjectQueue } from '@nestjs/bullmq';
 import { Prisma } from '@prisma/client';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { Queue } from 'bullmq';
 import { PrismaService } from '../prisma.service';
 import {
   RastreamentoM7,
@@ -21,10 +19,9 @@ import {
 import { BaseOrigin, TokenResolverService } from 'src/shared/token-resolver.service';
 import { baseTag } from 'src/shared/log.util';
 import { NotificationsService } from '../notifications/notifications.service';
+import { HistoricoSoftruckService } from './softruck/services/historico-softruck.service';
+import { HistoricoRotasResponseDto } from './softruck/dto/historico-response.dto';
 import axios from 'axios';
-import { TRACKING_REPORT_QUEUE } from '../queue/queue.module';
-import { TrackingReportStorageService } from './tracking-report-storage.service';
-import { TrackingReportJobData, TrackingReportRecord } from './tracking-report.types';
 
 const DEFAULT_LOGICA_STALE_THRESHOLD_MINUTES = 20;
 
@@ -59,9 +56,7 @@ export class RastreamentoService {
     private readonly notificationsService: NotificationsService,
     private readonly tokenResolver: TokenResolverService,
     private readonly softruck: RastreamentoSoftruck,
-    private readonly trackingReportStorage: TrackingReportStorageService,
-    @InjectQueue(TRACKING_REPORT_QUEUE)
-    private readonly trackingReportQueue: Queue,
+    private readonly historicoSoftruck: HistoricoSoftruckService,
   ) {
     this.m7 = new RastreamentoM7();
   }
@@ -297,7 +292,98 @@ export class RastreamentoService {
     );
   }
 
-  
+  /**
+   * Gera PDF de histórico de trajetórias via API Softruck.
+   * Delega para HistoricoSoftruckService após validar os parâmetros de entrada.
+   */
+  async gerarRelatorioHistoricoSoftruckPDF(
+    chassi: string,
+    dataInicial: string,
+    dataFinal: string,
+    baseOrigin: BaseOrigin,
+    publicKey: string,
+  ): Promise<Buffer> {
+    const chassiNormalizado = chassi?.trim();
+    const dataInicialNormalizada = dataInicial?.trim();
+    const dataFinalNormalizada = dataFinal?.trim();
+
+    if (!chassiNormalizado) {
+      throw new BadRequestException('Parâmetro chassi é obrigatório');
+    }
+
+    if (!this.isDataIsoValida(dataInicialNormalizada)) {
+      throw new BadRequestException(
+        'Parâmetro dataInicial inválido. Use o formato yyyy-mm-dd',
+      );
+    }
+
+    if (!this.isDataIsoValida(dataFinalNormalizada)) {
+      throw new BadRequestException(
+        'Parâmetro dataFinal inválido. Use o formato yyyy-mm-dd',
+      );
+    }
+
+    if (dataInicialNormalizada > dataFinalNormalizada) {
+      throw new BadRequestException(
+        'Parâmetro dataInicial não pode ser maior que dataFinal',
+      );
+    }
+
+    return this.historicoSoftruck.gerarRelatorioPdf(
+      chassiNormalizado,
+      dataInicialNormalizada,
+      dataFinalNormalizada,
+      baseOrigin,
+      publicKey,
+    );
+  }
+
+  /**
+   * Retorna rotas detalhadas em GeoJSON para o período via API Softruck.
+   * Delega para HistoricoSoftruckService após validar os parâmetros de entrada.
+   */
+  async obterRotasHistoricoSoftruck(
+    chassi: string,
+    dataInicial: string,
+    dataFinal: string,
+    baseOrigin: BaseOrigin,
+    publicKey: string,
+  ): Promise<HistoricoRotasResponseDto> {
+    const chassiNormalizado = chassi?.trim();
+    const dataInicialNormalizada = dataInicial?.trim();
+    const dataFinalNormalizada = dataFinal?.trim();
+
+    if (!chassiNormalizado) {
+      throw new BadRequestException('Parâmetro chassi é obrigatório');
+    }
+
+    if (!this.isDataIsoValida(dataInicialNormalizada)) {
+      throw new BadRequestException(
+        'Parâmetro dataInicial inválido. Use o formato yyyy-mm-dd',
+      );
+    }
+
+    if (!this.isDataIsoValida(dataFinalNormalizada)) {
+      throw new BadRequestException(
+        'Parâmetro dataFinal inválido. Use o formato yyyy-mm-dd',
+      );
+    }
+
+    if (dataInicialNormalizada > dataFinalNormalizada) {
+      throw new BadRequestException(
+        'Parâmetro dataInicial não pode ser maior que dataFinal',
+      );
+    }
+
+    return this.historicoSoftruck.obterRotas(
+      chassiNormalizado,
+      dataInicialNormalizada,
+      dataFinalNormalizada,
+      baseOrigin,
+      publicKey,
+    );
+  }
+
 
   /**
    * Obtém o estado atual do veículo (ancoraAtiva + notificacaoIgnicao).
@@ -560,153 +646,6 @@ export class RastreamentoService {
       publicKey,
       tokenOverride,
     );
-  }
-
-  // Orquestrador: gera PDF de trajetórias Softruck por intervalo de datas
-  async obterTrajetoriasSoftruck(
-    chassi: string,
-    dataInicial: string,
-    dataFinal: string,
-    baseOrigin: BaseOrigin,
-    publicKey: string,
-  ): Promise<Buffer> {
-    const { chassiNormalizado, dataInicialNormalizada, dataFinalNormalizada } =
-      this.validarParametrosRelatorioTrajetoriasSoftruck(
-        chassi,
-        dataInicial,
-        dataFinal,
-      );
-
-    const startDate = dataInicialNormalizada.replace(/-/g, '');
-    const endDate = dataFinalNormalizada.replace(/-/g, '');
-
-    this.logger.log(
-      `${baseTag(baseOrigin)} Gerando PDF de trajetórias Softruck para chassi=${chassiNormalizado} período=${startDate}-${endDate}`,
-    );
-
-    return this.softruck.obterTrajetoriasSoftruck(
-      chassiNormalizado,
-      startDate,
-      endDate,
-      baseOrigin,
-      publicKey,
-    );
-  }
-
-  async solicitarRelatorioTrajetoriasSoftruck(
-    chassi: string,
-    dataInicial: string,
-    dataFinal: string,
-    baseOrigin: BaseOrigin,
-    publicKey: string,
-  ): Promise<{
-    queued: true;
-    jobId: string;
-    queue: string;
-    status: 'queued';
-    enqueuedAt: string;
-  }> {
-    const { chassiNormalizado, dataInicialNormalizada, dataFinalNormalizada } =
-      this.validarParametrosRelatorioTrajetoriasSoftruck(
-        chassi,
-        dataInicial,
-        dataFinal,
-      );
-
-    const payload: TrackingReportJobData = {
-      chassi: chassiNormalizado,
-      dataInicial: dataInicialNormalizada,
-      dataFinal: dataFinalNormalizada,
-      baseOrigin,
-      publicKey,
-    };
-
-    const job = await this.trackingReportQueue.add('generate-softruck-pdf', payload, {
-      attempts: 3,
-      backoff: { type: 'exponential', delay: 2000 },
-    });
-
-    await this.trackingReportStorage.markQueued(String(job.id), payload);
-
-    this.logger.log(
-      `${baseTag(baseOrigin)} Job de relatório de trajetórias enfileirado #${job.id} chassi=${chassiNormalizado} período=${dataInicialNormalizada}-${dataFinalNormalizada}`,
-    );
-
-    return {
-      queued: true,
-      jobId: String(job.id),
-      queue: TRACKING_REPORT_QUEUE,
-      status: 'queued',
-      enqueuedAt: new Date().toISOString(),
-    };
-  }
-
-  async consultarRelatorioTrajetoriasSoftruck(
-    jobId: string,
-  ): Promise<TrackingReportRecord> {
-    const record = await this.trackingReportStorage.getRecord(jobId);
-
-    if (!record) {
-      throw new BadRequestException('Relatório não encontrado para o job informado');
-    }
-
-    return record;
-  }
-
-  async obterArquivoRelatorioTrajetoriasSoftruck(
-    jobId: string,
-  ): Promise<{ record: TrackingReportRecord; buffer: Buffer }> {
-    const reportFile = await this.trackingReportStorage.getCompletedReportFile(jobId);
-
-    if (!reportFile) {
-      throw new BadRequestException(
-        'Relatório ainda não está disponível para download',
-      );
-    }
-
-    return reportFile;
-  }
-
-  private validarParametrosRelatorioTrajetoriasSoftruck(
-    chassi: string,
-    dataInicial: string,
-    dataFinal: string,
-  ): {
-    chassiNormalizado: string;
-    dataInicialNormalizada: string;
-    dataFinalNormalizada: string;
-  } {
-    const chassiNormalizado = chassi?.trim();
-    const dataInicialNormalizada = dataInicial?.trim();
-    const dataFinalNormalizada = dataFinal?.trim();
-
-    if (!chassiNormalizado) {
-      throw new BadRequestException('Parâmetro chassi é obrigatório');
-    }
-
-    if (!this.isDataIsoValida(dataInicialNormalizada)) {
-      throw new BadRequestException(
-        'Parâmetro dataInicial inválido. Use o formato yyyy-mm-dd',
-      );
-    }
-
-    if (!this.isDataIsoValida(dataFinalNormalizada)) {
-      throw new BadRequestException(
-        'Parâmetro dataFinal inválido. Use o formato yyyy-mm-dd',
-      );
-    }
-
-    if (dataInicialNormalizada > dataFinalNormalizada) {
-      throw new BadRequestException(
-        'Parâmetro dataInicial não pode ser maior que dataFinal',
-      );
-    }
-
-    return {
-      chassiNormalizado,
-      dataInicialNormalizada,
-      dataFinalNormalizada,
-    };
   }
 
   private async resolveBaseContextFromDb(

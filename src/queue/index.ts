@@ -3,5 +3,4 @@ export {
 	WEBHOOK_QUEUE,
 	NOTIFICATION_QUEUE,
 	FUEL_ECONOMY_QUEUE,
-	TRACKING_REPORT_QUEUE,
 } from './queue.module';

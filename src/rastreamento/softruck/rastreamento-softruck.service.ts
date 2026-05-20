@@ -7,20 +7,20 @@ import {
   TokenResolverService,
 } from 'src/shared/token-resolver.service';
 import { UltimaPosicaoSoftruckResponse } from './dto/ultima-posicao.dto';
-import { TrajetoriasSoftruckResponse } from './dto/trajetorias.dto';
 import {
   CacheEntry,
   JwtPayload,
   SoftruckDeviceAssociationResponse,
-  SoftruckTrajectoriesApiResponse,
   SoftruckTrackingResponse,
   SoftruckVehicleResponse,
   TokenEntry,
 } from './interfaces/softruck-api.interface';
+import {
+  SoftruckByKeysApiResponse,
+  SoftruckGeomApiResponse,
+  SoftruckGeomFeatureCollection,
+} from './interfaces/softruck-trajectories.interface';
 import { mapearUltimaPosicaoSoftruck } from './mappers/ultima-posicao.mapper';
-import { mapearTrajetoriasSoftruck } from './mappers/trajetorias.mapper';
-import { gerarPdfTrajetorias } from './pdf/trajetorias-pdf-generator';
-import { GeoCodingService } from './services/geocoding.service';
 
 /** Timeout padrão para chamadas HTTP à API Softruck (em ms) */
 const SOFTRUCK_REQUEST_TIMEOUT = 15_000;
@@ -64,10 +64,7 @@ export class RastreamentoSoftruck {
     }>
   >();
 
-  constructor(
-    private readonly geoCodingService: GeoCodingService,
-    tokenResolver: TokenResolverService,
-  ) {
+  constructor(tokenResolver: TokenResolverService) {
     this.tokenResolver = tokenResolver;
 
     this.axiosInstance = axios.create({
@@ -435,6 +432,12 @@ export class RastreamentoSoftruck {
     publicKey: string,
     tokenOverride?: string,
   ): Promise<{ vehicleId: string; deviceId: string }> {
+    const cached = this.getCached(this.deviceCache, vehicleId);
+    if (cached) {
+      this.logger.debug(`[Cache HIT] Device data para vehicleId: ${vehicleId}`);
+      return cached;
+    }
+
     try {
       const response = await this.executarComReautenticacao(
         () =>
@@ -486,6 +489,7 @@ export class RastreamentoSoftruck {
         `IDs de tracking obtidos: trackingVehicleId=${trackingVehicleId} deviceId=${deviceId} para vehicle: ${vehicleId}`,
       );
       const result = { vehicleId: trackingVehicleId, deviceId };
+      this.setCache(this.deviceCache, vehicleId, result);
       return result;
     } catch (error) {
       if (error instanceof InternalServerErrorException) throw error;
@@ -543,24 +547,32 @@ export class RastreamentoSoftruck {
     }
   }
 
-  // STEP 3 (trajetórias): Consultar endpoint de trajetórias pelo trackingVehicleId
-  private async obterDadosTrajetorias(
-    trackingVehicleId: string,
-    startDate: string,
-    endDate: string,
+  // ============================================================
+  // STEP 4: Obter trajetórias diárias via /trajectories/by-keys
+  // ============================================================
+
+  /**
+   * Consulta o resumo de trajetórias de um dia específico pelo ACC (YYYYMMDD).
+   * Retorna null quando a Softruck não possui dados para o dia informado.
+   */
+  private async obterTrajetoriasByKeys(
+    vehicleId: string,
+    deviceId: string,
+    acc: number,
     baseOrigin: BaseOrigin,
     publicKey: string,
     tokenOverride?: string,
-  ): Promise<SoftruckTrajectoriesApiResponse> {
+  ): Promise<SoftruckByKeysApiResponse | null> {
     try {
-      const trajectoriesUrl = `${this.buildSoftruckUrl(`vehicles/${trackingVehicleId}/trajectories`)}?filters[acc][btw][0]=${startDate}&filters[acc][btw][1]=${endDate}`;
-      this.logger.debug('Construindo URL de trajetórias: ' + trajectoriesUrl);
-
       const response = await this.executarComReautenticacao(
         () =>
-          this.axiosInstance.get<SoftruckTrajectoriesApiResponse>(
-            trajectoriesUrl,
+          this.axiosInstance.get<SoftruckByKeysApiResponse>(
+            this.buildSoftruckUrl(`/vehicles/${vehicleId}/trajectories/by-keys`),
             {
+              params: {
+                'filters[acc][eq]': acc,
+                'filters[did][eq]': deviceId,
+              },
               headers: this.getRequestHeaders(baseOrigin, publicKey, tokenOverride),
               timeout: SOFTRUCK_REQUEST_TIMEOUT,
             },
@@ -570,29 +582,174 @@ export class RastreamentoSoftruck {
       );
 
       this.logger.debug(
-        `[${baseOrigin}] Resposta de trajetórias para trackingVehicleId=${trackingVehicleId} status=${response.status} body=${this.stringifyForLog(response.data)}`,
+        `[${baseOrigin}] by-keys vehicleId=${vehicleId} acc=${acc} status=${response.status} body=${this.stringifyForLog(response.data)}`,
       );
 
-      if (!response.data?.data) {
-        throw new InternalServerErrorException(
-          'Dados de trajetória não disponíveis',
+      if (!response.data?.data?.id) {
+        this.logger.debug(
+          `[${baseOrigin}] by-keys sem dados para acc=${acc} vehicleId=${vehicleId}`,
         );
+        return null;
       }
 
       this.logger.log(
-        `[${baseOrigin}] Trajetórias obtidas para trackingVehicleId=${trackingVehicleId}: ${response.data.data.length} registros`,
+        `[${baseOrigin}] by-keys acc=${acc}: ${response.data.data.attributes.sgCnt ?? 0} segmentos, ${response.data.data.attributes.dis}m`,
       );
-
       return response.data;
     } catch (error) {
+      if (axios.isAxiosError(error) && error.response?.status === 404) {
+        this.logger.debug(
+          `[${baseOrigin}] by-keys 404 para acc=${acc} vehicleId=${vehicleId} — sem dados nesse dia`,
+        );
+        return null;
+      }
       if (error instanceof InternalServerErrorException) throw error;
       this.logger.error(
-        `[${baseOrigin}] Erro ao obter trajetórias: ${this.formatError(error)}`,
+        `[${baseOrigin}] Erro ao buscar by-keys acc=${acc}: ${this.formatError(error)}`,
       );
       throw new InternalServerErrorException(
-        'Erro ao buscar trajetórias do veículo',
+        `Erro ao buscar trajetórias do dia ${acc}`,
       );
     }
+  }
+
+  // ============================================================
+  // STEP 5: Obter GeoJSON detalhado via /trajectories/geom
+  // ============================================================
+
+  /**
+   * Consulta os pontos GPS detalhados de um dia via endpoint geom.
+   * Requer o enterpriseId obtido previamente via by-keys.
+   * Retorna null quando não há dados para o dia.
+   */
+  private async obterGeomTrajetorias(
+    vehicleId: string,
+    deviceId: string,
+    enterpriseId: string,
+    acc: number,
+    baseOrigin: BaseOrigin,
+    publicKey: string,
+    tokenOverride?: string,
+  ): Promise<SoftruckGeomFeatureCollection | null> {
+    try {
+      const response = await this.executarComReautenticacao(
+        () =>
+          this.axiosInstance.get<SoftruckGeomApiResponse>(
+            this.buildSoftruckUrl(`/vehicles/${vehicleId}/trajectories/geom`),
+            {
+              params: {
+                'filters[acc][eq]': acc,
+                'filters[did][eq]': deviceId,
+                'filters[eid][eq]': enterpriseId,
+              },
+              headers: this.getRequestHeaders(baseOrigin, publicKey, tokenOverride),
+              timeout: SOFTRUCK_REQUEST_TIMEOUT,
+            },
+          ),
+        baseOrigin,
+        publicKey,
+      );
+
+      this.logger.debug(
+        `[${baseOrigin}] geom vehicleId=${vehicleId} acc=${acc} status=${response.status} features=${response.data?.data?.features?.length ?? 0}`,
+      );
+
+      if (!response.data?.data?.features?.length) {
+        this.logger.debug(
+          `[${baseOrigin}] geom sem features para acc=${acc} vehicleId=${vehicleId}`,
+        );
+        return null;
+      }
+
+      this.logger.log(
+        `[${baseOrigin}] geom acc=${acc}: ${response.data.data.features.length} features`,
+      );
+      return response.data.data;
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response?.status === 404) {
+        this.logger.debug(
+          `[${baseOrigin}] geom 404 para acc=${acc} vehicleId=${vehicleId} — sem dados nesse dia`,
+        );
+        return null;
+      }
+      if (error instanceof InternalServerErrorException) throw error;
+      this.logger.error(
+        `[${baseOrigin}] Erro ao buscar geom acc=${acc}: ${this.formatError(error)}`,
+      );
+      throw new InternalServerErrorException(
+        `Erro ao buscar GeoJSON de trajetórias do dia ${acc}`,
+      );
+    }
+  }
+
+  // ============================================================
+  // Métodos públicos para uso pelos serviços de histórico
+  // ============================================================
+
+  /**
+   * Resolve e retorna os dados de veículo e dispositivo para um chassi.
+   * Garante autenticação antes de realizar as consultas.
+   * Utiliza caches internos para evitar chamadas desnecessárias à Softruck.
+   */
+  async resolveVehicleAndDevice(
+    chassi: string,
+    baseOrigin: BaseOrigin,
+    publicKey: string,
+  ): Promise<{
+    vehicleData: { id: string; plate: string; brandName: string; modelName: string };
+    deviceData: { vehicleId: string; deviceId: string };
+  }> {
+    const storedToken = this.softruckTokenByBase.get(baseOrigin);
+
+    if (storedToken) {
+      const validToken = this.getValidToken(baseOrigin);
+      if (!validToken) {
+        this.logger.debug(
+          `[${baseOrigin}] resolveVehicleAndDevice: token expirado, fazendo novo login`,
+        );
+        await this.autenticarSoftruck(baseOrigin, publicKey);
+      }
+    } else {
+      await this.autenticarSoftruck(baseOrigin, publicKey);
+    }
+
+    const vehicleData = await this.obterVehicleId(chassi, baseOrigin, publicKey);
+    const deviceData = await this.obterDeviceId(vehicleData.id, baseOrigin, publicKey);
+
+    this.logger.log(
+      `[${baseOrigin}] resolveVehicleAndDevice chassi=${chassi} vehicleId=${vehicleData.id} deviceId=${deviceData.deviceId}`,
+    );
+
+    return { vehicleData, deviceData };
+  }
+
+  /**
+   * Busca o resumo de trajetórias de um dia específico (by-keys) para uso
+   * pelos serviços de histórico. Gerencia autenticação via executarComReautenticacao.
+   */
+  async buscarByKeysPorAcc(
+    vehicleId: string,
+    deviceId: string,
+    acc: number,
+    baseOrigin: BaseOrigin,
+    publicKey: string,
+  ): Promise<SoftruckByKeysApiResponse | null> {
+    return this.obterTrajetoriasByKeys(vehicleId, deviceId, acc, baseOrigin, publicKey);
+  }
+
+  /**
+   * Busca os pontos GPS detalhados de um dia (geom) para uso pelos serviços
+   * de histórico. Requer o enterpriseId obtido via by-keys.
+   */
+  async buscarGeomPorAcc(
+    vehicleId: string,
+    deviceId: string,
+    enterpriseId: string,
+    acc: number,
+    baseOrigin: BaseOrigin,
+    publicKey: string,
+  ): Promise<SoftruckGeomFeatureCollection | null> {
+    return this.obterGeomTrajetorias(vehicleId, deviceId, enterpriseId, acc, baseOrigin, publicKey);
   }
 
   // Consultar a última posição do veículo via Softruck
@@ -657,73 +814,8 @@ export class RastreamentoSoftruck {
       );
     }
   }
-
-  // Buscar trajetórias do veículo por intervalo de datas e gerar relatório em PDF
-  async obterTrajetoriasSoftruck(
-    chassi: string,
-    startDate: string,
-    endDate: string,
-    baseOrigin: BaseOrigin,
-    publicKey: string,
-    tokenOverride?: string,
-  ): Promise<Buffer> {
-    try {
-      const storedToken = this.softruckTokenByBase.get(baseOrigin);
-
-      if (!tokenOverride && storedToken) {
-        const validToken = this.getValidToken(baseOrigin);
-        if (!validToken) {
-          this.logger.debug(
-            `[${baseOrigin}] Token expirado ou próximo de expirar. Fazendo novo login.`,
-          );
-          await this.autenticarSoftruck(baseOrigin, publicKey);
-        }
-      } else if (!tokenOverride && !storedToken) {
-        await this.autenticarSoftruck(baseOrigin, publicKey);
-      }
-
-      const vehicleData = await this.obterVehicleId(
-        chassi,
-        baseOrigin,
-        publicKey,
-        tokenOverride,
-      );
-
-      const trajectoriesData = await this.obterDadosTrajetorias(
-        vehicleData.id,
-        startDate,
-        endDate,
-        baseOrigin,
-        publicKey,
-        tokenOverride,
-      );
-
-      const trajetoriasMapeadas = mapearTrajetoriasSoftruck(
-        trajectoriesData,
-        vehicleData,
-      );
-
-      return gerarPdfTrajetorias(
-        trajetoriasMapeadas,
-        startDate,
-        endDate,
-        this.geoCodingService.geocodificarCoordenadas.bind(this.geoCodingService),
-      );
-    } catch (error) {
-      if (error instanceof InternalServerErrorException) throw error;
-      this.logger.error(
-        `[${baseOrigin}] Erro ao obter trajetórias: ${this.formatError(error)}`,
-      );
-      throw new InternalServerErrorException(
-        'Erro ao consultar trajetórias do veículo',
-      );
-    }
-  }
 }
 
 // Re-export public types for convenience
 export type { UltimaPosicaoSoftruckResponse } from './dto/ultima-posicao.dto';
-export type {
-  TrajetoriaSoftruckRota,
-  TrajetoriasSoftruckResponse,
-} from './dto/trajetorias.dto';
+

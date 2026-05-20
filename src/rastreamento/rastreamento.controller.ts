@@ -20,6 +20,7 @@ import {
   TokenResolverService,
 } from 'src/shared/token-resolver.service';
 import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
+import { HistoricoQueryDto } from './softruck/dto/historico-query.dto';
 
 interface RastreamentoRequestContext {
   baseOrigin: BaseOrigin;
@@ -126,6 +127,45 @@ export class RastreamentoController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @Get('historico/softruck/pdf')
+  async gerarRelatorioHistoricoSoftruckPDF(
+    @Query() query: HistoricoQueryDto,
+    @Res() res: Response,
+  ) {
+    const ctx = this.buildRastreamentoContext();
+
+    const pdfBuffer = await this.rastreamentoService.gerarRelatorioHistoricoSoftruckPDF(
+      query.chassi,
+      query.dataInicial,
+      query.dataFinal,
+      ctx.baseOrigin,
+      ctx.softruckPublicKey,
+    );
+
+    const safeChassi = query.chassi.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 20);
+    const fileName = `trajetorias-${safeChassi}-${query.dataInicial}-${query.dataFinal}.pdf`;
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${fileName}"`);
+    res.setHeader('Content-Length', String(pdfBuffer.length));
+    res.send(pdfBuffer);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('historico/softruck/rotas')
+  async obterRotasHistoricoSoftruck(@Query() query: HistoricoQueryDto) {
+    const ctx = this.buildRastreamentoContext();
+
+    return this.rastreamentoService.obterRotasHistoricoSoftruck(
+      query.chassi,
+      query.dataInicial,
+      query.dataFinal,
+      ctx.baseOrigin,
+      ctx.softruckPublicKey,
+    );
+  }
+
+  @UseGuards(JwtAuthGuard)
   @Post('ancora-m7')
   async ancoraM7(
     @Body() body: { cnpj: string; chassi: string; ancora_ativa: boolean },
@@ -203,52 +243,6 @@ export class RastreamentoController {
       ctx.baseOrigin,
       ctx.softruckPublicKey,
     );
-  }
-
-  @UseGuards(JwtAuthGuard)
-  @Get('trajetorias-softruck/pdf')
-  async gerarRelatorioTrajetoriasSoftruckPDF(
-    @Query('chassi') chassi: string,
-    @Query('dataInicial') dataInicial: string,
-    @Query('dataFinal') dataFinal: string,
-  ) {
-    const ctx = this.buildRastreamentoContext();
-
-    return this.rastreamentoService.solicitarRelatorioTrajetoriasSoftruck(
-      chassi,
-      dataInicial,
-      dataFinal,
-      ctx.baseOrigin,
-      ctx.softruckPublicKey,
-    );
-  }
-
-  @UseGuards(JwtAuthGuard)
-  @Get('trajetorias-softruck/pdf/status')
-  async consultarRelatorioTrajetoriasSoftruckPDF(
-    @Query('jobId') jobId: string,
-  ) {
-    return this.rastreamentoService.consultarRelatorioTrajetoriasSoftruck(jobId);
-  }
-
-  @UseGuards(JwtAuthGuard)
-  @Get('trajetorias-softruck/pdf/download')
-  async baixarRelatorioTrajetoriasSoftruckPDF(
-    @Query('jobId') jobId: string,
-    @Res() res: Response,
-  ) {
-    const { record, buffer } =
-      await this.rastreamentoService.obterArquivoRelatorioTrajetoriasSoftruck(
-        jobId,
-      );
-
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader(
-      'Content-Disposition',
-      `inline; filename="${record.fileName ?? `${jobId}.pdf`}"`,
-    );
-    res.setHeader('Content-Length', String(buffer.length));
-    res.send(buffer);
   }
 
   //WEBHOOKS

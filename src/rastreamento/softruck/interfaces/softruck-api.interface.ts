@@ -65,6 +65,15 @@ export interface SoftruckTrajectoryPoint {
   lng: number;
 }
 
+/**
+ * Geometria LineString retornada pela API Softruck.
+ * Coordenadas no formato GeoJSON: [longitude, latitude].
+ */
+export interface SoftruckLsGeometry {
+  type?: string;
+  coordinates: [number, number][];
+}
+
 /** Segmento individual de viagem dentro de um dia (attributes.segs[]) */
 export interface SoftruckTrajectorySegment {
   sta: SoftruckTrajectoryPoint;
@@ -73,6 +82,8 @@ export interface SoftruckTrajectorySegment {
   dis: number;
   spMax?: number;
   spAvg?: number;
+  /** Polyline do segmento em formato GeoJSON LineString (opcional) */
+  ls?: SoftruckLsGeometry;
 }
 
 /** Resumo diário retornado pela API — cada item representa um dia */
@@ -84,6 +95,18 @@ export interface SoftruckTrajectoryAttributes {
   spAvg: number;
   sgCnt?: number;
   segs?: SoftruckTrajectorySegment[];
+  /** Polyline completa do dia em formato GeoJSON LineString (opcional) */
+  ls?: SoftruckLsGeometry;
+  /**
+   * Centro geográfico da trajetória retornado pela API.
+   * Usado como `mapCenter` quando disponível.
+   */
+  cen?: { lat: number; lng: number };
+  /**
+   * Bounding box da trajetória no formato GeoJSON:
+   * [minLongitude, minLatitude, maxLongitude, maxLatitude]
+   */
+  bbox?: [number, number, number, number];
 }
 
 export interface SoftruckTrajectoryItem {
