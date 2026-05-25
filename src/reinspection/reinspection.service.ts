@@ -21,6 +21,7 @@ import { UpsertTemplatePhotoDto } from './dto/upsert-template-photo.dto';
 import { MailService } from 'src/common/services/mail.service';
 import { BaseOrigin } from 'src/shared/token-resolver.service';
 import { SgaAuthService } from 'src/shared/sga-auth.service';
+import { SgaService } from 'src/sga/sga.service';
 
 @Injectable()
 export class ReinspectionService {
@@ -31,6 +32,7 @@ export class ReinspectionService {
     private readonly mailService: MailService,
     private readonly fileUploadService: FileUploadService,
     private readonly sgaAuthService: SgaAuthService,
+    private readonly sgaService: SgaService,
   ) {}
 
   async create(dto: CreateReinspectionDto, _userId: unknown) {
@@ -624,6 +626,24 @@ export class ReinspectionService {
       this.logger.error(
         `Falha ao enviar e-mail de aprovação | reinspectionId=${updated.id} | chassi=${vehicle.chassi} | plate=${vehicle.plate ?? 'N/A'}`,
         emailError instanceof Error ? emailError.stack : undefined,
+      );
+    }
+
+    if (vehicle.plate) {
+      try {
+        await this.sgaService.criarBoletoReativacao(
+          updated.userVehicleId,
+          vehicle.plate,
+        );
+      } catch (boletoError) {
+        this.logger.error(
+          `Falha ao criar boleto de reativação | reinspectionId=${updated.id} | userVehicleId=${updated.userVehicleId}`,
+          boletoError instanceof Error ? boletoError.stack : undefined,
+        );
+      }
+    } else {
+      this.logger.warn(
+        `Boleto de reativação não criado: placa não disponível | reinspectionId=${updated.id} | userVehicleId=${updated.userVehicleId}`,
       );
     }
 

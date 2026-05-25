@@ -101,7 +101,7 @@ export class AssociadoService {
       data?.error?.some((msg: string) =>
         msg.includes('Associado não encontrado'),
       ) ||
-      !['ATIVO', 'INADIMPLENTE 20 DIAS'].includes(data?.descricao_situacao)
+      !['ATIVO', 'INADIMPLENTE 20 DIAS', 'INADIMPLENTE'].includes(data?.descricao_situacao)
     ) {
       throw new BadRequestException('Cpf de associado inválido para cadastro');
     }

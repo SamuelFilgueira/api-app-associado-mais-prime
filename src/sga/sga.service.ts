@@ -263,4 +263,217 @@ export class SgaService {
 
     return;
   }
+
+  private async fetchProdutosVinculadosVeiculo(
+    placa: string,
+    baseOrigin: BaseOrigin,
+  ) {
+    const url = `https://api.hinova.com.br/api/sga/v2/produto-vinculado-veiculo/listar/${placa}`;
+
+    this.logger.log(
+      `${baseTag(baseOrigin)} consultando produtos vinculados ao veículo | placa=${placa}`,
+    );
+
+    return this.sgaAuthService.executeRequestWithAuth(baseOrigin, {
+      method: 'GET',
+      url,
+      validateStatus: () => true,
+    });
+  }
+
+  async criarBoletoReativacao(
+    userVehicleId: number,
+    plate: string,
+  ): Promise<void> {
+    // 1. Resolve CPF e baseOrigin a partir do veículo
+    const userVehicle = await this.prisma.userVehicle.findUnique({
+      where: { id: userVehicleId },
+      select: {
+        user: {
+          select: {
+            cpf: true,
+            baseOrigin: true,
+          },
+        },
+      },
+    });
+
+    if (!userVehicle?.user?.cpf) {
+      throw new NotFoundException('CPF não encontrado para o veículo');
+    }
+
+    const cpf = userVehicle.user.cpf.replace(/\D/g, '');
+    const baseOrigin: BaseOrigin =
+      (userVehicle.user.baseOrigin as BaseOrigin) ?? 'MAIS_PRIME';
+
+    // 2. Buscar dados do associado (codigo_associado, codigo_regional)
+    const associadoResponse = await this.fetchSgaAssociado(cpf);
+
+    if (associadoResponse.status >= 400) {
+      throw new InternalServerErrorException(
+        'Erro ao buscar dados do associado para criação do boleto',
+      );
+    }
+
+    const associadoData = associadoResponse.data as {
+      codigo_associado?: number;
+      codigo_regional?: number;
+      nome?: string;
+      telefone_celular?: string;
+    };
+
+    const { codigo_associado, codigo_regional, nome, telefone_celular } =
+      associadoData;
+
+    // 3. Buscar produtos vinculados ao veículo (valor_total_produtos_ativo_reais, taxa_administrativa, codigo_veiculo)
+    const produtosResponse = await this.fetchProdutosVinculadosVeiculo(
+      plate,
+      baseOrigin,
+    );
+
+    if (produtosResponse.status >= 400) {
+      throw new InternalServerErrorException(
+        'Erro ao buscar produtos vinculados ao veículo',
+      );
+    }
+
+    const produtosData = produtosResponse.data as {
+      valor_total_produtos_ativo_reais?: number;
+      taxa_administrativa?: string;
+      codigo_veiculo?: string;
+    };
+
+    const {
+      valor_total_produtos_ativo_reais,
+      taxa_administrativa,
+      codigo_veiculo,
+    } = produtosData;
+
+    // 4. Calcular valor total (taxa_administrativa pode ser negativo via valor_total_produtos_ativo_reais)
+    const totalValue =
+      parseFloat(taxa_administrativa ?? '0') +
+      (valor_total_produtos_ativo_reais ?? 0);
+
+    const formattedValue = totalValue.toFixed(2).replace('.', ',');
+
+    // 5. Montar datas
+    const now = new Date();
+    const mesReferente = `${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`;
+
+    const tomorrow = new Date(now);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const vencimento = `${String(tomorrow.getDate()).padStart(2, '0')}/${String(tomorrow.getMonth() + 1).padStart(2, '0')}/${tomorrow.getFullYear()}`;
+
+    // 6. Cadastrar boleto
+    const boletoUrl = `https://api.hinova.com.br/api/sga/v2/boleto/cadastrar`;
+    const boletoPayload = {
+      codigo_associado,
+      codigo_regional,
+      codigo_situacao: '2',
+      mes_referente: mesReferente,
+      link_boleto: true,
+      codigo_tipo_boleto: 2,
+      array_parcela: [
+        {
+          valor: formattedValue,
+          vencimento,
+        },
+      ],
+      referencia: [
+        {
+          modulo: 'veiculo',
+          codigo_modulo: codigo_veiculo,
+          descricao: 'Boleto reativação app',
+          valor: formattedValue,
+        },
+      ],
+    };
+
+    this.logger.debug(
+      `Criando boleto de reativação | userVehicleId=${userVehicleId} | placa=${plate} | valor=${formattedValue}`,
+    );
+
+    const boletoResponse = await this.sgaAuthService.executeRequestWithAuth(
+      baseOrigin,
+      {
+        method: 'POST',
+        url: boletoUrl,
+        data: boletoPayload,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        validateStatus: () => true,
+      },
+    );
+
+    this.logger.log(
+      `Boleto de reativação cadastrado | userVehicleId=${userVehicleId} | status=${boletoResponse.status}`,
+    );
+
+    if (boletoResponse.status >= 400) {
+      throw new InternalServerErrorException(
+        `Erro ao cadastrar boleto de reativação: ${JSON.stringify(boletoResponse.data)}`,
+      );
+    }
+
+    // 7. Enviar notificação via Suri com o link do boleto
+    const boletoData = boletoResponse.data as {
+      '0'?: { link_boleto?: string };
+    };
+    const linkBoleto = boletoData?.['0']?.link_boleto;
+
+    if (linkBoleto) {
+      try {
+        const primeiroNome = (nome ?? '').split(' ')[0];
+        const phoneNormalized =
+          '55' + (telefone_celular ?? '').replace(/\D/g, '');
+
+        const suriResponse = await axios.post(
+          process.env.suri_baseUrl!,
+          {
+            user: {
+              name: nome ?? '',
+              phone: phoneNormalized,
+              email: null,
+              gender: 0,
+              channelId: process.env.channelId,
+              channelType: 1,
+              defaultDepartmentId: null,
+            },
+            message: {
+              templateId: process.env.suri_template_id,
+              BodyParameters: [primeiroNome, linkBoleto],
+            },
+            responseAction: {
+              type: 1,
+              sendTo: process.env.sendTo,
+            },
+          },
+          {
+            headers: {
+              Authorization: `Bearer ${process.env.token_suri}`,
+              'Content-Type': 'application/json',
+            },
+            validateStatus: () => true,
+          },
+        );
+
+        this.logger.log(
+          `Notificação Suri enviada | userVehicleId=${userVehicleId} | phone=${phoneNormalized} | status=${suriResponse.status}`,
+        );
+        this.logger.debug(
+          `Resposta Suri | userVehicleId=${userVehicleId} | body=${JSON.stringify(suriResponse.data)}`,
+        );
+      } catch (suriError) {
+        this.logger.error(
+          `Falha ao enviar notificação Suri | userVehicleId=${userVehicleId}`,
+          suriError instanceof Error ? suriError.stack : undefined,
+        );
+      }
+    } else {
+      this.logger.warn(
+        `link_boleto não encontrado na resposta do boleto | userVehicleId=${userVehicleId}`,
+      );
+    }
+  }
 }

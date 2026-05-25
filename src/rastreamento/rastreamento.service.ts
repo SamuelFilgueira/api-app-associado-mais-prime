@@ -249,50 +249,6 @@ export class RastreamentoService {
   }
 
   /**
-   * Orquestrador: gera PDF do histórico M7.
-   * Toda validação de entrada é centralizada aqui para manter o controller enxuto.
-   */
-  async gerarRelatorioHistoricoM7PDF(
-    dataInicial: string,
-    dataFinal: string,
-    placa: string,
-    baseOrigin: BaseOrigin,
-  ): Promise<Buffer> {
-    const placaNormalizada = placa?.trim()?.toUpperCase();
-    const dataInicialNormalizada = dataInicial?.trim();
-    const dataFinalNormalizada = dataFinal?.trim();
-
-    if (!placaNormalizada) {
-      throw new BadRequestException('Parâmetro placa é obrigatório');
-    }
-
-    if (!this.isDataIsoValida(dataInicialNormalizada)) {
-      throw new BadRequestException(
-        'Parâmetro dataInicial inválido. Use o formato yyyy-mm-dd',
-      );
-    }
-
-    if (!this.isDataIsoValida(dataFinalNormalizada)) {
-      throw new BadRequestException(
-        'Parâmetro dataFinal inválido. Use o formato yyyy-mm-dd',
-      );
-    }
-
-    if (dataInicialNormalizada > dataFinalNormalizada) {
-      throw new BadRequestException(
-        'Parâmetro dataInicial não pode ser maior que dataFinal',
-      );
-    }
-
-    return this.m7.gerarRelatorioHistoricoPDFPorBase(
-      dataInicialNormalizada,
-      dataFinalNormalizada,
-      placaNormalizada,
-      baseOrigin,
-    );
-  }
-
-  /**
    * Gera PDF de histórico de trajetórias via API Softruck.
    * Delega para HistoricoSoftruckService após validar os parâmetros de entrada.
    */

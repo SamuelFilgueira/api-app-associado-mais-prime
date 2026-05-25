@@ -1,4 +1,4 @@
-import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
+import { InternalServerErrorException, Logger } from '@nestjs/common';
 import axios, { AxiosInstance } from 'axios';
 import { Agent as HttpAgent } from 'http';
 import { Agent as HttpsAgent } from 'https';
@@ -6,20 +6,6 @@ import {
   BaseOrigin,
   TokenResolverService,
 } from 'src/shared/token-resolver.service';
-import { UltimaPosicaoSoftruckResponse } from './dto/ultima-posicao.dto';
-import {
-  CacheEntry,
-  JwtPayload,
-  SoftruckDeviceAssociationResponse,
-  SoftruckTrackingResponse,
-  SoftruckVehicleResponse,
-  TokenEntry,
-} from './interfaces/softruck-api.interface';
-import { mapearUltimaPosicaoSoftruck } from './mappers/ultima-posicao.mapper';
-import {
-  SoftruckByKeysApiResponse,
-  SoftruckGeomFeatureCollection,
-} from './interfaces/softruck-trajectories.interface';
 
 /** Timeout padrão para chamadas HTTP à API Softruck (em ms) */
 const SOFTRUCK_REQUEST_TIMEOUT = 15_000;
@@ -30,7 +16,82 @@ const CACHE_TTL = 10 * 60 * 1000;
 /** TTL do token JWT em ms (menos buffer para renovar antecipadamente) */
 const TOKEN_TTL_BUFFER_MS = 60_000; // 1 minuto antes de expirar
 
-@Injectable()
+interface CacheEntry<T> {
+  data: T;
+  expiresAt: number;
+}
+
+interface TokenEntry {
+  token: string;
+  expiresAt: number;
+}
+
+interface JwtPayload {
+  exp?: number;
+  iat?: number;
+  [key: string]: unknown;
+}
+
+export interface UltimaPosicaoSoftruckResponse {
+  date: string;
+  ign?: boolean;
+  speed: number;
+  latitude: number;
+  longitude: number;
+  coordinates: {
+    latitude: number;
+    longitude: number;
+  };
+  plate: string;
+  brandName: string;
+  modelName: string;
+}
+
+interface SoftruckVehicleResponse {
+  data: Array<{
+    id: string;
+    type: string;
+    attributes: {
+      plate: string;
+      brand_name: string;
+      model_name: string;
+    };
+  }>;
+}
+
+interface SoftruckDeviceAssociationResponse {
+  data: Array<{
+    id: string;
+    attributes: {
+      created_at: string;
+      deleted_at: string | null;
+      is_main_device?: boolean;
+    };
+    relationships: {
+      device: {
+        id: string;
+      };
+      vehicle: {
+        id: string;
+      };
+    };
+  }>;
+}
+
+interface SoftruckTrackingResponse {
+  data: {
+    type: string;
+    attributes: {
+      ign: boolean;
+      act: number;
+      spd: number;
+      geometry: {
+        coordinates: [number | string, number | string];
+      };
+    };
+  };
+}
+
 export class RastreamentoSoftruck {
   private readonly logger = new Logger(RastreamentoSoftruck.name);
   private readonly tokenResolver: TokenResolverService;
@@ -63,9 +124,10 @@ export class RastreamentoSoftruck {
     }>
   >();
 
-  constructor(tokenResolver: TokenResolverService) {
-    this.tokenResolver = tokenResolver;
-
+  constructor(tokenResolver?: TokenResolverService) {
+    this.tokenResolver = tokenResolver ?? new TokenResolverService();
+    
+    // Configurar axios com agents para melhor gerenciamento de conexões
     this.axiosInstance = axios.create({
       httpAgent: new HttpAgent({
         keepAlive: true,
@@ -124,7 +186,9 @@ export class RastreamentoSoftruck {
       return '(vazio)';
     }
 
-    if (serialized.length <= RastreamentoSoftruck.MAX_LOG_PAYLOAD_LENGTH) {
+    if (
+      serialized.length <= RastreamentoSoftruck.MAX_LOG_PAYLOAD_LENGTH
+    ) {
       return serialized;
     }
 
@@ -180,12 +244,14 @@ export class RastreamentoSoftruck {
 
   /**
    * Decodificar JWT sem validar assinatura para extrair claims
+   * Útil para verificar expiração (exp) antes de fazer requisição
    */
   private decodeJwt(token: string): JwtPayload | null {
     try {
       const parts = token.split('.');
       if (parts.length !== 3) return null;
 
+      // Decodificar payload (segunda parte)
       const payload = Buffer.from(parts[1], 'base64').toString('utf-8');
       return JSON.parse(payload) as JwtPayload;
     } catch (error) {
@@ -196,31 +262,35 @@ export class RastreamentoSoftruck {
 
   /**
    * Verificar se token JWT está expirado ou próximo de expirar
+   * Usa buffer de TOKEN_TTL_BUFFER_MS para renovar antecipadamente
    */
   private isTokenExpired(token: string): boolean {
     const payload = this.decodeJwt(token);
-    if (!payload?.exp) return false;
+    if (!payload?.exp) return false; // Sem exp → assume válido
 
     const expiresAtMs = payload.exp * 1000;
     const now = Date.now();
+    const bufferMs = TOKEN_TTL_BUFFER_MS;
 
-    return now > expiresAtMs - TOKEN_TTL_BUFFER_MS;
+    return now > expiresAtMs - bufferMs;
   }
 
   /**
    * Obter token válido para base, renovando se necessário
    */
-  private getValidToken(baseOrigin: BaseOrigin): string | null {
+  private getValidToken(
+    baseOrigin: BaseOrigin,
+  ): string | null {
     const tokenEntry = this.softruckTokenByBase.get(baseOrigin);
     if (!tokenEntry) return null;
 
+    // Verificar se token ainda é válido
     if (!this.isTokenExpired(tokenEntry.token)) {
       return tokenEntry.token;
     }
 
-    this.logger.debug(
-      `[${baseOrigin}] Token expirado, será renovado no próximo login`,
-    );
+    // Token expirou → remover do cache para forçar novo login
+    this.logger.debug(`[${baseOrigin}] Token expirado, será renovado no próximo login`);
     this.softruckTokenByBase.delete(baseOrigin);
     return null;
   }
@@ -300,9 +370,9 @@ export class RastreamentoSoftruck {
         },
       );
 
-      this.logger.debug(
-        `[LOGIN] Resposta HTTP ${response.status}: ${JSON.stringify(response.data)}`,
-      );
+      // this.logger.debug(
+      //   `[LOGIN] Resposta HTTP ${response.status}: ${JSON.stringify(response.data)}`,
+      // );
 
       const token = response.data?.data?.token;
 
@@ -315,9 +385,9 @@ export class RastreamentoSoftruck {
         );
       }
 
+      // Decodificar para descobrir expiração real
       const payload = this.decodeJwt(token);
-      const expiresAt =
-        payload?.exp ? payload.exp * 1000 : Date.now() + CACHE_TTL;
+      const expiresAt = payload?.exp ? payload.exp * 1000 : Date.now() + CACHE_TTL;
 
       this.softruckTokenByBase.set(baseOrigin, { token, expiresAt });
       this.logger.log(
@@ -364,13 +434,85 @@ export class RastreamentoSoftruck {
     }
   }
 
+  // Consultar a última posição do veículo via Softruck
+  async ultimaPosicaoSoftruck(
+    chassi: string,
+    baseOrigin: BaseOrigin,
+    publicKey: string,
+    tokenOverride?: string,
+  ): Promise<UltimaPosicaoSoftruckResponse> {
+    try {
+      const storedToken = this.softruckTokenByBase.get(baseOrigin);
+      // this.logger.debug(
+      //   `[${baseOrigin}] ultimaPosicaoSoftruck chassi=${chassi} token=${this.maskSecret(tokenOverride ?? storedToken?.token)} publicKey=${this.maskSecret(publicKey)}`,
+      // );
+
+      // Verificar se token precisa ser renovado (expirado ou próximo de expirar)
+      if (!tokenOverride && storedToken) {
+        const validToken = this.getValidToken(baseOrigin);
+        if (!validToken) {
+          this.logger.debug(
+            `[${baseOrigin}] Token expirado ou próximo de expirar. Fazendo novo login.`,
+          );
+          await this.autenticarSoftruck(baseOrigin, publicKey);
+        }
+      } else if (!tokenOverride && !storedToken) {
+        await this.autenticarSoftruck(baseOrigin, publicKey);
+      }
+
+      // STEP 1: Obter vehicle_id e dados do veículo pelo chassi
+      const vehicleData = await this.obterVehicleId(
+        chassi,
+        baseOrigin,
+        publicKey,
+        tokenOverride,
+      );
+
+      // STEP 2: Obter device_id através da associação
+      const deviceId = await this.obterDeviceId(
+        vehicleData.id,
+        baseOrigin,
+        publicKey,
+        tokenOverride,
+      );
+
+      // STEP 3: Obter dados de rastreamento
+      const trackingData = await this.obterDadosRastreamento(
+        deviceId.vehicleId,
+        deviceId.deviceId,
+        baseOrigin,
+        publicKey,
+        tokenOverride,
+      );
+
+      // Retornar DTO formatado com dados do veículo e rastreamento
+      return this.mapearUltimaPosicaoSoftruck(trackingData, vehicleData);
+    } catch (error) {
+      if (error instanceof InternalServerErrorException) {
+        throw error;
+      }
+      this.logger.error(
+        `Erro ao consultar última posição: ${this.formatError(error)}`,
+      );
+      throw new InternalServerErrorException(
+        'Erro ao consultar última posição do veículo',
+      );
+    }
+  }
+
   // STEP 1: Obter vehicle_id pelo chassi
   private async obterVehicleId(
     chassi: string,
     baseOrigin: BaseOrigin,
     publicKey: string,
     tokenOverride?: string,
-  ): Promise<{ id: string; plate: string; brandName: string; modelName: string }> {
+  ): Promise<{
+    id: string;
+    plate: string;
+    brandName: string;
+    modelName: string;
+  }> {
+    // Verifica cache primeiro
     const cached = this.getCached(this.vehicleCache, chassi);
     if (cached) {
       this.logger.debug(`[Cache HIT] Vehicle data para chassi: ${chassi}`);
@@ -383,8 +525,14 @@ export class RastreamentoSoftruck {
           this.axiosInstance.get<SoftruckVehicleResponse>(
             this.buildSoftruckUrl('/vehicles'),
             {
-              params: { search: chassi },
-              headers: this.getRequestHeaders(baseOrigin, publicKey, tokenOverride),
+              params: {
+                search: chassi,
+              },
+              headers: this.getRequestHeaders(
+                baseOrigin,
+                publicKey,
+                tokenOverride,
+              ),
               timeout: SOFTRUCK_REQUEST_TIMEOUT,
             },
           ),
@@ -396,7 +544,11 @@ export class RastreamentoSoftruck {
         `[${baseOrigin}] Softruck /vehicles response status=${response.status} chassi=${chassi} body=${this.stringifyForLog(response.data)}`,
       );
 
-      if (!response.data?.data?.length) {
+      if (
+        !response.data ||
+        !response.data.data ||
+        response.data.data.length === 0
+      ) {
         throw new InternalServerErrorException(
           'Veículo não encontrado na base Softruck',
         );
@@ -407,20 +559,24 @@ export class RastreamentoSoftruck {
       );
 
       const vehicleData = response.data.data[0];
-      const result = {
-        id: vehicleData.id,
-        plate: vehicleData.attributes.plate,
-        brandName: vehicleData.attributes.brand_name,
-        modelName: vehicleData.attributes.model_name,
-      };
+      const vehicleId = vehicleData.id;
+      const plate = vehicleData.attributes.plate;
+      const brandName = vehicleData.attributes.brand_name;
+      const modelName = vehicleData.attributes.model_name;
 
-      this.logger.log(`Vehicle ID obtido: ${result.id} para chassi: ${chassi}`);
+      this.logger.log(`Vehicle ID obtido: ${vehicleId} para chassi: ${chassi}`);
+
+      const result = { id: vehicleId, plate, brandName, modelName };
       this.setCache(this.vehicleCache, chassi, result);
       return result;
     } catch (error) {
-      if (error instanceof InternalServerErrorException) throw error;
+      if (error instanceof InternalServerErrorException) {
+        throw error;
+      }
       this.logger.error(`Erro ao obter vehicle_id: ${this.formatError(error)}`);
-      throw new InternalServerErrorException('Erro ao buscar veículo pelo chassi');
+      throw new InternalServerErrorException(
+        'Erro ao buscar veículo pelo chassi',
+      );
     }
   }
 
@@ -435,9 +591,15 @@ export class RastreamentoSoftruck {
       const response = await this.executarComReautenticacao(
         () =>
           this.axiosInstance.get<SoftruckDeviceAssociationResponse>(
-            this.buildSoftruckUrl(`/vehicles/${vehicleId}/associations/devices`),
+            this.buildSoftruckUrl(
+              `/vehicles/${vehicleId}/associations/devices`,
+            ),
             {
-              headers: this.getRequestHeaders(baseOrigin, publicKey, tokenOverride),
+              headers: this.getRequestHeaders(
+                baseOrigin,
+                publicKey,
+                tokenOverride,
+              ),
               timeout: SOFTRUCK_REQUEST_TIMEOUT,
             },
           ),
@@ -449,30 +611,30 @@ export class RastreamentoSoftruck {
         `[${baseOrigin}] Softruck /vehicles/${vehicleId}/associations/devices response status=${response.status} body=${this.stringifyForLog(response.data)}`,
       );
 
-      if (!response.data?.data?.length) {
+      if (
+        !response.data ||
+        !response.data.data ||
+        response.data.data.length === 0
+      ) {
         throw new InternalServerErrorException(
           'Dispositivo não associado ao veículo',
         );
       }
 
-      const mainDevices = response.data.data.filter(
+      // is_main_device é a fonte de verdade para seleção do device
+      const associations = response.data.data;
+      const selectedAssociation = associations.find(
         (a) => a.attributes.is_main_device === true,
       );
 
-      if (!mainDevices.length) {
+      if (!selectedAssociation) {
         throw new InternalServerErrorException(
           'Associação principal (is_main_device=true) não encontrada para o veículo',
         );
       }
 
-      const selectedAssociation = mainDevices.reduce((maisRecente, atual) =>
-        atual.attributes.created_at > maisRecente.attributes.created_at
-          ? atual
-          : maisRecente,
-      );
-
       this.logger.log(
-        `Associação principal selecionada para vehicle: ${vehicleId}: ${selectedAssociation.id} (created_at=${selectedAssociation.attributes.created_at})`,
+        `Associação principal selecionada para vehicle: ${vehicleId}: ${selectedAssociation.id}`,
       );
 
       const trackingVehicleId = selectedAssociation.id;
@@ -490,7 +652,9 @@ export class RastreamentoSoftruck {
       const result = { vehicleId: trackingVehicleId, deviceId };
       return result;
     } catch (error) {
-      if (error instanceof InternalServerErrorException) throw error;
+      if (error instanceof InternalServerErrorException) {
+        throw error;
+      }
       this.logger.error(`Erro ao obter device_id: ${this.formatError(error)}`);
       throw new InternalServerErrorException(
         'Erro ao buscar dispositivo associado ao veículo',
@@ -510,9 +674,15 @@ export class RastreamentoSoftruck {
       const response = await this.executarComReautenticacao(
         () =>
           this.axiosInstance.get<SoftruckTrackingResponse>(
-            this.buildSoftruckUrl(`/vehicles/${vehicleId}/tracking/${deviceId}`),
+            this.buildSoftruckUrl(
+              `/vehicles/${vehicleId}/tracking/${deviceId}`,
+            ),
             {
-              headers: this.getRequestHeaders(baseOrigin, publicKey, tokenOverride),
+              headers: this.getRequestHeaders(
+                baseOrigin,
+                publicKey,
+                tokenOverride,
+              ),
               timeout: SOFTRUCK_REQUEST_TIMEOUT,
             },
           ),
@@ -524,7 +694,7 @@ export class RastreamentoSoftruck {
         `[${baseOrigin}] Softruck /vehicles/${vehicleId}/tracking/${deviceId} response status=${response.status} body=${this.stringifyForLog(response.data)}`,
       );
 
-      if (!response.data?.data) {
+      if (!response.data || !response.data.data) {
         throw new InternalServerErrorException(
           'Dados de rastreamento não disponíveis',
         );
@@ -535,7 +705,9 @@ export class RastreamentoSoftruck {
       );
       return response.data;
     } catch (error) {
-      if (error instanceof InternalServerErrorException) throw error;
+      if (error instanceof InternalServerErrorException) {
+        throw error;
+      }
       this.logger.error(
         `Erro ao obter dados de rastreamento: ${this.formatError(error)}`,
       );
@@ -545,176 +717,73 @@ export class RastreamentoSoftruck {
     }
   }
 
-  // Resolve vehicleId e deviceId para uso em operações de histórico
-  async resolveVehicleAndDevice(
-    chassi: string,
-    baseOrigin: BaseOrigin,
-    publicKey: string,
-  ): Promise<{
-    vehicleData: { id: string; plate: string; brandName: string; modelName: string };
-    deviceData: { vehicleId: string; deviceId: string };
-  }> {
-    const storedToken = this.softruckTokenByBase.get(baseOrigin);
-    if (storedToken) {
-      const validToken = this.getValidToken(baseOrigin);
-      if (!validToken) {
-        await this.autenticarSoftruck(baseOrigin, publicKey);
-      }
-    } else {
-      await this.autenticarSoftruck(baseOrigin, publicKey);
-    }
+  // Mapear resposta para DTO
+  private mapearUltimaPosicaoSoftruck(
+    data: SoftruckTrackingResponse,
+    vehicleData: {
+      id: string;
+      plate: string;
+      brandName: string;
+      modelName: string;
+    },
+  ): UltimaPosicaoSoftruckResponse {
+    const attributes = data.data.attributes;
 
-    const vehicleData = await this.obterVehicleId(chassi, baseOrigin, publicKey);
-    const deviceData = await this.obterDeviceId(vehicleData.id, baseOrigin, publicKey);
-    return { vehicleData, deviceData };
-  }
+    // Converter timestamp (act) para formato dd/MM/yyyy HH:mm
+    const date = this.formatarData(attributes.act);
 
-  // Busca trajetória diária via /trajectories/by-keys
-  async buscarByKeysPorAcc(
-    vehicleId: string,
-    deviceId: string,
-    acc: number,
-    baseOrigin: BaseOrigin,
-    publicKey: string,
-  ): Promise<SoftruckByKeysApiResponse | null> {
-    try {
-      const response = await this.executarComReautenticacao(
-        () =>
-          this.axiosInstance.get<SoftruckByKeysApiResponse>(
-            this.buildSoftruckUrl(`/vehicles/${vehicleId}/trajectories/by-keys`),
-            {
-              params: {
-                'filters[acc][eq]': acc,
-                'filters[did][eq]': deviceId,
-              },
-              headers: this.getRequestHeaders(baseOrigin, publicKey),
-              timeout: SOFTRUCK_REQUEST_TIMEOUT,
-            },
-          ),
-        baseOrigin,
-        publicKey,
-      );
+    // Extrair coordenadas [longitude, latitude]
+    const [longitudeRaw, latitudeRaw] = attributes.geometry.coordinates;
+    const longitude = this.parseCoordinate(longitudeRaw);
+    const latitude = this.parseCoordinate(latitudeRaw);
 
-      this.logger.debug(
-        `[${baseOrigin}] by-keys vehicle=${vehicleId} acc=${acc} status=${response.status}`,
-      );
-
-      return response.data ?? null;
-    } catch (error) {
-      if (this.isAuthError(error)) throw error;
-      this.logger.warn(
-        `[${baseOrigin}] by-keys acc=${acc} sem dados: ${this.formatError(error)}`,
-      );
-      return null;
-    }
-  }
-
-  // Busca pontos GPS detalhados via /trajectories/geom
-  async buscarGeomPorAcc(
-    vehicleId: string,
-    deviceId: string,
-    enterpriseId: string,
-    acc: number,
-    baseOrigin: BaseOrigin,
-    publicKey: string,
-  ): Promise<SoftruckGeomFeatureCollection | null> {
-    try {
-      const response = await this.executarComReautenticacao(
-        () =>
-          this.axiosInstance.get<{ data: SoftruckGeomFeatureCollection }>(
-            this.buildSoftruckUrl(`/vehicles/${vehicleId}/trajectories/geom`),
-            {
-              params: {
-                'filters[acc][eq]': acc,
-                'filters[did][eq]': deviceId,
-                'filters[eid][eq]': enterpriseId,
-              },
-              headers: this.getRequestHeaders(baseOrigin, publicKey),
-              timeout: SOFTRUCK_REQUEST_TIMEOUT,
-            },
-          ),
-        baseOrigin,
-        publicKey,
-      );
-
-      this.logger.debug(
-        `[${baseOrigin}] geom vehicle=${vehicleId} acc=${acc} status=${response.status}`,
-      );
-
-      return response.data?.data ?? null;
-    } catch (error) {
-      if (this.isAuthError(error)) throw error;
-      this.logger.warn(
-        `[${baseOrigin}] geom acc=${acc} sem dados: ${this.formatError(error)}`,
-      );
-      return null;
-    }
-  }
-
-  // Consultar a última posição do veículo via Softruck
-  async ultimaPosicaoSoftruck(
-    chassi: string,
-    baseOrigin: BaseOrigin,
-    publicKey: string,
-    tokenOverride?: string,
-  ): Promise<UltimaPosicaoSoftruckResponse> {
-    try {
-      const storedToken = this.softruckTokenByBase.get(baseOrigin);
-      this.logger.debug(
-        `[${baseOrigin}] ultimaPosicaoSoftruck chassi=${chassi} token=${this.maskSecret(tokenOverride ?? storedToken?.token)} publicKey=${this.maskSecret(publicKey)}`,
-      );
-
-      if (!tokenOverride && storedToken) {
-        const validToken = this.getValidToken(baseOrigin);
-        if (!validToken) {
-          this.logger.debug(
-            `[${baseOrigin}] Token expirado ou próximo de expirar. Fazendo novo login.`,
-          );
-          await this.autenticarSoftruck(baseOrigin, publicKey);
-        }
-      } else if (!tokenOverride && !storedToken) {
-        await this.autenticarSoftruck(baseOrigin, publicKey);
-      }
-
-      const vehicleData = await this.obterVehicleId(
-        chassi,
-        baseOrigin,
-        publicKey,
-        tokenOverride,
-      );
-
-      const deviceId = await this.obterDeviceId(
-        vehicleData.id,
-        baseOrigin,
-        publicKey,
-        tokenOverride,
-      );
-
-      const trackingData = await this.obterDadosRastreamento(
-        deviceId.vehicleId,
-        deviceId.deviceId,
-        baseOrigin,
-        publicKey,
-        tokenOverride,
-      );
-
-      const mapped = mapearUltimaPosicaoSoftruck(trackingData, vehicleData);
-      this.logger.debug(
-        `Softruck payload mapeado vehicleId=${vehicleData.id} body=${this.stringifyForLog(mapped)}`,
-      );
-      return mapped;
-    } catch (error) {
-      if (error instanceof InternalServerErrorException) throw error;
-      this.logger.error(
-        `Erro ao consultar última posição: ${this.formatError(error)}`,
-      );
+    if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) {
       throw new InternalServerErrorException(
-        'Erro ao consultar última posição do veículo',
+        'Coordenadas inválidas retornadas pela Softruck',
       );
     }
+
+    const mapped = {
+      date,
+      ign: attributes.ign,
+      speed: attributes.spd,
+      latitude,
+      longitude,
+      coordinates: {
+        latitude,
+        longitude,
+      },
+      plate: vehicleData.plate,
+      brandName: vehicleData.brandName,
+      modelName: vehicleData.modelName,
+    };
+
+    this.logger.debug(
+      `Softruck payload mapeado vehicleId=${vehicleData.id} body=${this.stringifyForLog(mapped)}`,
+    );
+
+    return mapped;
+  }
+
+  // Formatar timestamp Unix para dd/MM/yyyy HH:mm
+  private formatarData(timestamp: number): string {
+    const date = new Date(timestamp * 1000); // Converter de segundos para milissegundos
+
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+
+    return `${day}/${month}/${year} ${hours}:${minutes}`;
+  }
+
+  private parseCoordinate(value: number | string): number {
+    if (typeof value === 'number') {
+      return value;
+    }
+
+    const normalized = value.trim().replace(',', '.');
+    return Number(normalized);
   }
 }
-
-// Re-export public types for convenience
-export type { UltimaPosicaoSoftruckResponse } from './dto/ultima-posicao.dto';
-

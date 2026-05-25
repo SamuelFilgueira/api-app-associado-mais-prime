@@ -3,9 +3,9 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Instala dependências primeiro (cache layer)
+# Instala dependências primeiro (cache layer) — pula download do Chrome
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN PUPPETEER_SKIP_DOWNLOAD=true npm ci
 
 # Gera o Prisma Client
 COPY prisma ./prisma
@@ -16,15 +16,26 @@ COPY . .
 RUN npm run build
 
 # ── Stage 2: production ─────────────────────────────────────────
-FROM node:20-alpine AS production
+FROM node:20-slim AS production
 
 WORKDIR /app
 
 ENV NODE_ENV=production
 
-# Copia apenas deps de produção
+# Instala Chromium e dependências necessárias para o Puppeteer
+RUN apt-get update && apt-get install -y \
+    chromium \
+    fonts-freefont-ttf \
+    --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
+
+# Configura Puppeteer para usar o Chromium do sistema (sem fazer download)
+ENV PUPPETEER_SKIP_DOWNLOAD=true \
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+
+# Copia apenas deps de produção — pula download do Chrome
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
+RUN PUPPETEER_SKIP_DOWNLOAD=true npm ci --omit=dev
 
 # Copia Prisma schema + client gerado
 COPY prisma ./prisma

@@ -30,6 +30,7 @@ export interface SoftruckDeviceAssociationResponse {
   data: Array<{
     id: string;
     attributes: {
+      created_at: string;
       is_main_device: boolean;
       deleted_at: string | null;
     };
