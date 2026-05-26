@@ -9,29 +9,11 @@ export interface PeriodoM7Dto {
   dataFinal: string;
 }
 
-export interface TrajetoM7Dto {
-  tipo: string;
-  dataInicio: string;
-  dataFim: string;
-  tempoMovimento: string;
-  tempoParado: string;
-  tempoTotal: string;
-  distanciaMetros: number;
-  velocidadeMaxima: number;
-  destino: string;
-}
-
-export interface ResumoM7Dto {
-  totalTrajetos: number;
-  distanciaTotalMetros: number;
-  velocidadeMaxima: number;
-}
-
 export interface HistoricoM7PdfDataDto {
   veiculo: VeiculoM7InfoDto;
   periodo: PeriodoM7Dto;
-  resumo: ResumoM7Dto;
-  trajetos: TrajetoM7Dto[];
+  resumo: ResumoM7SummaryDto;
+  dias: DiaM7ResumoDto[];
 }
 
 export interface HistoricoM7RotasPontoDto {

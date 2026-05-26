@@ -1,5 +1,4 @@
 import { M7TrajetoRaw } from '../interfaces/m7-historico.interface';
-import { TrajetoM7Dto } from '../dto/historico-m7-response.dto';
 
 function parseDistancia(value: number | string | undefined): number {
   const n = Number(value ?? 0);
@@ -16,7 +15,17 @@ function isZeroTempo(tempo: string | undefined): boolean {
   return /^0{1,2}:0{1,2}:0{1,2}$/.test(tempo.trim());
 }
 
-export function filtrarTrajetos(trajetos: M7TrajetoRaw[]): TrajetoM7Dto[] {
+export function filtrarTrajetos(trajetos: M7TrajetoRaw[]): {
+  tipo: string;
+  dataInicio: string;
+  dataFim: string;
+  tempoMovimento: string;
+  tempoParado: string;
+  tempoTotal: string;
+  distanciaMetros: number;
+  velocidadeMaxima: number;
+  destino: string;
+}[] {
   return trajetos
     .filter((t) => {
       if (isZeroTempo(t.tempo_total)) return false;

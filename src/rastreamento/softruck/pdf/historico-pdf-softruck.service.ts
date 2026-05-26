@@ -1,7 +1,20 @@
 import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
+import * as fs from 'fs';
+import * as path from 'path';
 import puppeteer from 'puppeteer';
 import { HistoricoPdfDataDto, HistoricoSegmentoDto } from '../dto/historico-response.dto';
 import { escapeHtml, formatarDuracao } from '../utils/formatters';
+
+function carregarLogoBase64(): string {
+  try {
+    const logoPath = path.join(process.cwd(), 'assets', 'Logo.png');
+    return fs.readFileSync(logoPath).toString('base64');
+  } catch {
+    return '';
+  }
+}
+
+const LOGO_BASE64 = carregarLogoBase64();
 
 /** Número máximo de segmentos exibidos por página da tabela PDF */
 const MAX_ROWS_PER_PAGE = 40;
@@ -46,6 +59,109 @@ function formatarDataBR(isoDate: string): string {
   return `${dia}/${mes}/${ano}`;
 }
 
+function gerarGraficoDistribuicaoDias(segmentos: HistoricoSegmentoDto[]): string {
+  if (segmentos.length === 0) return '<p style="color:#6b7280;font-style:italic;font-size:11px;">Nenhum dado para exibir.</p>';
+
+  // Group by acc (YYYYMMDD number → "YYYY-MM-DD")
+  const porDia = new Map<string, number>();
+  for (const seg of segmentos) {
+    const accStr = String(seg.acc);
+    let dayKey = accStr;
+    if (accStr.length === 8) {
+      dayKey = `${accStr.slice(0, 4)}-${accStr.slice(4, 6)}-${accStr.slice(6, 8)}`;
+    }
+    porDia.set(dayKey, (porDia.get(dayKey) ?? 0) + 1);
+  }
+
+  const dias = Array.from(porDia.entries()).sort(([a], [b]) => a.localeCompare(b));
+  const maxCount = Math.max(...dias.map(([, c]) => c), 1);
+
+  const barWidth = 36;
+  const gap = 8;
+  const maxBarH = 110;
+  const paddingLeft = 36;
+  const paddingBottom = 42;
+  const paddingTop = 20;
+  const svgWidth = Math.max(dias.length * (barWidth + gap) + paddingLeft + 24, 400);
+  const svgHeight = maxBarH + paddingBottom + paddingTop;
+
+  const bars = dias
+    .map(([dayKey, count], i) => {
+      const barH = Math.max((count / maxCount) * maxBarH, 4);
+      const x = paddingLeft + i * (barWidth + gap);
+      const y = paddingTop + maxBarH - barH;
+      const parts = dayKey.split('-');
+      const label = parts.length === 3 ? `${parts[2]}/${parts[1]}` : dayKey;
+      const fillColor = count > 0 ? '#2563eb' : '#d1d5db';
+      return `
+        <rect x="${x}" y="${y}" width="${barWidth}" height="${barH}" fill="${fillColor}" rx="3"/>
+        <text x="${x + barWidth / 2}" y="${y - 4}" text-anchor="middle" font-size="9" fill="#374151" font-family="Arial">${count}</text>
+        <text x="${x + barWidth / 2}" y="${svgHeight - 6}" text-anchor="middle" font-size="8" fill="#6b7280" font-family="Arial">${escapeHtml(label)}</text>
+      `;
+    })
+    .join('');
+
+  const yLines = [0, Math.ceil(maxCount / 2), maxCount].map((v) => {
+    const y = paddingTop + maxBarH - (v / maxCount) * maxBarH;
+    return `
+      <line x1="${paddingLeft}" y1="${y}" x2="${svgWidth - 10}" y2="${y}" stroke="#f3f4f6" stroke-width="1"/>
+      <text x="${paddingLeft - 4}" y="${y + 3}" text-anchor="end" font-size="8" fill="#9ca3af" font-family="Arial">${v}</text>
+    `;
+  }).join('');
+
+  return `
+    <svg width="${svgWidth}" height="${svgHeight}" xmlns="http://www.w3.org/2000/svg" style="overflow:visible;">
+      ${yLines}
+      ${bars}
+      <line x1="${paddingLeft}" y1="${paddingTop}" x2="${paddingLeft}" y2="${paddingTop + maxBarH}" stroke="#e5e7eb" stroke-width="1"/>
+      <line x1="${paddingLeft}" y1="${paddingTop + maxBarH}" x2="${svgWidth - 10}" y2="${paddingTop + maxBarH}" stroke="#e5e7eb" stroke-width="1"/>
+    </svg>
+  `;
+}
+
+function gerarRegioesMaisVisitadas(segmentos: HistoricoSegmentoDto[]): string {
+  const contagem: Record<string, number> = {};
+
+  for (const seg of segmentos) {
+    const locs = [seg.inicio.adr, seg.fim.adr];
+    for (const loc of locs) {
+      const key = (loc ?? '').trim();
+      if (key) {
+        contagem[key] = (contagem[key] ?? 0) + 1;
+      }
+    }
+  }
+
+  const sorted = Object.entries(contagem)
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, 8);
+
+  if (sorted.length === 0) {
+    return '<p style="color:#6b7280;font-style:italic;font-size:11px;">Nenhuma região identificada no período.</p>';
+  }
+
+  const maxCount = sorted[0][1];
+
+  return sorted
+    .map(([regiao, count], i) => {
+      const pct = Math.round((count / maxCount) * 100);
+      const rank = `${i + 1}°`;
+      return `
+        <div class="region-card">
+          <div class="region-rank">${escapeHtml(rank)}</div>
+          <div class="region-info">
+            <div class="region-name">${escapeHtml(regiao)}</div>
+            <div class="region-bar-wrap">
+              <div class="region-bar" style="width:${pct}%"></div>
+            </div>
+          </div>
+          <div class="region-count">${count}x</div>
+        </div>
+      `;
+    })
+    .join('');
+}
+
 /** Gera uma linha HTML da tabela de segmentos */
 function gerarLinhaTabela(seg: HistoricoSegmentoDto, indice: number): string {
   const estileLinha = indice % 2 === 0 ? '' : 'background:#f9fafb;';
@@ -79,6 +195,13 @@ function gerarHtmlRelatorio(dados: HistoricoPdfDataDto): string {
     ? segmentos.slice(MAX_ROWS_PER_PAGE).map(gerarLinhaTabela).join('')
     : '';
 
+  const logoTag = LOGO_BASE64
+    ? `<img src="data:image/png;base64,${LOGO_BASE64}" alt="Logo" style="height:44px;object-fit:contain;"/>`
+    : '';
+
+  const grafico = gerarGraficoDistribuicaoDias(segmentos);
+  const regioes = gerarRegioesMaisVisitadas(segmentos);
+
   return `
     <!DOCTYPE html>
     <html lang="pt-BR">
@@ -96,11 +219,12 @@ function gerarHtmlRelatorio(dados: HistoricoPdfDataDto): string {
         .header {
           display: flex;
           justify-content: space-between;
-          align-items: flex-start;
+          align-items: center;
           border-bottom: 2px solid #2563eb;
           padding-bottom: 12px;
           margin-bottom: 16px;
         }
+        .header-left { display: flex; align-items: center; gap: 14px; }
         .header h1 {
           font-size: 18px;
           color: #1e40af;
@@ -164,6 +288,16 @@ function gerarHtmlRelatorio(dados: HistoricoPdfDataDto): string {
           color: #374151;
           margin-bottom: 8px;
         }
+        .section-title {
+          font-size: 12px;
+          font-weight: 700;
+          color: #1e40af;
+          text-transform: uppercase;
+          letter-spacing: 0.06em;
+          margin-bottom: 10px;
+          padding-bottom: 4px;
+          border-bottom: 1px solid #bfdbfe;
+        }
         table {
           width: 100%;
           border-collapse: collapse;
@@ -186,6 +320,64 @@ function gerarHtmlRelatorio(dados: HistoricoPdfDataDto): string {
           max-width: 180px;
           word-break: break-word;
         }
+        .analytics-row {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 16px;
+          margin-bottom: 20px;
+        }
+        .analytics-panel {
+          background: #f8fafc;
+          border: 1px solid #e2e8f0;
+          border-radius: 8px;
+          padding: 14px;
+          overflow: hidden;
+        }
+        .chart-scroll { overflow-x: auto; }
+        .region-card {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          padding: 8px 0;
+          border-bottom: 1px solid #f1f5f9;
+        }
+        .region-card:last-child { border-bottom: none; }
+        .region-rank {
+          font-size: 13px;
+          font-weight: 700;
+          color: #1e40af;
+          min-width: 24px;
+          text-align: center;
+        }
+        .region-info { flex: 1; overflow: hidden; }
+        .region-name {
+          font-size: 10px;
+          font-weight: 600;
+          color: #1f2937;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          margin-bottom: 4px;
+        }
+        .region-bar-wrap {
+          background: #e0e7ff;
+          border-radius: 3px;
+          height: 6px;
+          width: 100%;
+        }
+        .region-bar {
+          background: #2563eb;
+          height: 6px;
+          border-radius: 3px;
+          min-width: 4px;
+        }
+        .region-count {
+          font-size: 11px;
+          font-weight: 700;
+          color: #1e40af;
+          min-width: 28px;
+          text-align: right;
+        }
         .footer {
           margin-top: 16px;
           text-align: center;
@@ -198,9 +390,12 @@ function gerarHtmlRelatorio(dados: HistoricoPdfDataDto): string {
     </head>
     <body>
       <div class="header">
-        <div>
-          <h1>Relatório de Trajetórias</h1>
-          <p style="color:#6b7280;font-size:10px;margin-top:2px;">Gerado pelo sistema de rastreamento</p>
+        <div class="header-left">
+          ${logoTag}
+          <div>
+            <h1>Relatório de Trajetórias</h1>
+            <p style="color:#6b7280;font-size:10px;margin-top:2px;">Gerado pelo sistema de rastreamento</p>
+          </div>
         </div>
         <div class="meta-right">
           <p>Gerado em: ${escapeHtml(dataGeracao)}</p>
@@ -247,6 +442,19 @@ function gerarHtmlRelatorio(dados: HistoricoPdfDataDto): string {
         <div class="summary-card">
           <label>Dias com Dados</label>
           <span>${summary.diasComDados} / ${period.totalDias}</span>
+        </div>
+      </div>
+
+      <div class="analytics-row">
+        <div class="analytics-panel">
+          <div class="section-title">Distribuição de Trajetos por Dia</div>
+          <div class="chart-scroll">
+            ${grafico}
+          </div>
+        </div>
+        <div class="analytics-panel">
+          <div class="section-title">Regiões Mais Visitadas</div>
+          ${regioes}
         </div>
       </div>
 

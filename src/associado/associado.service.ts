@@ -221,7 +221,7 @@ export class AssociadoService {
     if (
       response.status >= 400 ||
       data?.mensagem === 'Não aceitável' ||
-      !['ATIVO', 'INADIMPLENTE 20 DIAS'].includes(data?.descricao)
+      !['ATIVO', 'INADIMPLENTE 20 DIAS', 'INADIMPLENTE'].includes(data?.descricao)
     ) {
       throw new ForbiddenException(
         'Associado sem permissão para acessar a aplicação',

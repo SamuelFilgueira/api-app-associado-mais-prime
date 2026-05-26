@@ -11,6 +11,7 @@ import {
   M7ConsultaVeiculoResponse,
   M7HistoricoApiResponse,
   M7TrajetosApiResponse,
+  M7TrajetoRaw,
 } from '../interfaces/m7-historico.interface';
 import {
   DiaM7ResumoDto,
@@ -19,9 +20,25 @@ import {
   HistoricoM7RotasResponseDto,
   ViagemM7Dto,
 } from '../dto/historico-m7-response.dto';
-import { filtrarTrajetos } from '../helpers/m7-trajetos-filter.helper';
 import { sanitizarPontosGps } from '../helpers/m7-gps-sanitizer.helper';
 import { HistoricoPdfM7Service } from '../pdf/historico-pdf-m7.service';
+
+/**
+ * Trunca endereços verbosos do M7/Nominatim mantendo somente até
+ * a primeira ocorrência de "Rio de Janeiro" na string.
+ * Ex.: "Rua Cobé, Rio da Prata, Bangu, Zona Oeste do Rio de Janeiro, Rio de Janeiro, Região..."
+ *   → "Rua Cobé, Rio da Prata, Bangu, Zona Oeste do Rio de Janeiro"
+ */
+function truncarEndereco(endereco: string): string {
+  if (!endereco) return endereco;
+  const marker = 'Rio de Janeiro';
+  const idx = endereco.indexOf(marker);
+  if (idx === -1) return endereco;
+  return endereco
+    .slice(0, idx + marker.length)
+    .replace(/,\s*$/, '')
+    .trim();
+}
 
 const M7_REQUEST_TIMEOUT = 25_000;
 
@@ -283,6 +300,98 @@ export class HistoricoM7Service {
   }
 
   // ---------------------------------------------------------------------------
+  // Private helpers
+  // ---------------------------------------------------------------------------
+
+  private construirViagensEDias(rawList: M7TrajetoRaw[]): {
+    viagens: ViagemM7Dto[];
+    dias: DiaM7ResumoDto[];
+    distanciaTotalKm: number;
+    velocidadeMaxima: number;
+  } {
+    const parseNum = (v: number | string | undefined): number => {
+      const n = Number(v ?? 0);
+      return Number.isFinite(n) ? n : 0;
+    };
+
+    const isZeroTempo = (tempo: string | undefined): boolean => {
+      if (!tempo) return true;
+      return /^0{1,2}:0{1,2}:0{1,2}$/.test(tempo.trim());
+    };
+
+    const tempoEmSegundos = (tempo: string): number => {
+      const parts = tempo.split(':');
+      const h = parseInt(parts[0] ?? '0', 10) || 0;
+      const m = parseInt(parts[1] ?? '0', 10) || 0;
+      const s = parseInt(parts[2] ?? '0', 10) || 0;
+      return h * 3600 + m * 60 + s;
+    };
+
+    // Modelo de estados: PARADO → VIAGEM → PARADO
+    // Origem vem do PARADO anterior, destino vem da VIAGEM.
+    const viagens: ViagemM7Dto[] = [];
+    for (let i = 0; i < rawList.length; i++) {
+      const atual = rawList[i];
+      if (atual.tipo !== 'VIAGEM') continue;
+
+      const distanciaKm = parseNum(atual.distancia);
+      const tempoMovimento = atual.tempo_movimento ?? '00:00:00';
+
+      // Ignorar viagens inválidas / ruído de telemetria
+      if (distanciaKm === 0 || isZeroTempo(tempoMovimento)) continue;
+
+      // Ignorar viagens com menos de 3 minutos (180 segundos)
+      if (tempoEmSegundos(tempoMovimento) <= 180) continue;
+
+      // Encontrar o PARADO mais próximo anterior para obter a origem
+      let origemEndereco = '';
+      for (let j = i - 1; j >= 0; j--) {
+        if (rawList[j].tipo === 'PARADO') {
+          origemEndereco = truncarEndereco(String(rawList[j].destino ?? ''));
+          break;
+        }
+      }
+
+      viagens.push({
+        origem: origemEndereco,
+        saida: String(atual.data_inicio ?? ''),
+        destino: truncarEndereco(String(atual.destino ?? '')),
+        chegada: String(atual.data_fim ?? ''),
+        distanciaKm,
+        tempoMovimento,
+        velocidadeMaxima: parseNum(atual.velocidade_maxima),
+      });
+    }
+
+    // Agrupar por data de saída
+    const porData = new Map<string, DiaM7ResumoDto>();
+    for (const viagem of viagens) {
+      const data: string = viagem.saida.slice(0, 10);
+      if (!porData.has(data)) {
+        porData.set(data, { data, viagens: [], distanciaTotalKm: 0 });
+      }
+      const dia = porData.get(data)!;
+      dia.viagens.push(viagem);
+      dia.distanciaTotalKm =
+        Math.round((dia.distanciaTotalKm + viagem.distanciaKm) * 100) / 100;
+    }
+
+    const dias = Array.from(porData.values()).sort((a, b) =>
+      a.data.localeCompare(b.data),
+    );
+
+    const distanciaTotalKm =
+      Math.round(viagens.reduce((acc, v) => acc + v.distanciaKm, 0) * 100) /
+      100;
+    const velocidadeMaxima = viagens.reduce<number>(
+      (max, v) => Math.max(max, v.velocidadeMaxima),
+      0,
+    );
+
+    return { viagens, dias, distanciaTotalKm, velocidadeMaxima };
+  }
+
+  // ---------------------------------------------------------------------------
   // Public orchestrators
   // ---------------------------------------------------------------------------
 
@@ -307,28 +416,23 @@ export class HistoricoM7Service {
       dataFinal,
       baseOrigin,
     );
-    const trajetos = filtrarTrajetos(
-      Array.isArray(trajetosRaw?.trajetos) ? trajetosRaw.trajetos : [],
-    );
+    const rawList = Array.isArray(trajetosRaw?.trajetos)
+      ? trajetosRaw.trajetos
+      : [];
 
-    const distanciaTotal = trajetos.reduce(
-      (acc, t) => acc + t.distanciaMetros,
-      0,
-    );
-    const velocidadeMaxima = trajetos.reduce(
-      (max, t) => Math.max(max, t.velocidadeMaxima),
-      0,
-    );
+    const { viagens, dias, distanciaTotalKm, velocidadeMaxima } =
+      this.construirViagensEDias(rawList);
 
     const dadosPdf: HistoricoM7PdfDataDto = {
       veiculo: { codigo, placa, chassi: chassiM7 },
       periodo: { dataInicial, dataFinal },
       resumo: {
-        totalTrajetos: trajetos.length,
-        distanciaTotalMetros: distanciaTotal,
+        diasComDados: dias.length,
+        totalViagens: viagens.length,
+        distanciaTotalKm,
         velocidadeMaxima,
       },
-      trajetos,
+      dias,
     };
 
     return this.pdfService.gerarPdf(dadosPdf);
@@ -363,80 +467,11 @@ export class HistoricoM7Service {
       `[${baseOrigin}] obterResumo: ${rawList.length} registros brutos recebidos`,
     );
 
-    const parseNum = (v: number | string | undefined): number => {
-      const n = Number(v ?? 0);
-      return Number.isFinite(n) ? n : 0;
-    };
-
-    const isZeroTempo = (tempo: string | undefined): boolean => {
-      if (!tempo) return true;
-      return /^0{1,2}:0{1,2}:0{1,2}$/.test(tempo.trim());
-    };
-
-    // Modelo de estados: PARADO → VIAGEM → PARADO
-    // Origem vem do PARADO anterior, destino vem da VIAGEM.
-    const viagens: ViagemM7Dto[] = [];
-    for (let i = 0; i < rawList.length; i++) {
-      const atual = rawList[i];
-      if (atual.tipo !== 'VIAGEM') continue;
-
-      const distanciaKm = parseNum(atual.distancia);
-      const tempoMovimento = atual.tempo_movimento ?? '00:00:00';
-
-      // Ignorar viagens inválidas / ruído de telemetria
-      if (distanciaKm === 0 || isZeroTempo(tempoMovimento)) continue;
-
-      // Encontrar o PARADO mais próximo anterior
-      let origemEndereco = '';
-      for (let j = i - 1; j >= 0; j--) {
-        if (rawList[j].tipo === 'PARADO') {
-          origemEndereco = String(rawList[j].destino ?? '');
-          break;
-        }
-      }
-
-      viagens.push({
-        origem: origemEndereco,
-        saida: String(atual.data_inicio ?? ''),
-        destino: String(atual.destino ?? ''),
-        chegada: String(atual.data_fim ?? ''),
-        distanciaKm,
-        tempoMovimento,
-        velocidadeMaxima: parseNum(atual.velocidade_maxima),
-      });
-    }
+    const { viagens, dias, distanciaTotalKm, velocidadeMaxima } =
+      this.construirViagensEDias(rawList);
 
     this.logger.debug(
       `[${baseOrigin}] obterResumo: ${viagens.length} viagens válidas mapeadas`,
-    );
-
-    // Agrupar por data de saída
-    const porData = new Map<string, DiaM7ResumoDto>();
-    for (const viagem of viagens) {
-      const data: string = viagem.saida.slice(0, 10);
-      if (!porData.has(data)) {
-        porData.set(data, {
-          data,
-          viagens: [] as ViagemM7Dto[],
-          distanciaTotalKm: 0,
-        });
-      }
-      const dia = porData.get(data)!;
-      dia.viagens.push(viagem);
-      dia.distanciaTotalKm =
-        Math.round((dia.distanciaTotalKm + viagem.distanciaKm) * 100) / 100;
-    }
-
-    const dias = Array.from(porData.values()).sort((a, b) =>
-      a.data.localeCompare(b.data),
-    );
-
-    const distanciaTotalKm =
-      Math.round(viagens.reduce((acc, v) => acc + v.distanciaKm, 0) * 100) /
-      100;
-    const velocidadeMaxima = viagens.reduce<number>(
-      (max, v) => Math.max(max, v.velocidadeMaxima as number),
-      0,
     );
 
     return {
