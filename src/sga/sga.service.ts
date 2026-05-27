@@ -568,7 +568,7 @@ export class SgaService {
           telefone_celular,
         },
         {
-          repeat: { every: 120_000 },
+          repeat: { every: 3_600_000 },
           jobId: `boleto-verificacao-${nossoNumero}`,
         },
       );
