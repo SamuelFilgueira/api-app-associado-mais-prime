@@ -47,25 +47,34 @@ export class SgaService {
   }
 
   /**
-   * Realiza chamada à API SGA da Hinova para buscar dados do associado
+   * Realiza chamada à API SGA da Hinova para buscar dados do associado.
+   * Quando `baseOriginOverride` é fornecido, ele é usado diretamente,
+   * evitando o relookup de CPF no banco que pode falhar por diferença de formatação.
    */
-  private async fetchSgaAssociado(cpf: string) {
+  private async fetchSgaAssociado(
+    cpf: string,
+    baseOriginOverride?: BaseOrigin,
+  ) {
     const url = `https://api.hinova.com.br/api/sga/v2/associado/buscar/${cpf}`;
 
-    // resolve baseOrigin from DB if possible
-    let baseOrigin: BaseOrigin = 'MAIS_PRIME';
-    try {
-      const user = await this.prisma.user.findFirst({ where: { cpf } });
-      if (user?.baseOrigin) baseOrigin = user.baseOrigin as BaseOrigin;
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'erro desconhecido';
-      this.logger.warn(
-        `Falha ao resolver baseOrigin por cpf=${cpf}: ${message}`,
-      );
+    let baseOrigin: BaseOrigin = baseOriginOverride ?? 'MAIS_PRIME';
+
+    if (!baseOriginOverride) {
+      // Fallback: tenta resolver baseOrigin pelo CPF no banco
+      // Obs.: pode falhar se o CPF estiver armazenado com formatação diferente
+      try {
+        const user = await this.prisma.user.findFirst({ where: { cpf } });
+        if (user?.baseOrigin) baseOrigin = user.baseOrigin as BaseOrigin;
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : 'erro desconhecido';
+        this.logger.warn(
+          `Falha ao resolver baseOrigin por cpf=${cpf}: ${message}`,
+        );
+      }
     }
 
     this.logger.log(
-      `${baseTag(baseOrigin)} consultando associado com autenticação dinâmica`,
+      `${baseTag(baseOrigin)} consultando associado | cpf=${cpf.slice(0, 3)}***`,
     );
 
     return this.sgaAuthService.executeRequestWithAuth(baseOrigin, {
@@ -341,15 +350,28 @@ export class SgaService {
       (userVehicle.user.baseOrigin as BaseOrigin) ?? 'MAIS_PRIME';
 
     // 2. Buscar dados do associado (codigo_associado, codigo_regional)
-    const associadoResponse = await this.fetchSgaAssociado(cpf);
+    // Passa baseOrigin explicitamente para evitar resolução errada por CPF formatado
+    const associadoResponse = await this.fetchSgaAssociado(cpf, baseOrigin);
 
     if (associadoResponse.status >= 400) {
+      this.logger.error(
+        `Erro ao buscar associado | userVehicleId=${userVehicleId} | status=${associadoResponse.status} | body=${JSON.stringify(associadoResponse.data)}`,
+      );
       throw new InternalServerErrorException(
         'Erro ao buscar dados do associado para criação do boleto',
       );
     }
 
-    const associadoData = associadoResponse.data as {
+    this.logger.debug(
+      `Resposta associado raw | userVehicleId=${userVehicleId} | type=${Array.isArray(associadoResponse.data) ? 'array' : typeof associadoResponse.data} | keys=${Object.keys(associadoResponse.data ?? {}).join(', ')}`,
+    );
+
+    // A API pode retornar objeto direto ou array com um elemento
+    const rawAssociadoData = Array.isArray(associadoResponse.data)
+      ? (associadoResponse.data[0] ?? {})
+      : (associadoResponse.data ?? {});
+
+    const associadoData = rawAssociadoData as {
       codigo_associado?: number;
       codigo_regional?: number;
       nome?: string;
@@ -359,6 +381,10 @@ export class SgaService {
     const { codigo_associado, codigo_regional, nome, telefone_celular } =
       associadoData;
 
+    this.logger.log(
+      `Dados do associado extraídos | userVehicleId=${userVehicleId} | codigo_associado=${codigo_associado ?? 'N/A'} | temNome=${!!nome} | temTelefone=${!!telefone_celular}`,
+    );
+
     // 3. Buscar produtos vinculados ao veículo (valor_total_produtos_ativo_reais, taxa_administrativa, codigo_veiculo)
     const produtosResponse = await this.fetchProdutosVinculadosVeiculo(
       plate,
@@ -366,12 +392,24 @@ export class SgaService {
     );
 
     if (produtosResponse.status >= 400) {
+      this.logger.error(
+        `Erro ao buscar produtos do veículo | userVehicleId=${userVehicleId} | placa=${plate} | status=${produtosResponse.status} | body=${JSON.stringify(produtosResponse.data)}`,
+      );
       throw new InternalServerErrorException(
         'Erro ao buscar produtos vinculados ao veículo',
       );
     }
 
-    const produtosData = produtosResponse.data as {
+    this.logger.debug(
+      `Resposta produtos raw | userVehicleId=${userVehicleId} | type=${Array.isArray(produtosResponse.data) ? 'array' : typeof produtosResponse.data} | keys=${Object.keys(Array.isArray(produtosResponse.data) ? (produtosResponse.data[0] ?? {}) : (produtosResponse.data ?? {})).join(', ')}`,
+    );
+
+    // A API pode retornar objeto direto ou array com um elemento
+    const rawProdutosData = Array.isArray(produtosResponse.data)
+      ? (produtosResponse.data[0] ?? {})
+      : (produtosResponse.data ?? {});
+
+    const produtosData = rawProdutosData as {
       valor_total_produtos_ativo_reais?: number;
       taxa_administrativa?: string;
       codigo_veiculo?: string;
@@ -382,6 +420,10 @@ export class SgaService {
       taxa_administrativa,
       codigo_veiculo,
     } = produtosData;
+
+    this.logger.log(
+      `Dados de produtos extraídos | userVehicleId=${userVehicleId} | codigo_veiculo=${codigo_veiculo ?? 'N/A'} | taxa_administrativa=${taxa_administrativa ?? 'N/A'} | valor_total=${valor_total_produtos_ativo_reais ?? 'N/A'}`,
+    );
 
     // 4. Calcular valor total (taxa_administrativa pode ser negativo via valor_total_produtos_ativo_reais)
     const totalValue =
@@ -453,37 +495,60 @@ export class SgaService {
       );
     }
 
-    // 7. Extrair nosso_numero e link_boleto da resposta do boleto
-    const boletoData = boletoResponse.data as {
-      dados_boleto_inserido?: Array<{
-        nosso_numero?: number;
-        linha_digitavel?: string;
-        link_boleto?: string;
-      }>;
-      '0'?: {
-        nosso_numero?: number;
-        linha_digitavel?: string;
-        link_boleto?: string;
-      };
+    // 7. Extrair nosso_numero, linha_digitavel e link_boleto da resposta do boleto
+    // Suporta todos os formatos conhecidos da Hinova:
+    //   - array direto: [{nosso_numero, linha_digitavel, link_boleto}]
+    //   - objeto com dados_boleto_inserido: {dados_boleto_inserido: [{...}]}
+    //   - objeto com chave numérica: {"0": {...}, mensagem: "OK"}
+    type BoletoCadastradoItem = {
+      nosso_numero?: number | string;
+      linha_digitavel?: string;
+      link_boleto?: string;
+      [key: string]: unknown;
     };
 
-    const dadosBoleto = boletoData?.dados_boleto_inserido;
+    const normalizeBoletoResponse = (input: unknown): BoletoCadastradoItem[] => {
+      if (!input) return [];
+      if (Array.isArray(input)) {
+        return input.filter(
+          (item): item is BoletoCadastradoItem => !!item && typeof item === 'object',
+        );
+      }
+      if (typeof input === 'object') {
+        const record = input as Record<string, unknown>;
+        if (Array.isArray(record.dados_boleto_inserido)) {
+          return record.dados_boleto_inserido.filter(
+            (item): item is BoletoCadastradoItem => !!item && typeof item === 'object',
+          );
+        }
+        const numericKeyItems = Object.entries(record)
+          .filter(
+            ([key, value]) =>
+              /^\d+$/.test(key) && !!value && typeof value === 'object',
+          )
+          .map(([, value]) => value as BoletoCadastradoItem);
+        if (numericKeyItems.length > 0) return numericKeyItems;
+      }
+      return [];
+    };
 
-    let boletoDados = dadosBoleto?.[0];
-    if (!boletoDados && boletoData?.['0']) {
-      boletoDados = boletoData['0'];
-      this.logger.log(
-        `Formato alternativo de boleto detectado (chave "0") | userVehicleId=${userVehicleId}`,
-      );
-    }
+    const boletosNormalizados = normalizeBoletoResponse(boletoResponse.data);
+    const boletoDados = boletosNormalizados[0];
+
+    this.logger.log(
+      `Parsing boleto | userVehicleId=${userVehicleId} | formato=${Array.isArray(boletoResponse.data) ? 'array' : typeof boletoResponse.data} | itens=${boletosNormalizados.length} | encontrou=${!!boletoDados}`,
+    );
 
     if (!boletoDados) {
       this.logger.warn(
-        `Dados do boleto ausentes nos formatos esperados | userVehicleId=${userVehicleId} | keys=${Object.keys(boletoData ?? {}).join(', ')}`,
+        `Dados do boleto ausentes em todos os formatos | userVehicleId=${userVehicleId} | rawKeys=${Object.keys((boletoResponse.data as Record<string, unknown>) ?? {}).join(', ')} | rawBody=${JSON.stringify(boletoResponse.data)}`,
       );
     }
 
-    const nossoNumero = boletoDados?.nosso_numero;
+    const nossoNumero =
+      boletoDados?.nosso_numero !== undefined && boletoDados.nosso_numero !== null
+        ? Number(boletoDados.nosso_numero)
+        : undefined;
     const linhaDigitavel = boletoDados?.linha_digitavel;
     const linkBoleto = boletoDados?.link_boleto;
 
@@ -638,7 +703,7 @@ export class SgaService {
       }
     } else {
       this.logger.warn(
-        `link_boleto não encontrado na resposta do boleto | userVehicleId=${userVehicleId} | nosso_numero=${nossoNumero ?? 'N/A'} | rawData=${JSON.stringify(boletoData)}`,
+        `link_boleto não encontrado na resposta do boleto | userVehicleId=${userVehicleId} | nosso_numero=${nossoNumero ?? 'N/A'} | rawData=${JSON.stringify(boletoResponse.data)}`,
       );
     }
   }
