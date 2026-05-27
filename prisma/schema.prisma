@@ -17,6 +17,7 @@ enum AdminPanelRole {
   REVISTORIA
   EVENTOS
   MARKETING
+  COBRANCA
 }
 
 model user {

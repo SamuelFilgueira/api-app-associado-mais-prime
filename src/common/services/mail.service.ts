@@ -116,7 +116,7 @@ export class MailService {
     const mailOptions: nodemailer.SendMailOptions = {
       from: `"Mais Prime App" <${process.env.GMAIL_USER}>`,
       to: 'cobranca@maisprime.org.br',
-      subject: '----TESTE DESENVOLVIMENTO----Revistoria Aprovada com Sucesso',
+      subject: 'Revistoria Aprovada com Sucesso',
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 480px; margin: auto; padding: 24px; border: 1px solid #e0e0e0; border-radius: 8px;">
           <h2 style="color: #2e7d32;">Revistoria Aprovada ✓</h2>
@@ -157,7 +157,7 @@ export class MailService {
         'cobranca@maisprime.org.br',
         'previa@maisprime.org.br'
       ],
-      subject: ` ----TESTE DESENVOLVIMENTO---- Boleto para placa ${safePlate} pago - Revistoria Aprovada`,
+      subject: `Boleto para placa ${safePlate} pago - Revistoria Aprovada`,
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 480px; margin: auto; padding: 24px; border: 1px solid #e0e0e0; border-radius: 8px;">
           <h2 style="color: #2e7d32;">Boleto Pago - Revistoria Aprovada ✓</h2>
