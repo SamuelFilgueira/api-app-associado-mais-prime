@@ -2,6 +2,8 @@ import { BoletoController } from './sga/boleto/boleto.controller';
 import { BoletoService } from './sga/boleto/boleto.service';
 import { BeneficiosVeiculoController } from './sga/beneficios-veiculo/beneficios-veiculo/beneficios-veiculo.controller';
 import { BeneficiosVeiculoService } from './sga/beneficios-veiculo/beneficios-veiculo/beneficios-veiculo.service';
+import { BoletoVerificacaoProcessor } from './sga/boleto-verificacao.processor';
+import { MailService } from './common/services/mail.service';
 import { Module } from '@nestjs/common';
 import { RastreamentoModule } from './rastreamento/rastreamento.module';
 import { AppController } from './app.controller';
@@ -62,6 +64,8 @@ import { FuelSessionModule } from './fuel-session/fuel-session.module';
     SgaService,
     BoletoService,
     BeneficiosVeiculoService,
+    BoletoVerificacaoProcessor,
+    MailService,
   ],
 })
 export class AppModule {}

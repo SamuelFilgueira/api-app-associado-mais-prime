@@ -74,7 +74,7 @@ export class MailService {
     const mailOptions: nodemailer.SendMailOptions = {
       from: `"Mais Prime App" <${process.env.GMAIL_USER}>`,
       to: 'previa@maisprime.org.br',
-      subject: 'Nova Vistoria Recebida',
+      subject: '----TESTE DESENVOLVIMENTO----Nova Vistoria Recebida',
       html: `
           <div style="font-family: Arial, sans-serif; max-width: 480px; margin: auto; padding: 24px; border: 1px solid #e0e0e0; border-radius: 8px;">
           <h2 style="color: #333;">Fotos de revistoria adicionadas para o chassi ${chassi} </h2>
@@ -116,11 +116,11 @@ export class MailService {
     const mailOptions: nodemailer.SendMailOptions = {
       from: `"Mais Prime App" <${process.env.GMAIL_USER}>`,
       to: 'cobranca@maisprime.org.br',
-      subject: 'Revistoria Aprovada com Sucesso',
+      subject: '----TESTE DESENVOLVIMENTO----Revistoria Aprovada com Sucesso',
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 480px; margin: auto; padding: 24px; border: 1px solid #e0e0e0; border-radius: 8px;">
           <h2 style="color: #2e7d32;">Revistoria Aprovada ✓</h2>
-          <p>A revistoria do veículo abaixo foi <strong>aprovada com sucesso</strong>:</p>
+          <p>A revistoria do veículo abaixo foi <strong>aprovada com sucesso e o boleto foi gerado de forma automática!</strong>:</p>
           <div style="background: #f4f4f4; border-radius: 6px; padding: 12px 20px; font-size: 22px; font-weight: bold; letter-spacing: 2px; text-align: center; color: #222;">
             Chassi: ${chassi}<br />
             Placa: ${safePlate}
@@ -139,6 +139,46 @@ export class MailService {
     } catch (error) {
       this.logger.error(
         `Falha ao enviar e-mail de revistoria aprovada | chassi=${chassi} | plate=${safePlate}`,
+        error,
+      );
+      throw error;
+    }
+  }
+
+    async sendBoletoRevistoriaPago(
+    chassi: string,
+    plate: string | null,
+  ): Promise<void> {
+    const safePlate = plate ?? 'N/A';
+
+    const mailOptions: nodemailer.SendMailOptions = {
+      from: `"Mais Prime App" <${process.env.GMAIL_USER}>`,
+      to: [
+        'cobranca@maisprime.org.br',
+        'previa@maisprime.org.br'
+      ],
+      subject: ` ----TESTE DESENVOLVIMENTO---- Boleto para placa ${safePlate} pago - Revistoria Aprovada`,
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 480px; margin: auto; padding: 24px; border: 1px solid #e0e0e0; border-radius: 8px;">
+          <h2 style="color: #2e7d32;">Boleto Pago - Revistoria Aprovada ✓</h2>
+          <p>O boleto do veículo abaixo foi <strong>pago com sucesso e o veículo está ATIVO</strong>:</p>
+          <div style="background: #f4f4f4; border-radius: 6px; padding: 12px 20px; font-size: 22px; font-weight: bold; letter-spacing: 2px; text-align: center; color: #222;">
+            Chassi: ${chassi}<br />
+            Placa: ${safePlate}
+          </div>
+          <p style="color: #888; font-size: 12px;">Em caso de dúvidas, entre em contato com o suporte.</p>
+        </div>
+      `,
+    };
+
+    try {
+      await this.transporter.sendMail(mailOptions);
+      this.logger.log(
+        `E-mail de boleto pago enviado | chassi=${chassi} | plate=${safePlate}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Falha ao enviar e-mail de boleto pago | chassi=${chassi} | plate=${safePlate}`,
         error,
       );
       throw error;

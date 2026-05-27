@@ -5,11 +5,14 @@ import {
   InternalServerErrorException,
   Logger,
 } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
 import axios from 'axios';
 import { PrismaService } from '../prisma.service';
 import { BaseOrigin } from 'src/shared/token-resolver.service';
 import { SgaAuthService } from 'src/shared/sga-auth.service';
 import { baseTag } from 'src/shared/log.util';
+import { BOLETO_VERIFICACAO_QUEUE } from 'src/queue/queue.module';
 
 type SgaVeiculo = {
   chassi?: string;
@@ -28,6 +31,8 @@ export class SgaService {
   constructor(
     private prisma: PrismaService,
     private sgaAuthService: SgaAuthService,
+    @InjectQueue(BOLETO_VERIFICACAO_QUEUE as string)
+    private readonly boletoVerificacaoQueue: Queue,
   ) {}
 
   /**
@@ -281,6 +286,35 @@ export class SgaService {
     });
   }
 
+  private async alterarSituacaoVeiculo(
+    codigoSituacao: number,
+    codigoVeiculo: string,
+    baseOrigin: BaseOrigin,
+  ) {
+    const url = `https://api.hinova.com.br/api/sga/v2/veiculo/alterar-situacao-para/${codigoSituacao}/${codigoVeiculo}`;
+
+    this.logger.log(
+      `${baseTag(baseOrigin)} alterando situação do veículo | codigoVeiculo=${codigoVeiculo} | codigoSituacao=${codigoSituacao}`,
+    );
+
+    const response = await this.sgaAuthService.executeRequestWithAuth(
+      baseOrigin,
+      { method: 'GET', url, validateStatus: () => true },
+    );
+
+    this.logger.log(
+      `Situação do veículo alterada | codigoVeiculo=${codigoVeiculo} | codigoSituacao=${codigoSituacao} | status=${response.status}`,
+    );
+
+    if (response.status >= 400) {
+      throw new InternalServerErrorException(
+        `Erro ao alterar situação do veículo: ${JSON.stringify(response.data)}`,
+      );
+    }
+
+    return response.data;
+  }
+
   async criarBoletoReativacao(
     userVehicleId: number,
     plate: string,
@@ -409,6 +443,9 @@ export class SgaService {
     this.logger.log(
       `Boleto de reativação cadastrado | userVehicleId=${userVehicleId} | status=${boletoResponse.status}`,
     );
+    this.logger.debug(
+      `Resposta raw do boleto | userVehicleId=${userVehicleId} | body=${JSON.stringify(boletoResponse.data)}`,
+    );
 
     if (boletoResponse.status >= 400) {
       throw new InternalServerErrorException(
@@ -416,17 +453,146 @@ export class SgaService {
       );
     }
 
-    // 7. Enviar notificação via Suri com o link do boleto
+    // 7. Extrair nosso_numero e link_boleto da resposta do boleto
     const boletoData = boletoResponse.data as {
-      '0'?: { link_boleto?: string };
+      dados_boleto_inserido?: Array<{
+        nosso_numero?: number;
+        linha_digitavel?: string;
+        link_boleto?: string;
+      }>;
+      '0'?: {
+        nosso_numero?: number;
+        linha_digitavel?: string;
+        link_boleto?: string;
+      };
     };
-    const linkBoleto = boletoData?.['0']?.link_boleto;
 
+    const dadosBoleto = boletoData?.dados_boleto_inserido;
+
+    let boletoDados = dadosBoleto?.[0];
+    if (!boletoDados && boletoData?.['0']) {
+      boletoDados = boletoData['0'];
+      this.logger.log(
+        `Formato alternativo de boleto detectado (chave "0") | userVehicleId=${userVehicleId}`,
+      );
+    }
+
+    if (!boletoDados) {
+      this.logger.warn(
+        `Dados do boleto ausentes nos formatos esperados | userVehicleId=${userVehicleId} | keys=${Object.keys(boletoData ?? {}).join(', ')}`,
+      );
+    }
+
+    const nossoNumero = boletoDados?.nosso_numero;
+    const linhaDigitavel = boletoDados?.linha_digitavel;
+    const linkBoleto = boletoDados?.link_boleto;
+
+    this.logger.log(
+      `Dados extraídos do boleto | userVehicleId=${userVehicleId} | nosso_numero=${nossoNumero ?? 'N/A'} | link_boleto=${linkBoleto ? 'presente' : 'ausente'}`,
+    );
+
+    // 8.1 Persistir estado inicial do pagamento da revistoria
+    try {
+      const nossoNumeroString =
+        nossoNumero !== undefined && nossoNumero !== null
+          ? String(nossoNumero)
+          : null;
+
+      if (nossoNumeroString) {
+        await this.prisma.reinspectionPayment.upsert({
+          where: { nossoNumero: nossoNumeroString },
+          update: {
+            linhaDigitavel: linhaDigitavel ?? null,
+            linkBoleto: linkBoleto ?? null,
+            situacaoBoleto: 'CRIADO',
+            pago: false,
+            pagoEm: null,
+          },
+          create: {
+            userVehicleId,
+            nossoNumero: nossoNumeroString,
+            linhaDigitavel: linhaDigitavel ?? null,
+            linkBoleto: linkBoleto ?? null,
+            situacaoBoleto: 'CRIADO',
+            boletoCriadoEm: new Date(),
+            pago: false,
+          },
+        });
+      } else {
+        await this.prisma.reinspectionPayment.create({
+          data: {
+            userVehicleId,
+            linhaDigitavel: linhaDigitavel ?? null,
+            linkBoleto: linkBoleto ?? null,
+            situacaoBoleto: 'CRIADO',
+            boletoCriadoEm: new Date(),
+            pago: false,
+          },
+        });
+      }
+
+      this.logger.log(
+        `Pagamento de revistoria persistido (inicial) | userVehicleId=${userVehicleId} | nosso_numero=${nossoNumero ?? 'N/A'}`,
+      );
+    } catch (paymentPersistError) {
+      this.logger.error(
+        `Falha ao persistir pagamento de revistoria (inicial) | userVehicleId=${userVehicleId} | nosso_numero=${nossoNumero ?? 'N/A'}`,
+        paymentPersistError instanceof Error
+          ? paymentPersistError.stack
+          : undefined,
+      );
+    }
+
+    // 9. Alterar situação do veículo para 20
+    if (codigo_veiculo) {
+      try {
+        await this.alterarSituacaoVeiculo(20, codigo_veiculo, baseOrigin);
+      } catch (alterarError) {
+        this.logger.error(
+          `Falha ao alterar situação do veículo para 20 | codigo_veiculo=${codigo_veiculo}`,
+          alterarError instanceof Error ? alterarError.stack : undefined,
+        );
+      }
+    }
+
+    // 10. Disparar job recorrente (1h) para verificar pagamento do boleto
+    if (nossoNumero && codigo_veiculo) {
+      await this.boletoVerificacaoQueue.add(
+        'verificar-boleto',
+        {
+          userVehicleId,
+          nosso_numero: nossoNumero,
+          codigo_veiculo,
+          baseOrigin,
+          nome,
+          telefone_celular,
+        },
+        {
+          repeat: { every: 120_000 },
+          jobId: `boleto-verificacao-${nossoNumero}`,
+        },
+      );
+      this.logger.log(
+        `Job de verificação de boleto agendado | nosso_numero=${nossoNumero} | codigo_veiculo=${codigo_veiculo}`,
+      );
+    }
+
+    // 11. Enviar notificação via Suri com o link do boleto
     if (linkBoleto) {
       try {
-        const primeiroNome = (nome ?? '').split(' ')[0];
+        const primeiroNome = (nome ?? '').trim().split(/\s+/)[0] ?? '';
+        const primeiroNomeFormatado = primeiroNome
+          ? `${primeiroNome.charAt(0).toUpperCase()}${primeiroNome.slice(1).toLowerCase()}`
+          : '';
         const phoneNormalized =
           '55' + (telefone_celular ?? '').replace(/\D/g, '');
+
+        this.logger.log(
+          `Enviando notificação Suri (boleto) | userVehicleId=${userVehicleId} | phone=${phoneNormalized} | primeiroNome=${primeiroNomeFormatado} | templateId=${process.env.suri_template_id}`,
+        );
+        this.logger.debug(
+          `Payload Suri (boleto) | userVehicleId=${userVehicleId} | suri_baseUrl=${process.env.suri_baseUrl} | linkBoleto=${linkBoleto}`,
+        );
 
         const suriResponse = await axios.post(
           process.env.suri_baseUrl!,
@@ -442,7 +608,7 @@ export class SgaService {
             },
             message: {
               templateId: process.env.suri_template_id,
-              BodyParameters: [primeiroNome, linkBoleto],
+              BodyParameters: [primeiroNomeFormatado, linkBoleto],
             },
             responseAction: {
               type: 1,
@@ -472,7 +638,7 @@ export class SgaService {
       }
     } else {
       this.logger.warn(
-        `link_boleto não encontrado na resposta do boleto | userVehicleId=${userVehicleId}`,
+        `link_boleto não encontrado na resposta do boleto | userVehicleId=${userVehicleId} | nosso_numero=${nossoNumero ?? 'N/A'} | rawData=${JSON.stringify(boletoData)}`,
       );
     }
   }

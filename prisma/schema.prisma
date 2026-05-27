@@ -90,6 +90,7 @@ model UserVehicle {
   lastSyncAt         DateTime @default(now())
   user               user     @relation(fields: [userId], references: [id], onDelete: Cascade)
   reinspections      Reinspection[]
+  reinspectionPayments ReinspectionPayment[]
 
   @@unique([userId, chassi], map: "UserVehicle_userId_chassi_key")
   @@index([chassi], map: "UserVehicle_chassi_idx")
@@ -294,6 +295,27 @@ model ReinspectionPhoto {
 
   @@index([reinspectionId], map: "ReinspectionPhoto_reinspectionId_idx")
   @@index([status], map: "ReinspectionPhoto_status_idx")
+}
+
+model ReinspectionPayment {
+  id               Int         @id @default(autoincrement())
+  userVehicleId    Int
+  nossoNumero      String?     @unique(map: "ReinspectionPayment_nossoNumero_key") @db.VarChar(50)
+  linhaDigitavel   String?     @db.VarChar(255)
+  linkBoleto       String?     @db.VarChar(500)
+  situacaoBoleto   String      @default("PENDENTE") @db.VarChar(100)
+  boletoCriadoEm   DateTime    @default(now())
+  pago             Boolean     @default(false)
+  pagoEm           DateTime?
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  userVehicle      UserVehicle @relation(fields: [userVehicleId], references: [id], onDelete: Cascade)
+
+  @@index([userVehicleId], map: "ReinspectionPayment_userVehicleId_idx")
+  @@index([situacaoBoleto], map: "ReinspectionPayment_situacaoBoleto_idx")
+  @@index([pago], map: "ReinspectionPayment_pago_idx")
+  @@index([boletoCriadoEm], map: "ReinspectionPayment_boletoCriadoEm_idx")
 }
 
 // ======================================================
