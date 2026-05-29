@@ -7,6 +7,7 @@ import { SgaAuthService } from 'src/shared/sga-auth.service';
 import { BaseOrigin } from 'src/shared/token-resolver.service';
 import { PrismaService } from 'src/prisma.service';
 import { MailService } from 'src/common/services/mail.service';
+import { debugLog } from 'src/shared/debug-log.util';
 
 function formatDateBR(date: Date) {
   const dia = String(date.getDate()).padStart(2, '0');
@@ -22,6 +23,7 @@ interface BoletoVerificacaoJobData {
   baseOrigin: BaseOrigin;
   nome?: string;
   telefone_celular?: string;
+  debugId?: string;
 }
 
 @Processor(BOLETO_VERIFICACAO_QUEUE as string)
@@ -46,16 +48,28 @@ export class BoletoVerificacaoProcessor extends WorkerHost {
       baseOrigin,
       nome,
       telefone_celular,
+      debugId,
     } = job.data;
 
     this.logger.log(
-      `[Job iniciado] verificar-boleto | jobId=${job.id} | attemptsMade=${job.attemptsMade} | nosso_numero=${nosso_numero} | codigo_veiculo=${codigo_veiculo} | baseOrigin=${baseOrigin} | temNome=${!!nome} | temTelefone=${!!telefone_celular}`,
+      debugLog(BoletoVerificacaoProcessor.name, 'Job iniciado verificar-boleto', debugId, {
+        jobId: job.id,
+        attemptsMade: job.attemptsMade,
+        nossoNumero: nosso_numero,
+        codigoVeiculo: codigo_veiculo,
+        baseOrigin,
+        temNome: !!nome,
+        temTelefone: !!telefone_celular,
+      }),
     );
 
     const url = `https://api.hinova.com.br/api/sga/v2/processa-pdf/boleto`;
 
     this.logger.log(
-      `Consultando status do boleto | nosso_numero=${nosso_numero} | url=${url}`,
+      debugLog(BoletoVerificacaoProcessor.name, 'Consultando status do boleto', debugId, {
+        nossoNumero: nosso_numero,
+        url,
+      }),
     );
 
     const response = await this.sgaAuthService.executeRequestWithAuth(
@@ -71,13 +85,22 @@ export class BoletoVerificacaoProcessor extends WorkerHost {
 
     if (response.status >= 400) {
       this.logger.warn(
-        `Erro ao verificar boleto | nosso_numero=${nosso_numero} | status=${response.status} | body=${JSON.stringify(response.data)}`,
+        debugLog(BoletoVerificacaoProcessor.name, 'Erro ao verificar boleto', debugId, {
+          nossoNumero: nosso_numero,
+          status: response.status,
+          body: response.data,
+        }),
       );
       return;
     }
 
     this.logger.debug(
-      `Resposta raw processa-pdf/boleto | nosso_numero=${nosso_numero} | status=${response.status} | type=${Array.isArray(response.data) ? 'array' : typeof response.data} | body=${JSON.stringify(response.data)}`,
+      debugLog(BoletoVerificacaoProcessor.name, 'Resposta raw processa-pdf/boleto', debugId, {
+        nossoNumero: nosso_numero,
+        status: response.status,
+        type: Array.isArray(response.data) ? 'array' : typeof response.data,
+        body: response.data,
+      }),
     );
 
     type BoletoInfo = {
@@ -141,7 +164,13 @@ export class BoletoVerificacaoProcessor extends WorkerHost {
         : undefined;
 
     this.logger.log(
-      `Status do boleto verificado | nosso_numero=${nosso_numero} | codigo_situacao_boleto=${codigoSituacao ?? 'N/A'} | totalRegistros=${boletos.length} | registroSelecionado=${boletoInfo ? 'sim' : 'nao'} | keys=${Object.keys(boletoInfo ?? {}).join(', ')}`,
+      debugLog(BoletoVerificacaoProcessor.name, 'Status do boleto verificado', debugId, {
+        nossoNumero: nosso_numero,
+        codigoSituacao: codigoSituacao ?? 'N/A',
+        totalRegistros: boletos.length,
+        registroSelecionado: !!boletoInfo,
+        keys: Object.keys(boletoInfo ?? {}).join(', '),
+      }),
     );
 
     // Fallback: quando processa-pdf retorna vazio/N/A, consultar boletos por veículo
@@ -159,10 +188,15 @@ export class BoletoVerificacaoProcessor extends WorkerHost {
       };
 
       this.logger.log(
-        `Fallback de status ativado (listar/boleto-associado-veiculo) | nosso_numero=${nosso_numero} | codigo_veiculo=${codigo_veiculo}`,
+        debugLog(BoletoVerificacaoProcessor.name, 'Fallback de status ativado', debugId, {
+          nossoNumero: nosso_numero,
+          codigoVeiculo: codigo_veiculo,
+        }),
       );
       this.logger.debug(
-        `Payload fallback listar boleto | body=${JSON.stringify(fallbackBody)}`,
+        debugLog(BoletoVerificacaoProcessor.name, 'Payload fallback listar boleto', debugId, {
+          body: fallbackBody,
+        }),
       );
 
       const fallbackResponse = await this.sgaAuthService.executeRequestWithAuth(
@@ -177,7 +211,10 @@ export class BoletoVerificacaoProcessor extends WorkerHost {
       );
 
       this.logger.debug(
-        `Resposta fallback listar boleto | status=${fallbackResponse.status} | body=${JSON.stringify(fallbackResponse.data)}`,
+        debugLog(BoletoVerificacaoProcessor.name, 'Resposta fallback listar boleto', debugId, {
+          status: fallbackResponse.status,
+          body: fallbackResponse.data,
+        }),
       );
 
       if (fallbackResponse.status < 400 && Array.isArray(fallbackResponse.data)) {
@@ -190,16 +227,25 @@ export class BoletoVerificacaoProcessor extends WorkerHost {
           codigoSituacao = String(boletoFallback.codigo_situacao_boleto);
           boletoInfo = boletoFallback as BoletoInfo;
           this.logger.log(
-            `Status recuperado via fallback | nosso_numero=${nosso_numero} | codigo_situacao_boleto=${codigoSituacao}`,
+            debugLog(BoletoVerificacaoProcessor.name, 'Status recuperado via fallback', debugId, {
+              nossoNumero: nosso_numero,
+              codigoSituacao,
+            }),
           );
         } else {
           this.logger.warn(
-            `Fallback sem status para nosso_numero informado | nosso_numero=${nosso_numero} | encontrados=${fallbackResponse.data.length}`,
+            debugLog(BoletoVerificacaoProcessor.name, 'Fallback sem status para nosso_numero informado', debugId, {
+              nossoNumero: nosso_numero,
+              encontrados: fallbackResponse.data.length,
+            }),
           );
         }
       } else {
         this.logger.warn(
-          `Fallback retornou erro | nosso_numero=${nosso_numero} | status=${fallbackResponse.status}`,
+          debugLog(BoletoVerificacaoProcessor.name, 'Fallback retornou erro', debugId, {
+            nossoNumero: nosso_numero,
+            status: fallbackResponse.status,
+          }),
         );
       }
     }
@@ -230,12 +276,20 @@ export class BoletoVerificacaoProcessor extends WorkerHost {
       });
 
       this.logger.log(
-        `Pagamento de revistoria persistido (job) | userVehicleId=${userVehicleId} | nosso_numero=${nosso_numero} | situacao=${codigoSituacao ?? 'PENDENTE'} | pago=${pago}`,
+        debugLog(BoletoVerificacaoProcessor.name, 'Pagamento de revistoria persistido (job)', debugId, {
+          userVehicleId,
+          nossoNumero: nosso_numero,
+          situacao: codigoSituacao ?? 'PENDENTE',
+          pago,
+        }),
       );
     } catch (persistError) {
       this.logger.error(
-        `Falha ao persistir pagamento de revistoria (job) | userVehicleId=${userVehicleId} | nosso_numero=${nosso_numero}`,
-        persistError instanceof Error ? persistError.stack : undefined,
+        debugLog(BoletoVerificacaoProcessor.name, 'Falha ao persistir pagamento de revistoria (job)', debugId, {
+          userVehicleId,
+          nossoNumero: nosso_numero,
+          error: persistError instanceof Error ? persistError.message : String(persistError),
+        }),
       );
     }
 
@@ -248,7 +302,10 @@ export class BoletoVerificacaoProcessor extends WorkerHost {
 
     // Boleto pago/liquidado — reativar veículo (situação 1)
     this.logger.log(
-      `Boleto pago! Reativando veículo | nosso_numero=${nosso_numero} | codigo_veiculo=${codigo_veiculo}`,
+      debugLog(BoletoVerificacaoProcessor.name, 'Boleto pago! Reativando veículo', debugId, {
+        nossoNumero: nosso_numero,
+        codigoVeiculo: codigo_veiculo,
+      }),
     );
 
     // Enviar e-mail de boleto pago para a equipe
@@ -261,11 +318,15 @@ export class BoletoVerificacaoProcessor extends WorkerHost {
       await this.mailService.sendBoletoRevistoriaPago(
         vehicleData?.chassi ?? 'N/A',
         vehicleData?.plate ?? null,
+        debugId,
       );
     } catch (mailError) {
       this.logger.error(
-        `Falha ao enviar e-mail de boleto pago | userVehicleId=${userVehicleId} | nosso_numero=${nosso_numero}`,
-        mailError instanceof Error ? mailError.stack : undefined,
+        debugLog(BoletoVerificacaoProcessor.name, 'Falha ao enviar e-mail de boleto pago', debugId, {
+          userVehicleId,
+          nossoNumero: nosso_numero,
+          error: mailError instanceof Error ? mailError.message : String(mailError),
+        }),
       );
     }
 
@@ -277,14 +338,20 @@ export class BoletoVerificacaoProcessor extends WorkerHost {
     );
 
     this.logger.log(
-      `Veículo reativado (situação 1) | codigo_veiculo=${codigo_veiculo} | status=${alterarResponse.status}`,
+      debugLog(BoletoVerificacaoProcessor.name, 'Veículo reativado (situação 1)', debugId, {
+        codigoVeiculo: codigo_veiculo,
+        status: alterarResponse.status,
+      }),
     );
 
     // Remover o job recorrente
     if (job.repeatJobKey) {
       await this.queue.removeRepeatableByKey(job.repeatJobKey);
       this.logger.log(
-        `Job de verificação removido | nosso_numero=${nosso_numero} | repeatJobKey=${job.repeatJobKey}`,
+        debugLog(BoletoVerificacaoProcessor.name, 'Job de verificação removido', debugId, {
+          nossoNumero: nosso_numero,
+          repeatJobKey: job.repeatJobKey,
+        }),
       );
     }
 
@@ -297,10 +364,18 @@ export class BoletoVerificacaoProcessor extends WorkerHost {
       const phoneNormalized = '55' + telefone_celular.replace(/\D/g, '');
 
       this.logger.log(
-        `Enviando notificação Suri (boleto pago) | nosso_numero=${nosso_numero} | phone=${phoneNormalized} | primeiroNome=${primeiroNomeFormatado} | templateId=${process.env.suri_template_id_boleto_pago}`,
+          debugLog(BoletoVerificacaoProcessor.name, 'Enviando notificação Suri (boleto pago)', debugId, {
+            nossoNumero: nosso_numero,
+            phone: phoneNormalized,
+            primeiroNome: primeiroNomeFormatado,
+            templateId: process.env.suri_template_id_boleto_pago,
+          }),
       );
       this.logger.debug(
-        `Payload Suri (boleto pago) | suri_baseUrl=${process.env.suri_baseUrl} | nome=${nome}`,
+          debugLog(BoletoVerificacaoProcessor.name, 'Payload Suri (boleto pago)', debugId, {
+            suriBaseUrl: process.env.suri_baseUrl,
+            nome,
+          }),
       );
 
       try {
@@ -335,20 +410,31 @@ export class BoletoVerificacaoProcessor extends WorkerHost {
         );
 
         this.logger.log(
-          `Notificação Suri (boleto pago) enviada | nosso_numero=${nosso_numero} | status=${suriResponse.status}`,
+          debugLog(BoletoVerificacaoProcessor.name, 'Notificação Suri (boleto pago) enviada', debugId, {
+            nossoNumero: nosso_numero,
+            status: suriResponse.status,
+          }),
         );
         this.logger.debug(
-          `Resposta Suri (boleto pago) | body=${JSON.stringify(suriResponse.data)}`,
+          debugLog(BoletoVerificacaoProcessor.name, 'Resposta Suri (boleto pago)', debugId, {
+            body: suriResponse.data,
+          }),
         );
       } catch (suriError) {
         this.logger.error(
-          `Falha ao enviar notificação Suri (boleto pago) | nosso_numero=${nosso_numero}`,
-          suriError instanceof Error ? suriError.stack : undefined,
+          debugLog(BoletoVerificacaoProcessor.name, 'Falha ao enviar notificação Suri (boleto pago)', debugId, {
+            nossoNumero: nosso_numero,
+            error: suriError instanceof Error ? suriError.message : String(suriError),
+          }),
         );
       }
     } else {
       this.logger.warn(
-        `Notificação Suri (boleto pago) não enviada — nome ou telefone ausente no job | nosso_numero=${nosso_numero} | temNome=${!!nome} | temTelefone=${!!telefone_celular}`,
+        debugLog(BoletoVerificacaoProcessor.name, 'Notificação Suri (boleto pago) não enviada — nome ou telefone ausente', debugId, {
+          nossoNumero: nosso_numero,
+          temNome: !!nome,
+          temTelefone: !!telefone_celular,
+        }),
       );
     }
   }

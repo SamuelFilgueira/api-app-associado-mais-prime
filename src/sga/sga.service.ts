@@ -12,6 +12,7 @@ import { PrismaService } from '../prisma.service';
 import { BaseOrigin } from 'src/shared/token-resolver.service';
 import { SgaAuthService } from 'src/shared/sga-auth.service';
 import { baseTag } from 'src/shared/log.util';
+import { debugLog } from 'src/shared/debug-log.util';
 import { BOLETO_VERIFICACAO_QUEUE } from 'src/queue/queue.module';
 
 type SgaVeiculo = {
@@ -327,6 +328,7 @@ export class SgaService {
   async criarBoletoReativacao(
     userVehicleId: number,
     plate: string,
+    debugId?: string,
   ): Promise<void> {
     // 1. Resolve CPF e baseOrigin a partir do veículo
     const userVehicle = await this.prisma.userVehicle.findUnique({
@@ -355,7 +357,11 @@ export class SgaService {
 
     if (associadoResponse.status >= 400) {
       this.logger.error(
-        `Erro ao buscar associado | userVehicleId=${userVehicleId} | status=${associadoResponse.status} | body=${JSON.stringify(associadoResponse.data)}`,
+        debugLog(SgaService.name, 'Erro ao buscar associado', debugId, {
+          userVehicleId,
+          status: associadoResponse.status,
+          body: associadoResponse.data,
+        }),
       );
       throw new InternalServerErrorException(
         'Erro ao buscar dados do associado para criação do boleto',
@@ -363,7 +369,11 @@ export class SgaService {
     }
 
     this.logger.debug(
-      `Resposta associado raw | userVehicleId=${userVehicleId} | type=${Array.isArray(associadoResponse.data) ? 'array' : typeof associadoResponse.data} | keys=${Object.keys(associadoResponse.data ?? {}).join(', ')}`,
+      debugLog(SgaService.name, 'Resposta associado raw', debugId, {
+        userVehicleId,
+        type: Array.isArray(associadoResponse.data) ? 'array' : typeof associadoResponse.data,
+        keys: Object.keys(associadoResponse.data ?? {}).join(', '),
+      }),
     );
 
     // A API pode retornar objeto direto ou array com um elemento
@@ -382,7 +392,12 @@ export class SgaService {
       associadoData;
 
     this.logger.log(
-      `Dados do associado extraídos | userVehicleId=${userVehicleId} | codigo_associado=${codigo_associado ?? 'N/A'} | temNome=${!!nome} | temTelefone=${!!telefone_celular}`,
+      debugLog(SgaService.name, 'Dados do associado extraídos', debugId, {
+        userVehicleId,
+        codigo_associado: codigo_associado ?? 'N/A',
+        temNome: !!nome,
+        temTelefone: !!telefone_celular,
+      }),
     );
 
     // 3. Buscar produtos vinculados ao veículo (valor_total_produtos_ativo_reais, taxa_administrativa, codigo_veiculo)
@@ -393,7 +408,12 @@ export class SgaService {
 
     if (produtosResponse.status >= 400) {
       this.logger.error(
-        `Erro ao buscar produtos do veículo | userVehicleId=${userVehicleId} | placa=${plate} | status=${produtosResponse.status} | body=${JSON.stringify(produtosResponse.data)}`,
+        debugLog(SgaService.name, 'Erro ao buscar produtos do veículo', debugId, {
+          userVehicleId,
+          placa: plate,
+          status: produtosResponse.status,
+          body: produtosResponse.data,
+        }),
       );
       throw new InternalServerErrorException(
         'Erro ao buscar produtos vinculados ao veículo',
@@ -401,7 +421,11 @@ export class SgaService {
     }
 
     this.logger.debug(
-      `Resposta produtos raw | userVehicleId=${userVehicleId} | type=${Array.isArray(produtosResponse.data) ? 'array' : typeof produtosResponse.data} | keys=${Object.keys(Array.isArray(produtosResponse.data) ? (produtosResponse.data[0] ?? {}) : (produtosResponse.data ?? {})).join(', ')}`,
+      debugLog(SgaService.name, 'Resposta produtos raw', debugId, {
+        userVehicleId,
+        type: Array.isArray(produtosResponse.data) ? 'array' : typeof produtosResponse.data,
+        keys: Object.keys(Array.isArray(produtosResponse.data) ? (produtosResponse.data[0] ?? {}) : (produtosResponse.data ?? {})).join(', '),
+      }),
     );
 
     // A API pode retornar objeto direto ou array com um elemento
@@ -422,7 +446,12 @@ export class SgaService {
     } = produtosData;
 
     this.logger.log(
-      `Dados de produtos extraídos | userVehicleId=${userVehicleId} | codigo_veiculo=${codigo_veiculo ?? 'N/A'} | taxa_administrativa=${taxa_administrativa ?? 'N/A'} | valor_total=${valor_total_produtos_ativo_reais ?? 'N/A'}`,
+      debugLog(SgaService.name, 'Dados de produtos extraídos', debugId, {
+        userVehicleId,
+        codigo_veiculo: codigo_veiculo ?? 'N/A',
+        taxa_administrativa: taxa_administrativa ?? 'N/A',
+        valor_total: valor_total_produtos_ativo_reais ?? 'N/A',
+      }),
     );
 
     // 4. Calcular valor total (taxa_administrativa pode ser negativo via valor_total_produtos_ativo_reais)
@@ -466,7 +495,12 @@ export class SgaService {
     };
 
     this.logger.debug(
-      `Criando boleto de reativação | userVehicleId=${userVehicleId} | placa=${plate} | valor=${formattedValue}`,
+      debugLog(SgaService.name, 'Criando boleto de reativação', debugId, {
+        userVehicleId,
+        placa: plate,
+        valor: formattedValue,
+        baseOrigin,
+      }),
     );
 
     const boletoResponse = await this.sgaAuthService.executeRequestWithAuth(
@@ -483,10 +517,16 @@ export class SgaService {
     );
 
     this.logger.log(
-      `Boleto de reativação cadastrado | userVehicleId=${userVehicleId} | status=${boletoResponse.status}`,
+      debugLog(SgaService.name, 'Boleto de reativação cadastrado', debugId, {
+        userVehicleId,
+        status: boletoResponse.status,
+      }),
     );
     this.logger.debug(
-      `Resposta raw do boleto | userVehicleId=${userVehicleId} | body=${JSON.stringify(boletoResponse.data)}`,
+      debugLog(SgaService.name, 'Resposta raw do boleto', debugId, {
+        userVehicleId,
+        body: boletoResponse.data,
+      }),
     );
 
     if (boletoResponse.status >= 400) {
@@ -553,7 +593,11 @@ export class SgaService {
     const linkBoleto = boletoDados?.link_boleto;
 
     this.logger.log(
-      `Dados extraídos do boleto | userVehicleId=${userVehicleId} | nosso_numero=${nossoNumero ?? 'N/A'} | link_boleto=${linkBoleto ? 'presente' : 'ausente'}`,
+      debugLog(SgaService.name, 'Dados extraídos do boleto', debugId, {
+        userVehicleId,
+        nossoNumero: nossoNumero ?? 'N/A',
+        linkBoleto: !!linkBoleto,
+      }),
     );
 
     // 8.1 Persistir estado inicial do pagamento da revistoria
@@ -597,14 +641,18 @@ export class SgaService {
       }
 
       this.logger.log(
-        `Pagamento de revistoria persistido (inicial) | userVehicleId=${userVehicleId} | nosso_numero=${nossoNumero ?? 'N/A'}`,
+        debugLog(SgaService.name, 'Pagamento de revistoria persistido (inicial)', debugId, {
+          userVehicleId,
+          nossoNumero: nossoNumero ?? 'N/A',
+        }),
       );
     } catch (paymentPersistError) {
       this.logger.error(
-        `Falha ao persistir pagamento de revistoria (inicial) | userVehicleId=${userVehicleId} | nosso_numero=${nossoNumero ?? 'N/A'}`,
-        paymentPersistError instanceof Error
-          ? paymentPersistError.stack
-          : undefined,
+        debugLog(SgaService.name, 'Falha ao persistir pagamento de revistoria (inicial)', debugId, {
+          userVehicleId,
+          nossoNumero: nossoNumero ?? 'N/A',
+          error: paymentPersistError instanceof Error ? paymentPersistError.message : String(paymentPersistError),
+        }),
       );
     }
 
@@ -620,7 +668,7 @@ export class SgaService {
       }
     }
 
-    // 10. Disparar job recorrente (1h) para verificar pagamento do boleto
+    // 10. Disparar job recorrente (2min) para verificar pagamento do boleto
     if (nossoNumero && codigo_veiculo) {
       await this.boletoVerificacaoQueue.add(
         'verificar-boleto',
@@ -631,14 +679,18 @@ export class SgaService {
           baseOrigin,
           nome,
           telefone_celular,
+          debugId,
         },
         {
-          repeat: { every: 3_600_000 },
+          repeat: { every: 120_000 },
           jobId: `boleto-verificacao-${nossoNumero}`,
         },
       );
       this.logger.log(
-        `Job de verificação de boleto agendado | nosso_numero=${nossoNumero} | codigo_veiculo=${codigo_veiculo}`,
+        debugLog(SgaService.name, 'Job de verificação de boleto agendado', debugId, {
+          nossoNumero,
+          codigo_veiculo,
+        }),
       );
     }
 
@@ -653,10 +705,19 @@ export class SgaService {
           '55' + (telefone_celular ?? '').replace(/\D/g, '');
 
         this.logger.log(
-          `Enviando notificação Suri (boleto) | userVehicleId=${userVehicleId} | phone=${phoneNormalized} | primeiroNome=${primeiroNomeFormatado} | templateId=${process.env.suri_template_id}`,
+          debugLog(SgaService.name, 'Enviando notificação Suri (boleto)', debugId, {
+            userVehicleId,
+            phone: phoneNormalized,
+            primeiroNome: primeiroNomeFormatado,
+            templateId: process.env.suri_template_id,
+          }),
         );
         this.logger.debug(
-          `Payload Suri (boleto) | userVehicleId=${userVehicleId} | suri_baseUrl=${process.env.suri_baseUrl} | linkBoleto=${linkBoleto}`,
+          debugLog(SgaService.name, 'Payload Suri (boleto)', debugId, {
+            userVehicleId,
+            suriBaseUrl: process.env.suri_baseUrl,
+            linkBoleto,
+          }),
         );
 
         const suriResponse = await axios.post(
@@ -690,20 +751,33 @@ export class SgaService {
         );
 
         this.logger.log(
-          `Notificação Suri enviada | userVehicleId=${userVehicleId} | phone=${phoneNormalized} | status=${suriResponse.status}`,
+          debugLog(SgaService.name, 'Notificação Suri enviada', debugId, {
+            userVehicleId,
+            phone: phoneNormalized,
+            status: suriResponse.status,
+          }),
         );
         this.logger.debug(
-          `Resposta Suri | userVehicleId=${userVehicleId} | body=${JSON.stringify(suriResponse.data)}`,
+          debugLog(SgaService.name, 'Resposta Suri', debugId, {
+            userVehicleId,
+            body: suriResponse.data,
+          }),
         );
       } catch (suriError) {
         this.logger.error(
-          `Falha ao enviar notificação Suri | userVehicleId=${userVehicleId}`,
-          suriError instanceof Error ? suriError.stack : undefined,
+          debugLog(SgaService.name, 'Falha ao enviar notificação Suri', debugId, {
+            userVehicleId,
+            error: suriError instanceof Error ? suriError.message : String(suriError),
+          }),
         );
       }
     } else {
       this.logger.warn(
-        `link_boleto não encontrado na resposta do boleto | userVehicleId=${userVehicleId} | nosso_numero=${nossoNumero ?? 'N/A'} | rawData=${JSON.stringify(boletoResponse.data)}`,
+        debugLog(SgaService.name, 'link_boleto não encontrado na resposta do boleto', debugId, {
+          userVehicleId,
+          nossoNumero: nossoNumero ?? 'N/A',
+          rawData: boletoResponse.data,
+        }),
       );
     }
   }

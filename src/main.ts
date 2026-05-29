@@ -10,6 +10,8 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { json, urlencoded } from 'express';
 import { validateEnvOrThrow } from './config/env.validator';
 import { Logger } from '@nestjs/common';
+import { LoggingInterceptor } from './infra/interceptors/logging.interceptor';
+import { HttpExceptionFilter } from './infra/filters/http-exception.filter';
 
 async function bootstrap() {
   // Validate required environment variables before starting the app
@@ -38,7 +40,9 @@ async function bootstrap() {
   app.use(json({ limit: '20mb' }));
   app.use(urlencoded({ extended: true, limit: '20mb' }));
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
-  app.setGlobalPrefix('api');
+  app.useGlobalInterceptors(new LoggingInterceptor());
+  app.useGlobalFilters(new HttpExceptionFilter());
+  app.setGlobalPrefix('api', { exclude: ['health'] });
 
   // Serve static files from uploads directory
   app.useStaticAssets(join(__dirname, '..', 'uploads'), {

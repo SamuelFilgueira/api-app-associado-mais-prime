@@ -1,9 +1,8 @@
 import { Module } from '@nestjs/common';
 import { FuelSessionService } from './fuel-session.service';
 import { FuelEconomyProcessor } from './fuel-economy.processor';
-import { EconomiaService } from '../economia/economia.service';
+import { EconomiaModule } from '../economia/economia.module';
 import { NotificationsModule } from '../notifications/notifications.module';
-import { PrismaService } from '../prisma.service';
 
 /**
  * Módulo responsável pelo rastreamento de economia de combustível.
@@ -16,12 +15,10 @@ import { PrismaService } from '../prisma.service';
  * Depende do QueueModule (global) para acesso à fila FUEL_ECONOMY_QUEUE.
  */
 @Module({
-  imports: [NotificationsModule],
+  imports: [EconomiaModule, NotificationsModule],
   providers: [
     FuelSessionService,
     FuelEconomyProcessor,
-    EconomiaService,
-    PrismaService,
   ],
   exports: [FuelSessionService],
 })

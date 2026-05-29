@@ -1,7 +1,6 @@
 import { Module } from '@nestjs/common';
 import { RastreamentoController } from './rastreamento.controller';
 import { RastreamentoService } from './rastreamento.service';
-import { PrismaService } from 'src/prisma.service';
 import { WebhookProcessor } from './webhook.processor';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { SharedModule } from 'src/shared/shared.module';
@@ -20,7 +19,6 @@ import { HistoricoPdfM7Service } from './m7/pdf/historico-pdf-m7.service';
   controllers: [RastreamentoController, HistoricoResumoController, HistoricoM7Controller],
   providers: [
     RastreamentoService,
-    PrismaService,
     WebhookProcessor,
     RastreamentoSoftruck,
     HistoricoSoftruckService,

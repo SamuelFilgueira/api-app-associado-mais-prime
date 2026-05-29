@@ -22,6 +22,7 @@ import { MailService } from 'src/common/services/mail.service';
 import { BaseOrigin } from 'src/shared/token-resolver.service';
 import { SgaAuthService } from 'src/shared/sga-auth.service';
 import { SgaService } from 'src/sga/sga.service';
+import { debugLog } from 'src/shared/debug-log.util';
 
 @Injectable()
 export class ReinspectionService {
@@ -35,19 +36,33 @@ export class ReinspectionService {
     private readonly sgaService: SgaService,
   ) {}
 
-  async create(dto: CreateReinspectionDto, _userId: unknown) {
-    this.logger.log(
-      `Iniciando create de revistoria | userVehicleId=${dto.userVehicleId} | vehicleType=${dto.vehicleType} | codigoVeiculo=${dto.codigoVeiculo ?? 'N/A'}`,
-    );
+  private log(debugId: string | undefined, message: string, meta?: Record<string, unknown>) {
+    this.logger.log(debugLog(ReinspectionService.name, message, debugId, meta));
+  }
+
+  private warn(debugId: string | undefined, message: string, meta?: Record<string, unknown>) {
+    this.logger.warn(debugLog(ReinspectionService.name, message, debugId, meta));
+  }
+
+  private error(debugId: string | undefined, message: string, meta?: Record<string, unknown>) {
+    this.logger.error(debugLog(ReinspectionService.name, message, debugId, meta));
+  }
+
+  async create(dto: CreateReinspectionDto, _userId: unknown, debugId?: string) {
+    this.log(debugId, 'Iniciando create de revistoria', {
+      userVehicleId: dto.userVehicleId,
+      vehicleType: dto.vehicleType,
+      codigoVeiculo: dto.codigoVeiculo ?? 'N/A',
+    });
 
     const vehicle = await this.prisma.userVehicle.findUnique({
       where: { id: dto.userVehicleId },
     });
 
     if (!vehicle) {
-      this.logger.warn(
-        `Validação falhou no create: veículo não encontrado | userVehicleId=${dto.userVehicleId}`,
-      );
+      this.warn(debugId, 'Validação falhou no create: veículo não encontrado', {
+        userVehicleId: dto.userVehicleId,
+      });
       throw new NotFoundException('Veículo não encontrado');
     }
 
@@ -59,9 +74,10 @@ export class ReinspectionService {
       },
     });
 
-    this.logger.log(
-      `Revistoria criada | reinspectionId=${reinspection.id} | userVehicleId=${dto.userVehicleId}`,
-    );
+    this.log(debugId, 'Revistoria criada', {
+      reinspectionId: reinspection.id,
+      userVehicleId: dto.userVehicleId,
+    });
 
     return {
       reinspectionId: reinspection.id,
@@ -97,10 +113,11 @@ export class ReinspectionService {
    * Adiciona um lote de fotos a uma revistoria existente com status PENDENTE.
    * Pode ser chamado múltiplas vezes para envio incremental.
    */
-  async addPhotos(reinspectionId: number, dto: AddPhotosDto) {
-    this.logger.log(
-      `Adicionando fotos à revistoria | reinspectionId=${reinspectionId} | photos=${dto.photos.length}`,
-    );
+  async addPhotos(reinspectionId: number, dto: AddPhotosDto, debugId?: string) {
+    this.log(debugId, 'Adicionando fotos à revistoria', {
+      reinspectionId,
+      photos: dto.photos.length,
+    });
 
     const reinspection = await this.prisma.reinspection.findUnique({
       where: { id: reinspectionId },
@@ -148,10 +165,10 @@ export class ReinspectionService {
         }),
       );
     } catch (error) {
-      this.logger.error(
-        `Falha ao salvar fotos | reinspectionId=${reinspectionId}`,
-        error instanceof Error ? error.stack : undefined,
-      );
+      this.error(debugId, 'Falha ao salvar fotos', {
+        reinspectionId,
+        error: error instanceof Error ? error.message : String(error),
+      });
       throw new BadRequestException(
         'Falha ao processar as fotos em base64 para armazenamento local',
       );
@@ -173,9 +190,11 @@ export class ReinspectionService {
       where: { reinspectionId },
     });
 
-    this.logger.log(
-      `Fotos adicionadas | reinspectionId=${reinspectionId} | added=${dto.photos.length} | total=${totalPhotos}`,
-    );
+    this.log(debugId, 'Fotos adicionadas', {
+      reinspectionId,
+      added: dto.photos.length,
+      total: totalPhotos,
+    });
 
     return {
       reinspectionId,
@@ -188,13 +207,14 @@ export class ReinspectionService {
    * Finaliza o envio das fotos, disparando o e-mail de notificação para os analistas.
    * Requer ao menos uma foto e status PENDENTE.
    */
-  async submitReinspection(reinspectionId: number) {
-    this.logger.log(`Submetendo revistoria | reinspectionId=${reinspectionId}`);
+  async submitReinspection(reinspectionId: number, debugId?: string) {
+    this.log(debugId, 'Submetendo revistoria', { reinspectionId });
 
     const reinspection = await this.prisma.reinspection.findUnique({
       where: { id: reinspectionId },
       select: {
         id: true,
+        userVehicleId: true,
         status: true,
         photos: { select: { url: true } },
         userVehicle: { select: { chassi: true, plate: true } },
@@ -218,23 +238,36 @@ export class ReinspectionService {
     }
 
     try {
+      this.log(debugId, 'Enviando e-mail de revistoria', {
+        reinspectionId,
+        chassi: reinspection.userVehicle.chassi,
+        plate: reinspection.userVehicle.plate ?? 'N/A',
+        fotos: reinspection.photos.length,
+      });
       await this.mailService.sendRevistoriaEmail(
         reinspection.userVehicle.chassi,
         reinspection.userVehicle.plate,
+        debugId,
         reinspection.photos
           .map((p) => p.url)
           .filter((url): url is string => url !== null),
       );
+      this.log(debugId, 'E-mail de revistoria enviado', {
+        reinspectionId,
+        chassi: reinspection.userVehicle.chassi,
+        plate: reinspection.userVehicle.plate ?? 'N/A',
+      });
     } catch (emailError) {
-      this.logger.error(
-        `Falha ao enviar e-mail de revistoria | reinspectionId=${reinspectionId}`,
-        emailError instanceof Error ? emailError.stack : undefined,
-      );
+      this.error(debugId, 'Falha ao enviar e-mail de revistoria', {
+        reinspectionId,
+        error: emailError instanceof Error ? emailError.message : String(emailError),
+      });
     }
 
-    this.logger.log(
-      `Revistoria submetida com sucesso | reinspectionId=${reinspectionId} | photos=${reinspection.photos.length}`,
-    );
+    this.log(debugId, 'Revistoria submetida com sucesso', {
+      reinspectionId,
+      photos: reinspection.photos.length,
+    });
 
     return {
       reinspectionId: reinspection.id,
@@ -276,7 +309,7 @@ export class ReinspectionService {
 
   async upsertTemplatePhoto(
     dto: UpsertTemplatePhotoDto,
-    file: Express.Multer.File,
+    file: any,
   ) {
     if (!file) {
       throw new BadRequestException('Foto do template é obrigatória');
@@ -515,7 +548,7 @@ export class ReinspectionService {
     };
   }
 
-  async finalizeByUserVehicleId(userVehicleId: number) {
+  async finalizeByUserVehicleId(userVehicleId: number, debugId?: string) {
     const vehicle = await this.prisma.userVehicle.findUnique({
       where: { id: userVehicleId },
       select: { id: true },
@@ -548,9 +581,10 @@ export class ReinspectionService {
       },
     });
 
-    this.logger.log(
-      `Revistoria finalizada com sucesso | reinspectionId=${updated.id} | userVehicleId=${updated.userVehicleId}`,
-    );
+    this.log(debugId, 'Revistoria finalizada com sucesso', {
+      reinspectionId: updated.id,
+      userVehicleId: updated.userVehicleId,
+    });
 
     return {
       reinspectionId: updated.id,
@@ -560,7 +594,7 @@ export class ReinspectionService {
     };
   }
 
-  async approveByUserVehicleId(userVehicleId: number) {
+  async approveByUserVehicleId(userVehicleId: number, debugId?: string) {
     const vehicle = await this.prisma.userVehicle.findUnique({
       where: { id: userVehicleId },
       select: { id: true, chassi: true, plate: true },
@@ -611,45 +645,50 @@ export class ReinspectionService {
     try {
       await this.sendReinspectionToHinova(updated.id);
     } catch (error) {
-      this.logger.error(
-        `Falha ao enviar revistoria aprovada para Hinova | reinspectionId=${updated.id} | userVehicleId=${updated.userVehicleId}`,
-        error instanceof Error ? error.stack : undefined,
-      );
+      this.error(debugId, 'Falha ao enviar revistoria aprovada para Hinova', {
+        reinspectionId: updated.id,
+        userVehicleId: updated.userVehicleId,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
 
     try {
+      this.log(debugId, 'Enviando e-mail de revistoria aprovada', {
+        reinspectionId: updated.id,
+        chassi: vehicle.chassi,
+        plate: vehicle.plate ?? 'N/A',
+      });
       await this.mailService.sendRevistoriaAprovadaEmail(
         vehicle.chassi,
         vehicle.plate,
+        debugId,
       );
+      this.log(debugId, 'E-mail de revistoria aprovada enviado', {
+        reinspectionId: updated.id,
+        chassi: vehicle.chassi,
+        plate: vehicle.plate ?? 'N/A',
+      });
     } catch (emailError) {
-      this.logger.error(
-        `Falha ao enviar e-mail de aprovação | reinspectionId=${updated.id} | chassi=${vehicle.chassi} | plate=${vehicle.plate ?? 'N/A'}`,
-        emailError instanceof Error ? emailError.stack : undefined,
-      );
+      this.error(debugId, 'Falha ao enviar e-mail de aprovação', {
+        reinspectionId: updated.id,
+        chassi: vehicle.chassi,
+        plate: vehicle.plate ?? 'N/A',
+        error: emailError instanceof Error ? emailError.message : String(emailError),
+      });
     }
 
-    if (vehicle.plate) {
-      try {
-        await this.sgaService.criarBoletoReativacao(
-          updated.userVehicleId,
-          vehicle.plate,
-        );
-      } catch (boletoError) {
-        this.logger.error(
-          `Falha ao criar boleto de reativação | reinspectionId=${updated.id} | userVehicleId=${updated.userVehicleId}`,
-          boletoError instanceof Error ? boletoError.stack : undefined,
-        );
-      }
-    } else {
-      this.logger.warn(
-        `Boleto de reativação não criado: placa não disponível | reinspectionId=${updated.id} | userVehicleId=${updated.userVehicleId}`,
-      );
-    }
-
-    this.logger.log(
-      `Revistoria aprovada com sucesso | reinspectionId=${updated.id} | userVehicleId=${updated.userVehicleId}`,
+    await this.tryCreateReinspectionBoleto(
+      updated.userVehicleId,
+      updated.id,
+      vehicle.plate,
+      'approve',
+      debugId,
     );
+
+    this.log(debugId, 'Revistoria aprovada com sucesso', {
+      reinspectionId: updated.id,
+      userVehicleId: updated.userVehicleId,
+    });
 
     return {
       reinspectionId: updated.id,
@@ -658,6 +697,67 @@ export class ReinspectionService {
       createdAt: updated.createdAt,
       updatedAt: updated.updatedAt,
     };
+  }
+
+  private async tryCreateReinspectionBoleto(
+    userVehicleId: number,
+    reinspectionId: number,
+    plate: string | null,
+    trigger: 'submit' | 'approve',
+    debugId?: string,
+  ) {
+    if (!plate) {
+      this.warn(debugId, 'Boleto de reativação não criado: placa não disponível', {
+        trigger,
+        reinspectionId,
+        userVehicleId,
+      });
+      return;
+    }
+
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    const existingOpenPayment =
+      await this.prisma.reinspectionPayment.findFirst({
+        where: {
+          userVehicleId,
+          pago: false,
+          boletoCriadoEm: { gte: oneHourAgo },
+        },
+        orderBy: { boletoCriadoEm: 'desc' },
+        select: {
+          id: true,
+          nossoNumero: true,
+          situacaoBoleto: true,
+        },
+      });
+
+    if (existingOpenPayment) {
+      this.log(debugId, 'Boleto de reativação já existente; nova criação ignorada', {
+        trigger,
+        reinspectionId,
+        userVehicleId,
+        paymentId: existingOpenPayment.id,
+        nossoNumero: existingOpenPayment.nossoNumero ?? 'N/A',
+        situacao: existingOpenPayment.situacaoBoleto,
+      });
+      return;
+    }
+
+    try {
+      await this.sgaService.criarBoletoReativacao(userVehicleId, plate, debugId);
+      this.log(debugId, 'Criação de boleto de reativação disparada com sucesso', {
+        trigger,
+        reinspectionId,
+        userVehicleId,
+      });
+    } catch (boletoError) {
+      this.error(debugId, 'Falha ao criar boleto de reativação', {
+        trigger,
+        reinspectionId,
+        userVehicleId,
+        error: boletoError instanceof Error ? boletoError.message : String(boletoError),
+      });
+    }
   }
 
   private async sendReinspectionToHinova(reinspectionId: number) {
@@ -926,7 +1026,7 @@ export class ReinspectionService {
     }));
   }
 
-  async resendPhoto(photoId: number, base64: string) {
+  async resendPhoto(photoId: number, base64: string, debugId?: string) {
     const photo = await this.prisma.reinspectionPhoto.findUnique({
       where: { id: photoId },
       select: {
@@ -995,22 +1095,25 @@ export class ReinspectionService {
       }),
     ]);
 
-    this.logger.log(
-      `Foto reenviada | photoId=${updatedPhoto.id} | reinspectionId=${updatedReinspection.id} | newUrl=${newUrl}`,
-    );
+    this.log(debugId, 'Foto reenviada', {
+      photoId: updatedPhoto.id,
+      reinspectionId: updatedReinspection.id,
+      newUrl,
+    });
 
     // Envia e-mail com assunto específico
     try {
       await this.mailService.sendFotoRecusadaReenviadaEmail(
         photo.reinspection.userVehicle.chassi,
         photo.reinspection.userVehicle.plate,
+        debugId,
         [newUrl],
       );
     } catch (emailError) {
-      this.logger.error(
-        `Falha ao enviar e-mail de foto reenviada | photoId=${photoId}`,
-        emailError instanceof Error ? emailError.stack : undefined,
-      );
+      this.error(debugId, 'Falha ao enviar e-mail de foto reenviada', {
+        photoId,
+        error: emailError instanceof Error ? emailError.message : String(emailError),
+      });
     }
 
     return {

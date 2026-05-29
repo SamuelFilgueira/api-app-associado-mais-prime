@@ -5,9 +5,7 @@ import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { JwtStrategy } from './jwt.strategy';
 import { LocalStrategy } from './local.strategy';
-import { PrismaService } from '../prisma.service';
 import { PrimeiroLoginGuard } from './primeiro-login.guard';
-import { MailService } from '../common/services/mail.service';
 
 @Module({
   imports: [
@@ -21,9 +19,7 @@ import { MailService } from '../common/services/mail.service';
     AuthService,
     JwtStrategy,
     LocalStrategy,
-    PrismaService,
     PrimeiroLoginGuard,
-    MailService,
   ],
   controllers: [AuthController],
   exports: [AuthService, PrimeiroLoginGuard],

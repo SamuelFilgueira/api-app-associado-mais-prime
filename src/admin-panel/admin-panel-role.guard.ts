@@ -43,6 +43,17 @@ export class AdminPanelRoleGuard implements CanActivate {
       );
     }
 
+    // Tokens novos incluem adminRole no payload — sem DB query
+    if (tokenUser.adminRole) {
+      if (!requiredRoles.includes(tokenUser.adminRole as AdminPanelRole)) {
+        throw new ForbiddenException(
+          'Perfil administrativo sem permissão para esta rota',
+        );
+      }
+      return true;
+    }
+
+    // Fallback para tokens antigos sem adminRole no payload
     let userEmail: string | undefined = tokenUser.email;
 
     if (!userEmail) {

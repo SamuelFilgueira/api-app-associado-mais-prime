@@ -3,21 +3,20 @@ import { BoletoService } from './sga/boleto/boleto.service';
 import { BeneficiosVeiculoController } from './sga/beneficios-veiculo/beneficios-veiculo/beneficios-veiculo.controller';
 import { BeneficiosVeiculoService } from './sga/beneficios-veiculo/beneficios-veiculo/beneficios-veiculo.service';
 import { BoletoVerificacaoProcessor } from './sga/boleto-verificacao.processor';
-import { MailService } from './common/services/mail.service';
 import { Module } from '@nestjs/common';
+import { DatabaseModule } from './database/database.module';
+import { InfraModule } from './infra/infra.module';
+import { StorageModule } from './storage/storage.module';
 import { RastreamentoModule } from './rastreamento/rastreamento.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
 import { PostosController } from './postos/postos.controller';
 import { PostosService } from './postos/postos.service';
-import { PrismaService } from './prisma.service';
 import { CartaoController } from './cartao/cartao.controller';
 import { CartaoService } from './cartao/cartao.service';
-import { EconomiaController } from './economia/economia.controller';
-import { EconomiaService } from './economia/economia.service';
-import { SgaController } from './sga/sga.controller';
-import { SgaService } from './sga/sga.service';
+import { SgaModule } from './sga/sga.module';
+import { EconomiaModule } from './economia/economia.module';
 import { OficinaModule } from './oficina/oficina.module';
 import { DocumentosModule } from './documentos/documentos.module';
 import { AssociadoModule } from './associado/associado.module';
@@ -32,6 +31,9 @@ import { FuelSessionModule } from './fuel-session/fuel-session.module';
 
 @Module({
   imports: [
+    DatabaseModule,
+    InfraModule,
+    StorageModule,
     QueueModule,
     AuthModule,
     RastreamentoModule,
@@ -40,6 +42,8 @@ import { FuelSessionModule } from './fuel-session/fuel-session.module';
     AssociadoModule,
     NotificationsModule,
     AlloyalApiModule,
+    SgaModule,
+    EconomiaModule,
     ReinspectionModule,
     SliderModule,
     AdminPanelModule,
@@ -49,8 +53,6 @@ import { FuelSessionModule } from './fuel-session/fuel-session.module';
     AppController,
     PostosController,
     CartaoController,
-    EconomiaController,
-    SgaController,
     BoletoController,
     BeneficiosVeiculoController,
     AlloyalApiController,
@@ -58,14 +60,10 @@ import { FuelSessionModule } from './fuel-session/fuel-session.module';
   providers: [
     AppService,
     PostosService,
-    PrismaService,
     CartaoService,
-    EconomiaService,
-    SgaService,
     BoletoService,
     BeneficiosVeiculoService,
     BoletoVerificacaoProcessor,
-    MailService,
   ],
 })
 export class AppModule {}

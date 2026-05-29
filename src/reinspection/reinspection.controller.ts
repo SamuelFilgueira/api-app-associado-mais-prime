@@ -4,6 +4,7 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  Headers,
   Param,
   ParseIntPipe,
   Patch,
@@ -42,8 +43,12 @@ export class ReinspectionController {
    * para enviar as fotos em lotes e POST /:id/submit para finalizar.
    */
   @Post()
-  async create(@Body() dto: CreateReinspectionDto, @Req() req: any) {
-    return this.reinspectionService.create(dto, req.user.id);
+  async create(
+    @Body() dto: CreateReinspectionDto,
+    @Req() req: any,
+    @Headers('x-debug-id') debugId?: string,
+  ) {
+    return this.reinspectionService.create(dto, req.user.id, debugId);
   }
 
   /**
@@ -53,8 +58,12 @@ export class ReinspectionController {
    */
   @Post(':id/photos')
   @HttpCode(HttpStatus.OK)
-  addPhotos(@Param('id', ParseIntPipe) id: number, @Body() dto: AddPhotosDto) {
-    return this.reinspectionService.addPhotos(id, dto);
+  addPhotos(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: AddPhotosDto,
+    @Headers('x-debug-id') debugId?: string,
+  ) {
+    return this.reinspectionService.addPhotos(id, dto, debugId);
   }
 
   /**
@@ -64,8 +73,11 @@ export class ReinspectionController {
    */
   @Post(':id/submit')
   @HttpCode(HttpStatus.OK)
-  submitReinspection(@Param('id', ParseIntPipe) id: number) {
-    return this.reinspectionService.submitReinspection(id);
+  submitReinspection(
+    @Param('id', ParseIntPipe) id: number,
+    @Headers('x-debug-id') debugId?: string,
+  ) {
+    return this.reinspectionService.submitReinspection(id, debugId);
   }
 
   /**
@@ -108,7 +120,7 @@ export class ReinspectionController {
   @UseInterceptors(FileInterceptor('photo'))
   async upsertTemplatePhoto(
     @Body() dto: UpsertTemplatePhotoDto,
-    @UploadedFile() file: Express.Multer.File,
+    @UploadedFile() file: any,
   ) {
     return this.reinspectionService.upsertTemplatePhoto(dto, file);
   }
@@ -177,9 +189,9 @@ export class ReinspectionController {
   @HttpCode(HttpStatus.OK)
   finalizeByUserVehicleId(
     @Query('userVehicleId', ParseIntPipe) userVehicleId: number,
+    @Headers('x-debug-id') debugId?: string,
   ) {
-    this.logger.log(`Recebido pedido para finalizar revistoria do userVehicleId: ${userVehicleId}`);
-    return this.reinspectionService.finalizeByUserVehicleId(userVehicleId);
+    return this.reinspectionService.finalizeByUserVehicleId(userVehicleId, debugId);
   }
 
   /**
@@ -190,8 +202,9 @@ export class ReinspectionController {
   @HttpCode(HttpStatus.OK)
   approveByUserVehicleId(
     @Query('userVehicleId', ParseIntPipe) userVehicleId: number,
+    @Headers('x-debug-id') debugId?: string,
   ) {
-    return this.reinspectionService.approveByUserVehicleId(userVehicleId);
+    return this.reinspectionService.approveByUserVehicleId(userVehicleId, debugId);
   }
 
   /**
@@ -238,7 +251,8 @@ export class ReinspectionController {
   resendPhoto(
     @Param('photoId', ParseIntPipe) photoId: number,
     @Body() dto: ResendPhotoDto,
+    @Headers('x-debug-id') debugId?: string,
   ) {
-    return this.reinspectionService.resendPhoto(photoId, dto.base64);
+    return this.reinspectionService.resendPhoto(photoId, dto.base64, debugId);
   }
 }

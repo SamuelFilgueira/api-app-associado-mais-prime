@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import * as nodemailer from 'nodemailer';
 import { join } from 'path';
+import { debugLog } from 'src/shared/debug-log.util';
 
 @Injectable()
 export class MailService {
@@ -48,6 +49,7 @@ export class MailService {
   async sendRevistoriaEmail(
     chassi: string,
     plate: string | null,
+    debugId?: string,
     photoUrls: string[] = [],
   ): Promise<void> {
     const safePlate = plate ?? 'N/A';
@@ -94,14 +96,31 @@ export class MailService {
       attachments,
     };
     try {
+      this.logger.log(
+        debugLog(MailService.name, 'Enviando e-mail de revistoria', debugId, {
+          chassi,
+          plate: safePlate,
+          imagens: attachments.length,
+          destino: 'previa@maisprime.org.br',
+        }),
+      );
       await this.transporter.sendMail(mailOptions);
       this.logger.log(
-        `E-mail de revistoria enviado para: previa@maisprime.org.br | chassi=${chassi} | plate=${safePlate} | imagens=${attachments.length}`,
+        debugLog(MailService.name, 'E-mail de revistoria enviado', debugId, {
+          chassi,
+          plate: safePlate,
+          imagens: attachments.length,
+          destino: 'previa@maisprime.org.br',
+        }),
       );
     } catch (error) {
       this.logger.error(
-        `Falha ao enviar e-mail para previa@maisprime.org.br`,
-        error,
+        debugLog(MailService.name, 'Falha ao enviar e-mail de revistoria', debugId, {
+          chassi,
+          plate: safePlate,
+          destino: 'previa@maisprime.org.br',
+          error: error instanceof Error ? error.message : String(error),
+        }),
       );
       throw error;
     }
@@ -110,6 +129,7 @@ export class MailService {
   async sendRevistoriaAprovadaEmail(
     chassi: string,
     plate: string | null,
+    debugId?: string,
   ): Promise<void> {
     const safePlate = plate ?? 'N/A';
 
@@ -132,22 +152,38 @@ export class MailService {
     };
 
     try {
+      this.logger.log(
+        debugLog(MailService.name, 'Enviando e-mail de revistoria aprovada', debugId, {
+          chassi,
+          plate: safePlate,
+          destino: 'cobranca@maisprime.org.br',
+        }),
+      );
       await this.transporter.sendMail(mailOptions);
       this.logger.log(
-        `E-mail de revistoria aprovada enviado | chassi=${chassi} | plate=${safePlate}`,
+        debugLog(MailService.name, 'E-mail de revistoria aprovada enviado', debugId, {
+          chassi,
+          plate: safePlate,
+          destino: 'cobranca@maisprime.org.br',
+        }),
       );
     } catch (error) {
       this.logger.error(
-        `Falha ao enviar e-mail de revistoria aprovada | chassi=${chassi} | plate=${safePlate}`,
-        error,
+        debugLog(MailService.name, 'Falha ao enviar e-mail de revistoria aprovada', debugId, {
+          chassi,
+          plate: safePlate,
+          destino: 'cobranca@maisprime.org.br',
+          error: error instanceof Error ? error.message : String(error),
+        }),
       );
       throw error;
     }
   }
 
-    async sendBoletoRevistoriaPago(
+  async sendBoletoRevistoriaPago(
     chassi: string,
     plate: string | null,
+    debugId?: string,
   ): Promise<void> {
     const safePlate = plate ?? 'N/A';
 
@@ -172,14 +208,29 @@ export class MailService {
     };
 
     try {
+      this.logger.log(
+        debugLog(MailService.name, 'Enviando e-mail de boleto pago', debugId, {
+          chassi,
+          plate: safePlate,
+          destino: ['cobranca@maisprime.org.br', 'previa@maisprime.org.br'],
+        }),
+      );
       await this.transporter.sendMail(mailOptions);
       this.logger.log(
-        `E-mail de boleto pago enviado | chassi=${chassi} | plate=${safePlate}`,
+        debugLog(MailService.name, 'E-mail de boleto pago enviado', debugId, {
+          chassi,
+          plate: safePlate,
+          destino: ['cobranca@maisprime.org.br', 'previa@maisprime.org.br'],
+        }),
       );
     } catch (error) {
       this.logger.error(
-        `Falha ao enviar e-mail de boleto pago | chassi=${chassi} | plate=${safePlate}`,
-        error,
+        debugLog(MailService.name, 'Falha ao enviar e-mail de boleto pago', debugId, {
+          chassi,
+          plate: safePlate,
+          destino: ['cobranca@maisprime.org.br', 'previa@maisprime.org.br'],
+          error: error instanceof Error ? error.message : String(error),
+        }),
       );
       throw error;
     }
@@ -197,6 +248,7 @@ export class MailService {
   async sendFotoRecusadaReenviadaEmail(
     chassi: string,
     plate: string | null,
+    debugId?: string,
     photoUrls: string[] = [],
   ): Promise<void> {
     const safePlate = plate ?? 'N/A';
@@ -244,14 +296,30 @@ export class MailService {
     };
 
     try {
+      this.logger.log(
+        debugLog(MailService.name, 'Enviando e-mail de foto recusada reenviada', debugId, {
+          chassi,
+          plate: safePlate,
+          imagens: attachments.length,
+          destino: 'previa@maisprime.org.br',
+        }),
+      );
       await this.transporter.sendMail(mailOptions);
       this.logger.log(
-        `E-mail de foto recusada reenviada enviado | chassi=${chassi} | plate=${safePlate} | imagens=${attachments.length}`,
+        debugLog(MailService.name, 'E-mail de foto recusada reenviada enviado', debugId, {
+          chassi,
+          plate: safePlate,
+          imagens: attachments.length,
+          destino: 'previa@maisprime.org.br',
+        }),
       );
     } catch (error) {
       this.logger.error(
-        `Falha ao enviar e-mail de foto recusada reenviada | chassi=${chassi} | plate=${safePlate}`,
-        error,
+        debugLog(MailService.name, 'Falha ao enviar e-mail de foto recusada reenviada', debugId, {
+          chassi,
+          plate: safePlate,
+          error: error instanceof Error ? error.message : String(error),
+        }),
       );
       throw error;
     }

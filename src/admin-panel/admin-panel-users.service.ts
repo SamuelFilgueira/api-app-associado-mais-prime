@@ -42,10 +42,11 @@ export class AdminPanelUsersService {
       email: adminPanelUser.email,
       username: adminPanelUser.name,
       role: UserRole.ADMIN,
+      adminRole: adminPanelUser.role,
     };
 
     return {
-      access_token: this.jwtService.sign(payload),
+      access_token: this.jwtService.sign(payload, { audience: 'admin-panel' }),
       user: {
         id: adminPanelUser.id,
         name: adminPanelUser.name,
