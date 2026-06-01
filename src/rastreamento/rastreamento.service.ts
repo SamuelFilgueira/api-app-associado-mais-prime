@@ -106,9 +106,6 @@ export class RastreamentoService {
     const baseContext =
       requestContext ?? (await this.resolveBaseContextFromDb(chassi));
 
-    this.logger.log(
-      `${baseTag(baseContext.baseOrigin)} usando token ${baseContext.logicaTokenKey} para consulta Lógica`,
-    );
 
     const softruckPublicKeyKey = this.tokenResolver.getTokenKey(
       baseContext.baseOrigin,
@@ -196,10 +193,6 @@ export class RastreamentoService {
         selecionado = maisRecente;
       }
     }
-
-    this.logger.log(
-      `Rastreamento unificado retornando registro em ${selecionado.dataOriginal} (${selecionado.origem})`,
-    );
 
     const payload = this.normalizarRespostaRastreamento(
       selecionado.data,
@@ -327,9 +320,6 @@ export class RastreamentoService {
             where: { id: userVehicle.userId },
             data: { ancoraAtiva },
           });
-          this.logger.log(
-            `Estado da âncora atualizado para userId=${userVehicle.userId}: ancoraAtiva=${ancoraAtiva}`,
-          );
         } else {
           this.logger.warn(
             `Nenhum usuário encontrado para o chassi ${chassi} — estado da âncora não persistido`,
@@ -375,9 +365,6 @@ export class RastreamentoService {
             where: { id: userVehicle.userId },
             data: { notificacaoIgnicao: evtIgnNormalizado },
           });
-          this.logger.log(
-            `Estado de ignição atualizado para userId=${userVehicle.userId}: notificacaoIgnicao=${evtIgnNormalizado}`,
-          );
         } else {
           this.logger.warn(
             `Nenhum usuário encontrado para o chassi ${chassi} — estado de ignição não persistido`,
@@ -717,7 +704,6 @@ export class RastreamentoService {
         'utf-8',
       );
 
-      this.logger.log(`[Webhook M7] Payload salvo em: ${filename}`);
     } catch (error) {
       this.logger.error('[Webhook M7] Erro ao salvar payload:', error);
     }
