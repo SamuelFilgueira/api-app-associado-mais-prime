@@ -6,16 +6,21 @@ import {
   UseGuards,
   Body,
   UnauthorizedException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { LocalAuthGuard } from './local-auth.guard';
 import { RegisterDto } from './dto/register.dto';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { LoginDto } from './dto/login.dto';
+import { MailService } from '../common/services/mail.service';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private authService: AuthService) {}
+  constructor(
+    private authService: AuthService,
+    private mailService: MailService,
+  ) {}
 
   @Post('login')
   async login(@Body() body: LoginDto) {
@@ -58,4 +63,16 @@ export class AuthController {
   resetPassword(@Body() body: { cpf: string }) {
     return this.authService.resetPassword(body.cpf);
   }
+
+  // ─── ENDPOINT DE TESTE — remova antes de subir em produção ────────────────
+  // Habilite com: ENABLE_TEST_ENDPOINTS=true no .env
+  @Post('test-ses-email')
+  async testSesEmail(@Body() body: { to: string }) {
+    if (process.env.ENABLE_TEST_ENDPOINTS !== 'true') {
+      throw new ForbiddenException('Endpoint de teste desabilitado.');
+    }
+    await this.mailService.sendPasswordReset(body.to, 'SenhaTest@123');
+    return { success: true, message: `E-mail de teste enviado para ${body.to} via Amazon SES.` };
+  }
+  // ─────────────────────────────────────────────────────────────────────────
 }

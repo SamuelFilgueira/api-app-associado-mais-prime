@@ -1,9 +1,17 @@
 import {
+  Injectable,
   InternalServerErrorException,
   Logger,
+  OnModuleDestroy,
+  OnModuleInit,
 } from '@nestjs/common';
 import axios from 'axios';
-import { BaseOrigin } from '../shared/token-resolver.service';
+import { BaseOrigin, TokenResolverService } from '../shared/token-resolver.service';
+import {
+  IRastreamentoProvider,
+  RastreamentoBaseContext,
+  RastreamentoCandidatoResult,
+} from './providers/rastreamento-provider.interface';
 
 // ---------------------------------------------------------------------------
 // Constantes
@@ -11,18 +19,6 @@ import { BaseOrigin } from '../shared/token-resolver.service';
 
 /** Timeout padrão para chamadas HTTP à API M7 (em ms) */
 const M7_REQUEST_TIMEOUT = 15_000;
-
-/**
- * Mapeamento de credenciais por base de origem.
- * Cada base possui variáveis de ambiente distintas para token e código.
- */
-const M7_CREDENTIALS: Record<
-  BaseOrigin,
-  { tokenEnvVar: string; codigoEnvVar: string }
-> = {
-  MAIS_PRIME: { tokenEnvVar: 'MO7_TOKEN', codigoEnvVar: 'M07_CODIGO' },
-  MAIS_PRIME_RS: { tokenEnvVar: 'MO7_TOKEN_RS', codigoEnvVar: 'M07_CODIGO_RS' },
-};
 
 // ---------------------------------------------------------------------------
 // Tipos e interfaces
@@ -78,38 +74,63 @@ export interface EventoPadraoM7Response {
 // Classe principal
 // ---------------------------------------------------------------------------
 
-export class RastreamentoM7 {
+@Injectable()
+export class RastreamentoM7 implements IRastreamentoProvider, OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(RastreamentoM7.name);
+  readonly providerName = 'm7' as const;
 
   // -------------------------------------------------------------------------
   // Estado interno
   // -------------------------------------------------------------------------
 
+  private readonly bases: BaseOrigin[] = ['MAIS_PRIME', 'MAIS_PRIME_RS'];
+
   /** Estado de token por base de origem. */
   private readonly tokenState: Record<BaseOrigin, TokenState> = {
     MAIS_PRIME: { token: null, tokenExpires: null, tokenRenewalPromise: null },
-    MAIS_PRIME_RS: {
-      token: null,
-      tokenExpires: null,
-      tokenRenewalPromise: null,
-    },
+    MAIS_PRIME_RS: { token: null, tokenExpires: null, tokenRenewalPromise: null },
   };
+
+  private renewalInterval: NodeJS.Timeout;
 
   // -------------------------------------------------------------------------
   // Inicialização
   // -------------------------------------------------------------------------
 
-  constructor() {
-    // Obtém tokens para todas as bases ao iniciar a instância
-    void this.renovarToken('MAIS_PRIME');
-    void this.renovarToken('MAIS_PRIME_RS');
+  constructor(private readonly tokenResolver: TokenResolverService) {}
 
-    // Renova tokens a cada 30 minutos de forma contínua.
-    // .unref() evita que o intervalo bloqueie o shutdown da aplicação.
-    setInterval(() => {
-      this.renovarToken('MAIS_PRIME').catch(() => {});
-      this.renovarToken('MAIS_PRIME_RS').catch(() => {});
-    }, 1800000).unref();
+  async onModuleInit(): Promise<void> {
+    await Promise.allSettled(this.bases.map((b) => this.renovarToken(b)));
+
+    this.renewalInterval = setInterval(() => {
+      for (const base of this.bases) {
+        void this.renovarToken(base).catch(() => {});
+      }
+    }, 1_800_000);
+    this.renewalInterval.unref();
+  }
+
+  onModuleDestroy(): void {
+    clearInterval(this.renewalInterval);
+  }
+
+  // -------------------------------------------------------------------------
+  // IRastreamentoProvider
+  // -------------------------------------------------------------------------
+
+  async obterUltimaPosicao(params: {
+    cnpj: string;
+    chassi: string;
+    baseContext: RastreamentoBaseContext;
+  }): Promise<RastreamentoCandidatoResult> {
+    const { cnpj, chassi, baseContext } = params;
+    const data = await this.ultimaPosicaoM7(cnpj, chassi, baseContext.baseOrigin);
+    return {
+      dataOriginal: data.data_gps,
+      timestamp: new Date(data.data_gps.replace(' ', 'T')).getTime(),
+      data: data as unknown as Record<string, unknown>,
+      origem: 'm7',
+    };
   }
 
   // -------------------------------------------------------------------------
@@ -123,23 +144,16 @@ export class RastreamentoM7 {
   async renovarToken(baseOrigin: BaseOrigin = 'MAIS_PRIME') {
     const state = this.tokenState[baseOrigin];
 
-    // Se já há uma renovação em andamento, aguarda e reutiliza o resultado
     if (state.tokenRenewalPromise) {
       await state.tokenRenewalPromise;
-      return {
-        token: state.token,
-        expires_in: state.tokenExpires,
-      };
+      return { token: state.token, expires_in: state.tokenExpires };
     }
 
     state.tokenRenewalPromise = this.executeRenovarToken(baseOrigin);
 
     try {
       await state.tokenRenewalPromise;
-      return {
-        token: state.token,
-        expires_in: state.tokenExpires,
-      };
+      return { token: state.token, expires_in: state.tokenExpires };
     } finally {
       state.tokenRenewalPromise = null;
     }
@@ -150,17 +164,13 @@ export class RastreamentoM7 {
    * interno do token para a base informada.
    */
   private async executeRenovarToken(baseOrigin: BaseOrigin): Promise<void> {
-    const { tokenEnvVar, codigoEnvVar } = M7_CREDENTIALS[baseOrigin];
-    const apiM7Token = process.env[tokenEnvVar];
-    const codigo = process.env[codigoEnvVar];
+    const apiM7Token = process.env[this.tokenResolver.getTokenKey(baseOrigin, 'm7Token')];
+    const codigo = process.env[this.tokenResolver.getTokenKey(baseOrigin, 'm7Codigo')];
 
     try {
       const response = await axios.post(
         `${process.env.M7_API_BASE_URL}login`,
-        {
-          codigo,
-          api_m7_token: apiM7Token,
-        },
+        { codigo, api_m7_token: apiM7Token },
         { timeout: M7_REQUEST_TIMEOUT },
       );
 
@@ -170,9 +180,7 @@ export class RastreamentoM7 {
         return;
       }
 
-      this.logger.error(
-        `[${baseOrigin}] Falha ao renovar token - sucesso=false`,
-      );
+      this.logger.error(`[${baseOrigin}] Falha ao renovar token - sucesso=false`);
       throw new InternalServerErrorException('Falha ao renovar token');
     } catch (error) {
       if (error instanceof InternalServerErrorException) throw error;
@@ -203,9 +211,6 @@ export class RastreamentoM7 {
   /**
    * Wrapper genérico: executa o request fornecido e, em caso de token
    * inválido ou expirado, renova e repete a chamada uma única vez.
-   *
-   * Axios lança AxiosError para respostas HTTP >= 400 (incluindo 401),
-   * por isso é necessário capturar a exceção além de checar o body.
    */
   private async executarComReautenticacao<T>(
     baseOrigin: BaseOrigin,
@@ -214,9 +219,7 @@ export class RastreamentoM7 {
     const state = this.tokenState[baseOrigin];
 
     if (!state.token) {
-      this.logger.error(
-        `[${baseOrigin}] executarComReautenticacao - Token não disponível`,
-      );
+      this.logger.error(`[${baseOrigin}] executarComReautenticacao - Token não disponível`);
       throw new InternalServerErrorException('Token não disponível');
     }
 
@@ -224,7 +227,6 @@ export class RastreamentoM7 {
       const response = await request(state.token);
       return response.data;
     } catch (error) {
-      // Verifica se o erro é de autenticação e tenta renovar o token
       if (
         axios.isAxiosError(error) &&
         (error.response?.status === 401 ||
@@ -234,19 +236,13 @@ export class RastreamentoM7 {
           }))
       ) {
         this.logger.warn(`[${baseOrigin}] Token expirado/inválido, renovando`);
-
         await this.renovarToken(baseOrigin);
 
         if (!state.token) {
-          this.logger.error(
-            `[${baseOrigin}] Token ainda indisponível após renovação`,
-          );
-          throw new InternalServerErrorException(
-            'Token não disponível após renovação',
-          );
+          this.logger.error(`[${baseOrigin}] Token ainda indisponível após renovação`);
+          throw new InternalServerErrorException('Token não disponível após renovação');
         }
 
-        // Retry único com o token renovado
         const retry = await request(state.token);
         return retry.data;
       }
@@ -259,17 +255,6 @@ export class RastreamentoM7 {
 
       throw error;
     }
-  }
-
-  // -------------------------------------------------------------------------
-  // Utilitários internos
-  // -------------------------------------------------------------------------
-
-  /** Mascara parcialmente um segredo para exibição segura em logs. */
-  private maskSecret(value?: string | null): string {
-    if (!value) return '(vazio)';
-    if (value.length <= 8) return '***';
-    return `${value.slice(0, 4)}...${value.slice(-4)}`;
   }
 
   // -------------------------------------------------------------------------
@@ -295,18 +280,13 @@ export class RastreamentoM7 {
           },
         ),
       );
-      const result = this.mapearUltimaPosicaoM7(
-        data as Record<string, unknown>,
-      );
-      return result;
+      return this.mapearUltimaPosicaoM7(data as Record<string, unknown>);
     } catch (error) {
       if (error instanceof InternalServerErrorException) throw error;
       this.logger.error(
         `[${baseOrigin}] ultimaPosicaoM7 ERRO: ${error instanceof Error ? error.message : JSON.stringify(error)}`,
       );
-      throw new InternalServerErrorException(
-        'Erro ao consultar última posição do veículo',
-      );
+      throw new InternalServerErrorException('Erro ao consultar última posição do veículo');
     }
   }
 
@@ -327,25 +307,17 @@ export class RastreamentoM7 {
           timeout: M7_REQUEST_TIMEOUT,
         }),
       );
-      const evento = ((data as Record<string, unknown>).evento ?? {}) as Record<
-        string,
-        unknown
-      >;
-      const result = {
+      const evento = ((data as Record<string, unknown>).evento ?? {}) as Record<string, unknown>;
+      return {
         ancoraAtiva: Boolean(evento.ancora),
         evtIgn: Boolean(evento.ignicao_ligada),
       };
-      return result;
     } catch (error) {
       if (error instanceof InternalServerErrorException) throw error;
       this.logger.error(
-        `[${baseOrigin}] getEventoPadraoM7 ERRO: ${
-          error instanceof Error ? error.message : JSON.stringify(error)
-        }`,
+        `[${baseOrigin}] getEventoPadraoM7 ERRO: ${error instanceof Error ? error.message : JSON.stringify(error)}`,
       );
-      throw new InternalServerErrorException(
-        'Erro ao buscar estado atual do veículo na API M7',
-      );
+      throw new InternalServerErrorException('Erro ao buscar estado atual do veículo na API M7');
     }
   }
 
@@ -377,8 +349,7 @@ export class RastreamentoM7 {
         timeout: M7_REQUEST_TIMEOUT,
       }),
     );
-    const result = this.mapearAncoraM7(data as Record<string, unknown>);
-    return result;
+    return this.mapearAncoraM7(data as Record<string, unknown>);
   }
 
   /**
@@ -393,14 +364,7 @@ export class RastreamentoM7 {
     baseOrigin: BaseOrigin,
   ): Promise<AncoraM7Response> {
     try {
-      const result = await this._enviarComandoVeiculo(
-        cnpj,
-        chassi,
-        ancoraAtiva,
-        evtIgn,
-        baseOrigin,
-      );
-      return result;
+      return await this._enviarComandoVeiculo(cnpj, chassi, ancoraAtiva, evtIgn, baseOrigin);
     } catch (error) {
       if (error instanceof InternalServerErrorException) throw error;
       this.logger.error(
@@ -422,14 +386,7 @@ export class RastreamentoM7 {
     baseOrigin: BaseOrigin,
   ): Promise<AncoraM7Response> {
     try {
-      const result = await this._enviarComandoVeiculo(
-        cnpj,
-        chassi,
-        ancoraAtiva,
-        evtIgn,
-        baseOrigin,
-      );
-      return result;
+      return await this._enviarComandoVeiculo(cnpj, chassi, ancoraAtiva, evtIgn, baseOrigin);
     } catch (error) {
       if (error instanceof InternalServerErrorException) throw error;
       this.logger.error(
@@ -438,19 +395,16 @@ export class RastreamentoM7 {
       throw new InternalServerErrorException('Erro ao atualizar ignição');
     }
   }
+
+  // -------------------------------------------------------------------------
   // Mapeamento de respostas da API M7
   // -------------------------------------------------------------------------
 
   /**
    * Converte o payload bruto da API M7 para o formato tipado de última posição.
    */
-  private mapearUltimaPosicaoM7(
-    data: Record<string, unknown>,
-  ): UltimaPosicaoM7Response {
-    const ultimaPosicao = (data.ultima_posicao || {}) as Record<
-      string,
-      unknown
-    >;
+  private mapearUltimaPosicaoM7(data: Record<string, unknown>): UltimaPosicaoM7Response {
+    const ultimaPosicao = (data.ultima_posicao || {}) as Record<string, unknown>;
 
     return {
       monitorado: ultimaPosicao.monitorado as number,
@@ -475,16 +429,14 @@ export class RastreamentoM7 {
       return { erro: (data as { erro: string }).erro };
     }
 
-    const ancora = data;
-
     return {
-      mensagem: ancora.mensagem as string,
-      monitorado: ancora.monitorado as number,
-      ancora_ativa: ancora.ancora_ativa as number,
-      evt_ign: ancora.evt_ign as number,
-      evg_ign_exec: ancora.evg_ign_exec as number,
-      ancora_lat: ancora.ancora_lat as number,
-      ancora_lng: ancora.ancora_lng as number,
+      mensagem: data.mensagem as string,
+      monitorado: data.monitorado as number,
+      ancora_ativa: data.ancora_ativa as number,
+      evt_ign: data.evt_ign as number,
+      evg_ign_exec: data.evg_ign_exec as number,
+      ancora_lat: data.ancora_lat as number,
+      ancora_lng: data.ancora_lng as number,
     };
   }
 
@@ -505,17 +457,11 @@ export class RastreamentoM7 {
 
     try {
       if (!payload) {
-        return {
-          sucesso: false,
-          mensagem: 'Payload vazio ou inválido',
-        };
+        return { sucesso: false, mensagem: 'Payload vazio ou inválido' };
       }
 
       if (typeof payload !== 'object') {
-        return {
-          sucesso: false,
-          mensagem: 'Payload deve ser um objeto JSON válido',
-        };
+        return { sucesso: false, mensagem: 'Payload deve ser um objeto JSON válido' };
       }
 
       const payloadData = payload as Record<string, unknown>;

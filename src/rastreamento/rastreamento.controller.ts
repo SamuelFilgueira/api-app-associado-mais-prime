@@ -19,6 +19,7 @@ import {
   BaseOrigin,
   TokenResolverService,
 } from 'src/shared/token-resolver.service';
+import { maskSecret } from 'src/shared/log.util';
 import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
 import { HistoricoQueryDto } from './softruck/dto/historico-query.dto';
 
@@ -39,12 +40,6 @@ export class RastreamentoController {
     private readonly baseContextService: BaseContextService,
     private readonly tokenResolver: TokenResolverService,
   ) {}
-
-  private maskSecret(value?: string): string {
-    if (!value) return '(vazio)';
-    if (value.length <= 8) return '***';
-    return `${value.slice(0, 4)}...${value.slice(-4)}`;
-  }
 
   private buildRastreamentoContext(): RastreamentoRequestContext {
     const baseOrigin = this.baseContextService.getBaseOrigin();
@@ -70,7 +65,7 @@ export class RastreamentoController {
     );
 
     this.logger.log(
-      `[${ctx.baseOrigin}] rastreamento chassi=${body.chassi} tokenKey=${ctx.logicaTokenKey} token=${this.maskSecret(ctx.logicaToken)} apiKey=${softruckPublicKeyKey} apiKeyValue=${this.maskSecret(ctx.softruckPublicKey)}`,
+      `[${ctx.baseOrigin}] rastreamento chassi=${body.chassi} tokenKey=${ctx.logicaTokenKey} token=${maskSecret(ctx.logicaToken)} apiKey=${softruckPublicKeyKey} apiKeyValue=${maskSecret(ctx.softruckPublicKey)}`,
     );
 
     return this.rastreamentoService.rastreamento(body.cnpj, body.chassi, {
@@ -184,7 +179,7 @@ export class RastreamentoController {
     const ctx = this.buildRastreamentoContext();
 
     this.logger.log(
-      `[${ctx.baseOrigin}] ultima-posicao-logica chassi=${body.chassi} tokenKey=${ctx.logicaTokenKey} token=${this.maskSecret(ctx.logicaToken)}`,
+      `[${ctx.baseOrigin}] ultima-posicao-logica chassi=${body.chassi} tokenKey=${ctx.logicaTokenKey} token=${maskSecret(ctx.logicaToken)}`,
     );
 
     return this.rastreamentoService.ultimaPosicaoLogica(
@@ -209,7 +204,7 @@ export class RastreamentoController {
     );
 
     this.logger.log(
-      `[${ctx.baseOrigin}] ultima-posicao-softruck chassi=${body.chassi} apiKey=${softruckPublicKeyKey} apiKeyValue=${this.maskSecret(ctx.softruckPublicKey)} token=dinamico-via-auth`,
+      `[${ctx.baseOrigin}] ultima-posicao-softruck chassi=${body.chassi} apiKey=${softruckPublicKeyKey} apiKeyValue=${maskSecret(ctx.softruckPublicKey)} token=dinamico-via-auth`,
     );
 
     return this.rastreamentoService.ultimaPosicaoSoftruck(

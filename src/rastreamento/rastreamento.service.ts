@@ -9,7 +9,7 @@ import {
   EventoPadraoM7Response,
 } from './rastreamento-m7';
 import {
-  ultimaPosicaoLogica,
+  LogicaRastreamentoService,
   UltimaPosicaoLogicaResponse,
 } from './rastreamento.logica';
 import {
@@ -38,6 +38,7 @@ interface RastreamentoCandidato {
   data: RastreamentoUnificadoResponse;
   dataOriginal: string;
   timestamp: number;
+  origem: 'm7' | 'logica' | 'softruck';
 }
 
 interface RastreamentoBaseContext {
@@ -47,47 +48,33 @@ interface RastreamentoBaseContext {
   softruckPublicKey: string;
 }
 
+interface WebhookDados {
+  chassi: string;
+  evento: string | null;
+  tipoevento: number | null;
+}
+
 @Injectable()
 export class RastreamentoService {
-  private m7: RastreamentoM7;
   private readonly logger = new Logger(RastreamentoService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly notificationsService: NotificationsService,
     private readonly tokenResolver: TokenResolverService,
     private readonly softruck: RastreamentoSoftruck,
+    private readonly m7: RastreamentoM7,
+    private readonly logica: LogicaRastreamentoService,
     private readonly historicoSoftruck: HistoricoSoftruckService,
-  ) {
-    this.m7 = new RastreamentoM7();
-  }
+  ) {}
+
   /**
-   * Persiste evento de webhook M7 na base de dados
-   * - Extrai chassi, evento, tipoevento de forma defensiva
-   * - Salva payload completo para auditoria
-   * - Nunca lança erro para não quebrar o fluxo do webhook
+   * Persiste evento de webhook M7 na base de dados.
+   * Nunca lança erro para não quebrar o fluxo do webhook.
    */
   async saveM7WebhookEvent(payload: unknown): Promise<void> {
     try {
-      let chassi = '';
-      let evento: string | null = null;
-      let tipoevento: number | null = null;
-
-      if (payload && typeof payload === 'object') {
-        if ('chassi' in payload && typeof payload['chassi'] === 'string') {
-          chassi = payload['chassi'];
-        }
-        if ('evento' in payload && typeof payload['evento'] === 'string') {
-          evento = payload['evento'];
-        }
-        if (
-          'tipoevento' in payload &&
-          (typeof payload['tipoevento'] === 'number' ||
-            typeof payload['tipoevento'] === 'string')
-        ) {
-          const n = Number(payload['tipoevento']);
-          tipoevento = isNaN(n) ? null : n;
-        }
-      }
+      const { chassi, evento, tipoevento } = this.extrairDadosWebhook(payload);
 
       await this.prisma.vehicleWebhookEvent.create({
         data: {
@@ -99,21 +86,16 @@ export class RastreamentoService {
         },
       });
     } catch (err) {
-      this.logger.error(
-        'Erro ao salvar evento de webhook M7',
-        err?.stack || err,
-      );
-      // Nunca lança erro para não quebrar o fluxo do webhook
+      this.logger.error('Erro ao salvar evento de webhook M7', err?.stack || err);
     }
   }
 
-  // Orquestrador: delega para o rastreador Lógica Soluções
   async ultimaPosicaoLogica(
     chassi: string,
     token?: string,
     context?: { baseOrigin?: BaseOrigin; tokenKey?: string },
   ): Promise<UltimaPosicaoLogicaResponse> {
-    return ultimaPosicaoLogica(chassi, token, context);
+    return this.logica.ultimaPosicao(chassi, token, context);
   }
 
   async rastreamento(
@@ -121,85 +103,75 @@ export class RastreamentoService {
     chassi: string,
     requestContext?: RastreamentoBaseContext,
   ): Promise<RastreamentoUnificadoControllerResponse> {
-    const candidatos: Array<{
-      data: any;
-      dataOriginal: string;
-      timestamp: number;
-      origem: 'm7' | 'logica' | 'softruck';
-    }> = [];
+    const baseContext =
+      requestContext ?? (await this.resolveBaseContextFromDb(chassi));
 
-    try {
-      const baseContext =
-        requestContext ?? (await this.resolveBaseContextFromDb(chassi));
+    this.logger.log(
+      `${baseTag(baseContext.baseOrigin)} usando token ${baseContext.logicaTokenKey} para consulta Lógica`,
+    );
 
-      this.logger.log(
-        `${baseTag(baseContext.baseOrigin)} usando token ${baseContext.logicaTokenKey} para consulta Lógica`,
-      );
+    const softruckPublicKeyKey = this.tokenResolver.getTokenKey(
+      baseContext.baseOrigin,
+      'softruckPublicKey',
+    );
+    this.logger.log(
+      `${baseTag(baseContext.baseOrigin)} usando publicKey ${softruckPublicKeyKey} para consulta Softruck (token via autenticação dinâmica)`,
+    );
 
-      const logica = await this.ultimaPosicaoLogica(chassi, baseContext.logicaToken, {
+    const [logicaResult, m7Result, softruckResult] = await Promise.allSettled([
+      this.logica.ultimaPosicao(chassi, baseContext.logicaToken, {
         baseOrigin: baseContext.baseOrigin,
         tokenKey: baseContext.logicaTokenKey,
-      });
-      const timestamp = this.parseDateToTimestamp(logica.ultimaTrasmissao);
-
-      candidatos.push({
-        data: logica,
-        dataOriginal: logica.ultimaTrasmissao,
-        timestamp,
-        origem: 'logica',
-      });
-    } catch (error) {
-      this.logger.warn(
-        `Falha no rastreamento Lógica para chassi ${chassi}: ${this.descreverErroProvider(error)}`,
-      );
-    }
-
-    try {
-      const baseContext =
-        requestContext ?? (await this.resolveBaseContextFromDb(chassi));
-      const m7 = await this.ultimaPosicaoM7(cnpj, chassi, baseContext.baseOrigin);
-      const timestamp = this.parseDateToTimestamp(m7.data_gps);
-
-      candidatos.push({
-        data: m7,
-        dataOriginal: m7.data_gps,
-        timestamp,
-        origem: 'm7',
-      });
-    } catch (error) {
-      this.logger.warn(
-        `Falha no rastreamento M7 para chassi ${chassi}: ${this.descreverErroProvider(error)}`,
-      );
-    }
-
-    try {
-      const baseContext =
-        requestContext ?? (await this.resolveBaseContextFromDb(chassi));
-      const softruckPublicKeyKey = this.tokenResolver.getTokenKey(
-        baseContext.baseOrigin,
-        'softruckPublicKey',
-      );
-
-      this.logger.log(
-        `${baseTag(baseContext.baseOrigin)} usando publicKey ${softruckPublicKeyKey} para consulta Softruck (token via autenticação dinâmica)`,
-      );
-
-      const softruck = await this.ultimaPosicaoSoftruck(
+      }),
+      this.m7.ultimaPosicaoM7(cnpj, chassi, baseContext.baseOrigin),
+      this.softruck.ultimaPosicaoSoftruck(
         chassi,
         baseContext.baseOrigin,
         baseContext.softruckPublicKey,
-      );
-      const timestamp = this.parseDateToTimestamp(softruck.date);
+      ),
+    ]);
 
+    const candidatos: RastreamentoCandidato[] = [];
+
+    if (logicaResult.status === 'fulfilled') {
+      const logica = logicaResult.value;
+      candidatos.push({
+        data: logica,
+        dataOriginal: logica.ultimaTrasmissao,
+        timestamp: this.parseDateToTimestamp(logica.ultimaTrasmissao),
+        origem: 'logica',
+      });
+    } else {
+      this.logger.warn(
+        `Falha no rastreamento Lógica para chassi ${chassi}: ${this.descreverErroProvider(logicaResult.reason)}`,
+      );
+    }
+
+    if (m7Result.status === 'fulfilled') {
+      const m7 = m7Result.value;
+      candidatos.push({
+        data: m7,
+        dataOriginal: m7.data_gps,
+        timestamp: this.parseDateToTimestamp(m7.data_gps),
+        origem: 'm7',
+      });
+    } else {
+      this.logger.warn(
+        `Falha no rastreamento M7 para chassi ${chassi}: ${this.descreverErroProvider(m7Result.reason)}`,
+      );
+    }
+
+    if (softruckResult.status === 'fulfilled') {
+      const softruck = softruckResult.value;
       candidatos.push({
         data: softruck,
         dataOriginal: softruck.date,
-        timestamp,
+        timestamp: this.parseDateToTimestamp(softruck.date),
         origem: 'softruck',
       });
-    } catch (error) {
+    } else {
       this.logger.warn(
-        `Falha no rastreamento Softruck para chassi ${chassi}: ${this.descreverErroProvider(error)}`,
+        `Falha no rastreamento Softruck para chassi ${chassi}: ${this.descreverErroProvider(softruckResult.reason)}`,
       );
     }
 
@@ -208,14 +180,10 @@ export class RastreamentoService {
     }
 
     const maisRecente = candidatos.reduce((atualMaisRecente, candidato) =>
-      candidato.timestamp > atualMaisRecente.timestamp
-        ? candidato
-        : atualMaisRecente,
+      candidato.timestamp > atualMaisRecente.timestamp ? candidato : atualMaisRecente,
     );
 
-    const candidatoLogica = candidatos.find(
-      (candidato) => candidato.origem === 'logica',
-    );
+    const candidatoLogica = candidatos.find((c) => c.origem === 'logica');
 
     let selecionado = maisRecente;
     if (candidatoLogica) {
@@ -238,19 +206,15 @@ export class RastreamentoService {
       selecionado.origem,
     );
 
-    return {
-      ...payload,
-      origem: selecionado.origem,
-    };
+    return { ...payload, origem: selecionado.origem };
   }
-  // Orquestrador: delega para o rastreador M7
+
   async ultimaPosicaoM7(cnpj: string, chassi: string, baseOrigin: BaseOrigin) {
     return this.m7.ultimaPosicaoM7(cnpj, chassi, baseOrigin);
   }
 
   /**
    * Gera PDF de histórico de trajetórias via API Softruck.
-   * Delega para HistoricoSoftruckService após validar os parâmetros de entrada.
    */
   async gerarRelatorioHistoricoSoftruckPDF(
     chassi: string,
@@ -263,27 +227,7 @@ export class RastreamentoService {
     const dataInicialNormalizada = dataInicial?.trim();
     const dataFinalNormalizada = dataFinal?.trim();
 
-    if (!chassiNormalizado) {
-      throw new BadRequestException('Parâmetro chassi é obrigatório');
-    }
-
-    if (!this.isDataIsoValida(dataInicialNormalizada)) {
-      throw new BadRequestException(
-        'Parâmetro dataInicial inválido. Use o formato yyyy-mm-dd',
-      );
-    }
-
-    if (!this.isDataIsoValida(dataFinalNormalizada)) {
-      throw new BadRequestException(
-        'Parâmetro dataFinal inválido. Use o formato yyyy-mm-dd',
-      );
-    }
-
-    if (dataInicialNormalizada > dataFinalNormalizada) {
-      throw new BadRequestException(
-        'Parâmetro dataInicial não pode ser maior que dataFinal',
-      );
-    }
+    this.validarParametrosHistorico(chassiNormalizado, dataInicialNormalizada, dataFinalNormalizada);
 
     return this.historicoSoftruck.gerarRelatorioPdf(
       chassiNormalizado,
@@ -296,7 +240,6 @@ export class RastreamentoService {
 
   /**
    * Retorna rotas detalhadas em GeoJSON para o período via API Softruck.
-   * Delega para HistoricoSoftruckService após validar os parâmetros de entrada.
    */
   async obterRotasHistoricoSoftruck(
     chassi: string,
@@ -309,27 +252,7 @@ export class RastreamentoService {
     const dataInicialNormalizada = dataInicial?.trim();
     const dataFinalNormalizada = dataFinal?.trim();
 
-    if (!chassiNormalizado) {
-      throw new BadRequestException('Parâmetro chassi é obrigatório');
-    }
-
-    if (!this.isDataIsoValida(dataInicialNormalizada)) {
-      throw new BadRequestException(
-        'Parâmetro dataInicial inválido. Use o formato yyyy-mm-dd',
-      );
-    }
-
-    if (!this.isDataIsoValida(dataFinalNormalizada)) {
-      throw new BadRequestException(
-        'Parâmetro dataFinal inválido. Use o formato yyyy-mm-dd',
-      );
-    }
-
-    if (dataInicialNormalizada > dataFinalNormalizada) {
-      throw new BadRequestException(
-        'Parâmetro dataInicial não pode ser maior que dataFinal',
-      );
-    }
+    this.validarParametrosHistorico(chassiNormalizado, dataInicialNormalizada, dataFinalNormalizada);
 
     return this.historicoSoftruck.obterRotas(
       chassiNormalizado,
@@ -339,7 +262,6 @@ export class RastreamentoService {
       publicKey,
     );
   }
-
 
   /**
    * Obtém o estado atual do veículo (ancoraAtiva + notificacaoIgnicao).
@@ -384,7 +306,6 @@ export class RastreamentoService {
     ancoraAtiva: boolean,
     baseOrigin: BaseOrigin,
   ): Promise<AncoraM7Response> {
-    // Preserva o estado de ignição atual para evitar reset acidental
     const estado = await this.getVehicleState(cnpj, chassi, baseOrigin);
     const result = await this.m7.ancoraM7(
       cnpj,
@@ -432,18 +353,7 @@ export class RastreamentoService {
     baseOrigin: BaseOrigin,
   ): Promise<AncoraM7Response> {
     const evtIgnNormalizado = this.normalizarBooleanoEntrada(evtIgn, 'evt_ign');
-
-    // Preserva o estado da âncora atual para evitar reset acidental
     const estado = await this.getVehicleState(cnpj, chassi, baseOrigin);
-
-    // if (evtIgnNormalizado && estado.ancoraAtiva) {
-    //   this.logger.warn(
-    //     `Tentativa inválida de ativar ignição com âncora ativa para chassi=${chassi}`,
-    //   );
-    //   throw new BadRequestException(
-    //     'Não é permitido ligar ignição com âncora ativa',
-    //   );
-    // }
 
     const result = await this.m7.ignicaoM7(
       cnpj,
@@ -547,31 +457,81 @@ export class RastreamentoService {
     };
   }
 
-  private normalizarBooleanoEntrada(
-    value: unknown,
-    fieldName: string,
-  ): boolean {
-    if (typeof value === 'boolean') {
-      return value;
-    }
+  async ultimaPosicaoSoftruck(
+    chassi: string,
+    baseOrigin: BaseOrigin,
+    publicKey: string,
+    tokenOverride?: string,
+  ): Promise<UltimaPosicaoSoftruckResponse> {
+    this.logger.log(
+      `${baseTag(baseOrigin)} Consultando última posição Softruck para chassi: ${chassi} (tokenOverride=${!!tokenOverride})`,
+    );
+    return this.softruck.ultimaPosicaoSoftruck(chassi, baseOrigin, publicKey, tokenOverride);
+  }
 
+  async processarWebhookM7(payload: unknown) {
+    await this.salvarPayloadWebhook(payload);
+    await this.saveM7WebhookEvent(payload);
+    await this.dispararNotificacaoPorEvento(payload);
+    return this.m7.processarWebhook(payload);
+  }
+
+  // -------------------------------------------------------------------------
+  // Privados
+  // -------------------------------------------------------------------------
+
+  /**
+   * Extrai chassi, evento e tipoevento do payload de webhook.
+   * Centraliza a lógica que antes estava duplicada em saveM7WebhookEvent e dispararNotificacaoPorEvento.
+   */
+  private extrairDadosWebhook(payload: unknown): WebhookDados {
+    if (!payload || typeof payload !== 'object') {
+      return { chassi: '', evento: null, tipoevento: null };
+    }
+    const p = payload as Record<string, unknown>;
+    const chassi = typeof p['chassi'] === 'string' ? p['chassi'] : '';
+    const evento = typeof p['evento'] === 'string' ? p['evento'] : null;
+    const raw = Number(p['tipoevento']);
+    return { chassi, evento, tipoevento: isNaN(raw) ? null : raw };
+  }
+
+  /**
+   * Valida chassi + intervalo de datas para endpoints de histórico.
+   * Lança BadRequestException em caso de parâmetros inválidos.
+   */
+  private validarParametrosHistorico(
+    chassi: string,
+    dataInicial: string,
+    dataFinal: string,
+  ): void {
+    if (!chassi) {
+      throw new BadRequestException('Parâmetro chassi é obrigatório');
+    }
+    if (!this.isDataIsoValida(dataInicial)) {
+      throw new BadRequestException('Parâmetro dataInicial inválido. Use o formato yyyy-mm-dd');
+    }
+    if (!this.isDataIsoValida(dataFinal)) {
+      throw new BadRequestException('Parâmetro dataFinal inválido. Use o formato yyyy-mm-dd');
+    }
+    if (dataInicial > dataFinal) {
+      throw new BadRequestException('Parâmetro dataInicial não pode ser maior que dataFinal');
+    }
+  }
+
+  private normalizarBooleanoEntrada(value: unknown, fieldName: string): boolean {
+    if (typeof value === 'boolean') return value;
     if (typeof value === 'number') {
       if (value === 1) return true;
       if (value === 0) return false;
     }
-
     if (typeof value === 'string') {
       const normalized = value.trim().toLowerCase();
       if (normalized === 'true' || normalized === '1') return true;
       if (normalized === 'false' || normalized === '0') return false;
     }
-
-    throw new BadRequestException(
-      `Campo ${fieldName} inválido. Use true/false ou 1/0.`,
-    );
+    throw new BadRequestException(`Campo ${fieldName} inválido. Use true/false ou 1/0.`);
   }
 
-  /** Valida formato yyyy-mm-dd com data real de calendário. */
   private isDataIsoValida(value?: string): boolean {
     if (!value) return false;
     if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
@@ -586,27 +546,7 @@ export class RastreamentoService {
     );
   }
 
-  // Orquestrador: delega para o rastreador Softruck
-  async ultimaPosicaoSoftruck(
-    chassi: string,
-    baseOrigin: BaseOrigin,
-    publicKey: string,
-    tokenOverride?: string,
-  ): Promise<UltimaPosicaoSoftruckResponse> {
-    this.logger.log(
-      `${baseTag(baseOrigin)} Consultando última posição Softruck para chassi: ${chassi} (tokenOverride=${!!tokenOverride})`,
-    );
-    return this.softruck.ultimaPosicaoSoftruck(
-      chassi,
-      baseOrigin,
-      publicKey,
-      tokenOverride,
-    );
-  }
-
-  private async resolveBaseContextFromDb(
-    chassi: string,
-  ): Promise<RastreamentoBaseContext> {
+  private async resolveBaseContextFromDb(chassi: string): Promise<RastreamentoBaseContext> {
     let baseOrigin: BaseOrigin = 'MAIS_PRIME';
 
     try {
@@ -635,33 +575,15 @@ export class RastreamentoService {
     if (axios.isAxiosError(error)) {
       return `HTTP ${error.response?.status ?? 'N/A'} | URL: ${error.config?.url ?? 'N/A'} | Body: ${JSON.stringify(error.response?.data ?? null)}`;
     }
-
-    if (error instanceof Error) {
-      return error.message;
-    }
-
+    if (error instanceof Error) return error.message;
     return String(error);
-  }
-
-  // Orquestrador: delega para o processador de webhook M7
-  async processarWebhookM7(payload: unknown) {
-    // Salva o payload antes de processar
-    await this.salvarPayloadWebhook(payload);
-    await this.saveM7WebhookEvent(payload);
-
-    // Disparar notificações push conforme tipo do evento
-    await this.dispararNotificacaoPorEvento(payload);
-
-    return this.m7.processarWebhook(payload);
   }
 
   private parseDateToTimestamp(dateValue: string): number {
     const dateTrimmed = dateValue.trim();
 
     const parsedNative = Date.parse(dateTrimmed.replace(' ', 'T'));
-    if (!Number.isNaN(parsedNative)) {
-      return parsedNative;
-    }
+    if (!Number.isNaN(parsedNative)) return parsedNative;
 
     const brDateMatch = dateTrimmed.match(
       /^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})(?::(\d{2}))?$/,
@@ -670,17 +592,10 @@ export class RastreamentoService {
     if (brDateMatch) {
       const [, day, month, year, hour, minute, second] = brDateMatch;
       const parsed = new Date(
-        Number(year),
-        Number(month) - 1,
-        Number(day),
-        Number(hour),
-        Number(minute),
-        Number(second ?? '0'),
+        Number(year), Number(month) - 1, Number(day),
+        Number(hour), Number(minute), Number(second ?? '0'),
       ).getTime();
-
-      if (!Number.isNaN(parsed)) {
-        return parsed;
-      }
+      if (!Number.isNaN(parsed)) return parsed;
     }
 
     throw new Error(`Formato de data inválido: ${dateValue}`);
@@ -726,9 +641,7 @@ export class RastreamentoService {
       origem: 'm7' | 'softruck' | 'logica';
     },
   ): boolean {
-    if (candidatoMaisRecente.origem === 'logica') {
-      return false;
-    }
+    if (candidatoMaisRecente.origem === 'logica') return false;
 
     const thresholdMs = this.getLogicaStaleThresholdMs();
     const diferencaMs = candidatoMaisRecente.timestamp - candidatoLogica.timestamp;
@@ -750,10 +663,7 @@ export class RastreamentoService {
     const rawValue = process.env.RASTREAMENTO_LOGICA_STALE_THRESHOLD_MINUTES;
     const parsedMinutes = Number(rawValue);
 
-    if (
-      Number.isFinite(parsedMinutes) &&
-      parsedMinutes > 0
-    ) {
+    if (Number.isFinite(parsedMinutes) && parsedMinutes > 0) {
       return parsedMinutes * 60_000;
     }
 
@@ -766,27 +676,10 @@ export class RastreamentoService {
    */
   private async dispararNotificacaoPorEvento(payload: unknown): Promise<void> {
     try {
-      if (!payload || typeof payload !== 'object') return;
-
-      let chassi = '';
-      let evento: string | null = null;
-      let tipoevento: number | null = null;
-
-      if ('chassi' in payload && typeof payload['chassi'] === 'string') {
-        chassi = payload['chassi'];
-      }
-      if ('evento' in payload && typeof payload['evento'] === 'string') {
-        evento = payload['evento'];
-      }
-      if ('tipoevento' in payload) {
-        const n = Number(payload['tipoevento']);
-        tipoevento = isNaN(n) ? null : n;
-      }
+      const { chassi, evento, tipoevento } = this.extrairDadosWebhook(payload);
 
       if (!chassi) {
-        this.logger.warn(
-          '[Webhook] Payload sem chassi — notificação não disparada',
-        );
+        this.logger.warn('[Webhook] Payload sem chassi — notificação não disparada');
         return;
       }
 
@@ -796,49 +689,36 @@ export class RastreamentoService {
         evento,
       );
     } catch (err) {
-      this.logger.error(
-        '[Webhook] Erro ao disparar notificação por evento',
-        err?.stack || err,
-      );
+      this.logger.error('[Webhook] Erro ao disparar notificação por evento', err?.stack || err);
     }
   }
 
   /**
-   * Salva o payload do webhook M7 em um arquivo JSON estruturado
-   * Os arquivos são salvos em webhook/payloads com timestamp único
-   * Usa operações assíncronas para não bloquear o event loop
+   * Salva o payload do webhook M7 em um arquivo JSON estruturado.
+   * Usa operações assíncronas para não bloquear o event loop.
    */
   private async salvarPayloadWebhook(payload: unknown): Promise<void> {
     try {
-      // Define o caminho da pasta de payloads
       const payloadsDir = path.join(process.cwd(), 'webhook', 'payloads');
-
-      // Cria a estrutura de diretórios se não existir
       await fs.mkdir(payloadsDir, { recursive: true });
 
-      // Gera um nome único para o arquivo usando timestamp e ID aleatório
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
       const randomId = Math.random().toString(36).substring(2, 9);
       const filename = `webhook-m7-${timestamp}-${randomId}.json`;
       const filepath = path.join(payloadsDir, filename);
 
-      // Estrutura o payload com metadados
-      const payloadStructured = {
-        receivedAt: new Date().toISOString(),
-        type: 'M7_WEBHOOK',
-        payload: payload,
-      };
-
-      // Salva o arquivo JSON formatado (assíncrono)
       await fs.writeFile(
         filepath,
-        JSON.stringify(payloadStructured, null, 2),
+        JSON.stringify(
+          { receivedAt: new Date().toISOString(), type: 'M7_WEBHOOK', payload },
+          null,
+          2,
+        ),
         'utf-8',
       );
 
       this.logger.log(`[Webhook M7] Payload salvo em: ${filename}`);
     } catch (error) {
-      // Não lança erro para não quebrar o fluxo do webhook
       this.logger.error('[Webhook M7] Erro ao salvar payload:', error);
     }
   }

@@ -13,6 +13,8 @@ import { HistoricoResumoController } from './softruck/controllers/historico-resu
 import { HistoricoM7Controller } from './m7/controllers/historico-m7.controller';
 import { HistoricoM7Service } from './m7/services/historico-m7.service';
 import { HistoricoPdfM7Service } from './m7/pdf/historico-pdf-m7.service';
+import { RastreamentoM7 } from './rastreamento-m7';
+import { LogicaRastreamentoService } from './rastreamento.logica';
 
 @Module({
   imports: [NotificationsModule, SharedModule],
@@ -20,6 +22,8 @@ import { HistoricoPdfM7Service } from './m7/pdf/historico-pdf-m7.service';
   providers: [
     RastreamentoService,
     WebhookProcessor,
+    RastreamentoM7,
+    LogicaRastreamentoService,
     RastreamentoSoftruck,
     HistoricoSoftruckService,
     HistoricoPdfSoftruckService,
