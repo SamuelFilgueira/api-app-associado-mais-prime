@@ -43,6 +43,7 @@ RUN npx prisma generate
 
 # Copia build
 COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/assets ./assets
 
 # Cria diretório de uploads
 RUN mkdir -p uploads/profile-photos uploads/workshop-photos

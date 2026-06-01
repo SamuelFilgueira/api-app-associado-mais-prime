@@ -20,6 +20,7 @@ interface BoletoVerificacaoJobData {
   userVehicleId: number;
   nosso_numero: number;
   codigo_veiculo: string;
+  codigo_associado?: number;
   baseOrigin: BaseOrigin;
   nome?: string;
   telefone_celular?: string;
@@ -45,6 +46,7 @@ export class BoletoVerificacaoProcessor extends WorkerHost {
       userVehicleId,
       nosso_numero,
       codigo_veiculo,
+      codigo_associado,
       baseOrigin,
       nome,
       telefone_celular,
@@ -57,6 +59,7 @@ export class BoletoVerificacaoProcessor extends WorkerHost {
         attemptsMade: job.attemptsMade,
         nossoNumero: nosso_numero,
         codigoVeiculo: codigo_veiculo,
+        codigoAssociado: codigo_associado ?? null,
         baseOrigin,
         temNome: !!nome,
         temTelefone: !!telefone_celular,
@@ -187,17 +190,6 @@ export class BoletoVerificacaoProcessor extends WorkerHost {
         data_vencimento_original_final: formatDateBR(dataFinal),
       };
 
-      this.logger.log(
-        debugLog(BoletoVerificacaoProcessor.name, 'Fallback de status ativado', debugId, {
-          nossoNumero: nosso_numero,
-          codigoVeiculo: codigo_veiculo,
-        }),
-      );
-      this.logger.debug(
-        debugLog(BoletoVerificacaoProcessor.name, 'Payload fallback listar boleto', debugId, {
-          body: fallbackBody,
-        }),
-      );
 
       const fallbackResponse = await this.sgaAuthService.executeRequestWithAuth(
         baseOrigin,
@@ -210,12 +202,6 @@ export class BoletoVerificacaoProcessor extends WorkerHost {
         },
       );
 
-      this.logger.debug(
-        debugLog(BoletoVerificacaoProcessor.name, 'Resposta fallback listar boleto', debugId, {
-          status: fallbackResponse.status,
-          body: fallbackResponse.data,
-        }),
-      );
 
       if (fallbackResponse.status < 400 && Array.isArray(fallbackResponse.data)) {
         const boletoFallback = fallbackResponse.data.find(
@@ -275,14 +261,14 @@ export class BoletoVerificacaoProcessor extends WorkerHost {
         },
       });
 
-      this.logger.log(
-        debugLog(BoletoVerificacaoProcessor.name, 'Pagamento de revistoria persistido (job)', debugId, {
-          userVehicleId,
-          nossoNumero: nosso_numero,
-          situacao: codigoSituacao ?? 'PENDENTE',
-          pago,
-        }),
-      );
+      // this.logger.log(
+      //   debugLog(BoletoVerificacaoProcessor.name, 'Pagamento de revistoria persistido (job)', debugId, {
+      //     userVehicleId,
+      //     nossoNumero: nosso_numero,
+      //     situacao: codigoSituacao ?? 'PENDENTE',
+      //     pago,
+      //   }),
+      // );
     } catch (persistError) {
       this.logger.error(
         debugLog(BoletoVerificacaoProcessor.name, 'Falha ao persistir pagamento de revistoria (job)', debugId, {
@@ -343,6 +329,43 @@ export class BoletoVerificacaoProcessor extends WorkerHost {
         status: alterarResponse.status,
       }),
     );
+
+    // Após confirmação de pagamento, reativar associado (situação 1)
+    if (codigo_associado) {
+      const alterarAssociadoUrl = `https://api.hinova.com.br/api/sga/v2/associado/alterar-situacao-para/1/${codigo_associado}`;
+
+      const alterarAssociadoResponse =
+        await this.sgaAuthService.executeRequestWithAuth(baseOrigin, {
+          method: 'GET',
+          url: alterarAssociadoUrl,
+          validateStatus: () => true,
+        });
+
+      this.logger.log(
+        debugLog(BoletoVerificacaoProcessor.name, 'Associado reativado (situação 1)', debugId, {
+          codigoAssociado: codigo_associado,
+          status: alterarAssociadoResponse.status,
+          body: alterarAssociadoResponse.data,
+        }),
+      );
+
+      if (alterarAssociadoResponse.status >= 400) {
+        this.logger.warn(
+          debugLog(BoletoVerificacaoProcessor.name, 'Falha ao reativar associado (situação 1)', debugId, {
+            codigoAssociado: codigo_associado,
+            status: alterarAssociadoResponse.status,
+            body: alterarAssociadoResponse.data,
+          }),
+        );
+      }
+    } else {
+      this.logger.warn(
+        debugLog(BoletoVerificacaoProcessor.name, 'codigo_associado ausente no job; reativação de associado não executada', debugId, {
+          nossoNumero: nosso_numero,
+          userVehicleId,
+        }),
+      );
+    }
 
     // Remover o job recorrente
     if (job.repeatJobKey) {

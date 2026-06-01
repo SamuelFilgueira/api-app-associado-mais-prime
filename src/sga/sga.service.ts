@@ -676,6 +676,7 @@ export class SgaService {
           userVehicleId,
           nosso_numero: nossoNumero,
           codigo_veiculo,
+          codigo_associado,
           baseOrigin,
           nome,
           telefone_celular,

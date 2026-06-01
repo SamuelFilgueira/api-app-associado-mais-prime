@@ -1,0 +1,18 @@
+{
+  "receivedAt": "2026-06-01T15:01:09.004Z",
+  "type": "M7_WEBHOOK",
+  "payload": {
+    "canal": {
+      "nome": "WEBHOOK MAIS PRIME",
+      "identificacao": "https://app-dev.texvngroup.com.br/api/rastreamento/webhook-m7"
+    },
+    "scope": "empresa",
+    "chassi": "9BHBG51DBFP494246",
+    "codigo": "167929867",
+    "evento": "Violação de Bateria",
+    "titulo": "Data: 30/05/2026 21:40, Violação de Bateria, Monitorado: KRH7G05",
+    "enviado_em": "2026-06-01T14:56:56.210Z",
+    "monitorado": "KRH7G05",
+    "tipoevento": 1
+  }
+}
