@@ -1,7 +1,5 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import * as fs from 'fs/promises';
-import * as path from 'path';
 import { PrismaService } from '../prisma.service';
 import {
   RastreamentoM7,
@@ -52,6 +50,7 @@ interface WebhookDados {
   chassi: string;
   evento: string | null;
   tipoevento: number | null;
+  scope: string | null;
 }
 
 @Injectable()
@@ -74,7 +73,14 @@ export class RastreamentoService {
    */
   async saveM7WebhookEvent(payload: unknown): Promise<void> {
     try {
-      const { chassi, evento, tipoevento } = this.extrairDadosWebhook(payload);
+      const { chassi, evento, tipoevento, scope } = this.extrairDadosWebhook(payload);
+
+      if (scope !== 'cliente') {
+        this.logger.log(
+          `Webhook M7 ignorado para persistência por scope=${scope ?? 'null'} (chassi=${chassi || 'N/A'})`,
+        );
+        return;
+      }
 
       await this.prisma.vehicleWebhookEvent.create({
         data: {
@@ -457,7 +463,6 @@ export class RastreamentoService {
   }
 
   async processarWebhookM7(payload: unknown) {
-    await this.salvarPayloadWebhook(payload);
     await this.saveM7WebhookEvent(payload);
     await this.dispararNotificacaoPorEvento(payload);
     return this.m7.processarWebhook(payload);
@@ -473,13 +478,14 @@ export class RastreamentoService {
    */
   private extrairDadosWebhook(payload: unknown): WebhookDados {
     if (!payload || typeof payload !== 'object') {
-      return { chassi: '', evento: null, tipoevento: null };
+      return { chassi: '', evento: null, tipoevento: null, scope: null };
     }
     const p = payload as Record<string, unknown>;
     const chassi = typeof p['chassi'] === 'string' ? p['chassi'] : '';
     const evento = typeof p['evento'] === 'string' ? p['evento'] : null;
     const raw = Number(p['tipoevento']);
-    return { chassi, evento, tipoevento: isNaN(raw) ? null : raw };
+    const scope = typeof p['scope'] === 'string' ? p['scope'].trim().toLowerCase() : null;
+    return { chassi, evento, tipoevento: isNaN(raw) ? null : raw, scope };
   }
 
   /**
@@ -680,32 +686,4 @@ export class RastreamentoService {
     }
   }
 
-  /**
-   * Salva o payload do webhook M7 em um arquivo JSON estruturado.
-   * Usa operações assíncronas para não bloquear o event loop.
-   */
-  private async salvarPayloadWebhook(payload: unknown): Promise<void> {
-    try {
-      const payloadsDir = path.join(process.cwd(), 'webhook', 'payloads');
-      await fs.mkdir(payloadsDir, { recursive: true });
-
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const randomId = Math.random().toString(36).substring(2, 9);
-      const filename = `webhook-m7-${timestamp}-${randomId}.json`;
-      const filepath = path.join(payloadsDir, filename);
-
-      await fs.writeFile(
-        filepath,
-        JSON.stringify(
-          { receivedAt: new Date().toISOString(), type: 'M7_WEBHOOK', payload },
-          null,
-          2,
-        ),
-        'utf-8',
-      );
-
-    } catch (error) {
-      this.logger.error('[Webhook M7] Erro ao salvar payload:', error);
-    }
-  }
 }
