@@ -5,6 +5,7 @@ import {
   HttpStatus,
   Param,
   ParseIntPipe,
+  Patch,
   Query,
   UseGuards,
 } from '@nestjs/common';
@@ -41,5 +42,11 @@ export class ReinspectionPaymentsAdminController {
   @HttpCode(HttpStatus.OK)
   getById(@Param('id', ParseIntPipe) id: number) {
     return this.reinspectionPaymentsAdminService.getById(id);
+  }
+
+  @Patch(':id/cancelar')
+  @HttpCode(HttpStatus.OK)
+  cancel(@Param('id', ParseIntPipe) id: number) {
+    return this.reinspectionPaymentsAdminService.cancel(id);
   }
 }

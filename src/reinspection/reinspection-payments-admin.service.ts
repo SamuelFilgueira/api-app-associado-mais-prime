@@ -34,6 +34,7 @@ export class ReinspectionPaymentsAdminService {
     linhaDigitavel: string | null;
     linkBoleto: string | null;
     situacaoBoleto: string;
+    cancelado: boolean;
     boletoCriadoEm: Date;
     pago: boolean;
     pagoEm: Date | null;
@@ -56,6 +57,7 @@ export class ReinspectionPaymentsAdminService {
       linkBoleto: payment.linkBoleto,
       situacaoBoletoCodigo: payment.situacaoBoleto,
       situacaoBoletoTexto: this.mapSituacaoBoleto(payment.situacaoBoleto),
+      cancelado: payment.cancelado,
       pago: payment.pago,
       pagoTexto: payment.pago ? 'Pago' : 'Nao pago',
       boletoCriadoEm: payment.boletoCriadoEm,
@@ -113,6 +115,7 @@ export class ReinspectionPaymentsAdminService {
           linhaDigitavel: true,
           linkBoleto: true,
           situacaoBoleto: true,
+          cancelado: true,
           boletoCriadoEm: true,
           pago: true,
           pagoEm: true,
@@ -153,6 +156,7 @@ export class ReinspectionPaymentsAdminService {
         linhaDigitavel: true,
         linkBoleto: true,
         situacaoBoleto: true,
+        cancelado: true,
         boletoCriadoEm: true,
         pago: true,
         pagoEm: true,
@@ -197,6 +201,7 @@ export class ReinspectionPaymentsAdminService {
         linhaDigitavel: true,
         linkBoleto: true,
         situacaoBoleto: true,
+        cancelado: true,
         boletoCriadoEm: true,
         pago: true,
         pagoEm: true,
@@ -221,6 +226,32 @@ export class ReinspectionPaymentsAdminService {
       userVehicleId,
       total: payments.length,
       data: payments.map((payment) => this.mapPaymentForAdmin(payment)),
+    };
+  }
+
+  async cancel(id: number) {
+    const payment = await this.prisma.reinspectionPayment.findUnique({
+      where: { id },
+      select: { id: true, cancelado: true },
+    });
+
+    if (!payment) {
+      return {
+        found: false,
+        message: 'Boleto de revistoria nao encontrado',
+      };
+    }
+
+    if (!payment.cancelado) {
+      await this.prisma.reinspectionPayment.update({
+        where: { id },
+        data: { cancelado: true },
+      });
+    }
+
+    return {
+      found: true,
+      message: 'Boleto de revistoria cancelado com sucesso',
     };
   }
 }

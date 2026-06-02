@@ -305,6 +305,7 @@ model ReinspectionPayment {
   linhaDigitavel   String?     @db.VarChar(255)
   linkBoleto       String?     @db.VarChar(500)
   situacaoBoleto   String      @default("PENDENTE") @db.VarChar(100)
+  cancelado        Boolean     @default(false)
   boletoCriadoEm   DateTime    @default(now())
   pago             Boolean     @default(false)
   pagoEm           DateTime?

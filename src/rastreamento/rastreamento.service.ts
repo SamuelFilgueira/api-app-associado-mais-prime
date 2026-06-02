@@ -138,12 +138,12 @@ export class RastreamentoService {
 
     if (logicaResult.status === 'fulfilled') {
       const logica = logicaResult.value;
-      candidatos.push({
-        data: logica,
-        dataOriginal: logica.ultimaTrasmissao,
-        timestamp: this.parseDateToTimestamp(logica.ultimaTrasmissao),
-        origem: 'logica',
-      });
+      this.adicionarCandidatoSeValido(
+        candidatos,
+        'logica',
+        logica,
+        logica.ultimaTrasmissao,
+      );
     } else {
       this.logger.warn(
         `Falha no rastreamento Lógica para chassi ${chassi}: ${this.descreverErroProvider(logicaResult.reason)}`,
@@ -152,12 +152,18 @@ export class RastreamentoService {
 
     if (m7Result.status === 'fulfilled') {
       const m7 = m7Result.value;
-      candidatos.push({
-        data: m7,
-        dataOriginal: m7.data_gps,
-        timestamp: this.parseDateToTimestamp(m7.data_gps),
-        origem: 'm7',
-      });
+      const m7Payload = m7 as unknown as {
+        data_gps?: unknown;
+        ultima_posicao?: { data_gps?: unknown };
+      };
+      const m7DataOriginal =
+        typeof m7Payload.data_gps === 'string'
+          ? m7Payload.data_gps
+          : typeof m7Payload.ultima_posicao?.data_gps === 'string'
+            ? m7Payload.ultima_posicao.data_gps
+            : null;
+
+      this.adicionarCandidatoSeValido(candidatos, 'm7', m7, m7DataOriginal);
     } else {
       this.logger.warn(
         `Falha no rastreamento M7 para chassi ${chassi}: ${this.descreverErroProvider(m7Result.reason)}`,
@@ -166,12 +172,7 @@ export class RastreamentoService {
 
     if (softruckResult.status === 'fulfilled') {
       const softruck = softruckResult.value;
-      candidatos.push({
-        data: softruck,
-        dataOriginal: softruck.date,
-        timestamp: this.parseDateToTimestamp(softruck.date),
-        origem: 'softruck',
-      });
+      this.adicionarCandidatoSeValido(candidatos, 'softruck', softruck, softruck.date);
     } else {
       this.logger.warn(
         `Falha no rastreamento Softruck para chassi ${chassi}: ${this.descreverErroProvider(softruckResult.reason)}`,
@@ -572,7 +573,32 @@ export class RastreamentoService {
     return String(error);
   }
 
-  private parseDateToTimestamp(dateValue: string): number {
+  private adicionarCandidatoSeValido(
+    candidatos: RastreamentoCandidato[],
+    origem: 'm7' | 'logica' | 'softruck',
+    data: RastreamentoUnificadoResponse,
+    dataOriginal: string | null | undefined,
+  ): void {
+    try {
+      const timestamp = this.parseDateToTimestamp(dataOriginal);
+      candidatos.push({
+        data,
+        dataOriginal: dataOriginal!.trim(),
+        timestamp,
+        origem,
+      });
+    } catch (err) {
+      this.logger.warn(
+        `Provider ${origem} ignorado por data inválida no rastreamento: ${this.descreverErroProvider(err)}`,
+      );
+    }
+  }
+
+  private parseDateToTimestamp(dateValue: string | null | undefined): number {
+    if (typeof dateValue !== 'string' || !dateValue.trim()) {
+      throw new Error('Data de rastreamento ausente ou inválida');
+    }
+
     const dateTrimmed = dateValue.trim();
 
     const parsedNative = Date.parse(dateTrimmed.replace(' ', 'T'));
