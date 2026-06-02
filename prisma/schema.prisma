@@ -88,6 +88,7 @@ model UserVehicle {
   externalVehicleCode String? @db.VarChar(50)
   isActive           Boolean  @default(true)
   reinspectionRequired Boolean @default(false)
+  cortarRastreamento Boolean  @default(false)
   lastSyncAt         DateTime @default(now())
   user               user     @relation(fields: [userId], references: [id], onDelete: Cascade)
   reinspections      Reinspection[]

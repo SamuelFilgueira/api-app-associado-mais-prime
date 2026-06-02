@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import {
@@ -101,6 +101,7 @@ export class RastreamentoService {
     token?: string,
     context?: { baseOrigin?: BaseOrigin; tokenKey?: string },
   ): Promise<UltimaPosicaoLogicaResponse> {
+    await this.checkCortarRastreamento(chassi);
     return this.logica.ultimaPosicao(chassi, token, context);
   }
 
@@ -109,6 +110,7 @@ export class RastreamentoService {
     chassi: string,
     requestContext?: RastreamentoBaseContext,
   ): Promise<RastreamentoUnificadoControllerResponse> {
+    await this.checkCortarRastreamento(chassi);
     const baseContext =
       requestContext ?? (await this.resolveBaseContextFromDb(chassi));
 
@@ -210,6 +212,7 @@ export class RastreamentoService {
   }
 
   async ultimaPosicaoM7(cnpj: string, chassi: string, baseOrigin: BaseOrigin) {
+    await this.checkCortarRastreamento(chassi);
     return this.m7.ultimaPosicaoM7(cnpj, chassi, baseOrigin);
   }
 
@@ -223,6 +226,7 @@ export class RastreamentoService {
     baseOrigin: BaseOrigin,
     publicKey: string,
   ): Promise<Buffer> {
+    await this.checkCortarRastreamento(chassi);
     const chassiNormalizado = chassi?.trim();
     const dataInicialNormalizada = dataInicial?.trim();
     const dataFinalNormalizada = dataFinal?.trim();
@@ -248,6 +252,7 @@ export class RastreamentoService {
     baseOrigin: BaseOrigin,
     publicKey: string,
   ): Promise<HistoricoRotasResponseDto> {
+    await this.checkCortarRastreamento(chassi);
     const chassiNormalizado = chassi?.trim();
     const dataInicialNormalizada = dataInicial?.trim();
     const dataFinalNormalizada = dataFinal?.trim();
@@ -306,6 +311,7 @@ export class RastreamentoService {
     ancoraAtiva: boolean,
     baseOrigin: BaseOrigin,
   ): Promise<AncoraM7Response> {
+    await this.checkCortarRastreamento(chassi);
     const estado = await this.getVehicleState(cnpj, chassi, baseOrigin);
     const result = await this.m7.ancoraM7(
       cnpj,
@@ -349,6 +355,7 @@ export class RastreamentoService {
     evtIgn: boolean,
     baseOrigin: BaseOrigin,
   ): Promise<AncoraM7Response> {
+    await this.checkCortarRastreamento(chassi);
     const evtIgnNormalizado = this.normalizarBooleanoEntrada(evtIgn, 'evt_ign');
     const estado = await this.getVehicleState(cnpj, chassi, baseOrigin);
 
@@ -457,6 +464,7 @@ export class RastreamentoService {
     publicKey: string,
     tokenOverride?: string,
   ): Promise<UltimaPosicaoSoftruckResponse> {
+    await this.checkCortarRastreamento(chassi);
     this.logger.log(
       `${baseTag(baseOrigin)} Consultando última posição Softruck para chassi: ${chassi} (tokenOverride=${!!tokenOverride})`,
     );
@@ -472,6 +480,18 @@ export class RastreamentoService {
   // -------------------------------------------------------------------------
   // Privados
   // -------------------------------------------------------------------------
+
+  private async checkCortarRastreamento(chassi: string): Promise<void> {
+    const vehicle = await this.prisma.userVehicle.findFirst({
+      where: { chassi },
+      select: { cortarRastreamento: true },
+    });
+    if (vehicle?.cortarRastreamento) {
+      throw new ForbiddenException(
+        `Rastreamento bloqueado para o veículo com chassi ${chassi}.`,
+      );
+    }
+  }
 
   /**
    * Extrai chassi, evento e tipoevento do payload de webhook.
