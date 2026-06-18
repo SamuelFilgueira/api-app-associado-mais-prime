@@ -39,6 +39,8 @@ export interface UltimaPosicaoM7Response {
   latitude: string;
   longitude: string;
   velocidade: number;
+  tensao?: string | null;
+  voltagem?: number | null;
   ignicao: boolean;
   cidade: string;
   marca: string;
@@ -407,6 +409,13 @@ export class RastreamentoM7 implements IRastreamentoProvider, OnModuleInit, OnMo
    */
   private mapearUltimaPosicaoM7(data: Record<string, unknown>): UltimaPosicaoM7Response {
     const ultimaPosicao = (data.ultima_posicao || {}) as Record<string, unknown>;
+    const tensaoRaw = ultimaPosicao.tensao;
+    const voltagemFromTensao =
+      typeof tensaoRaw === 'number'
+        ? tensaoRaw
+        : typeof tensaoRaw === 'string'
+          ? Number.parseFloat(tensaoRaw.replace(',', '.'))
+          : Number.NaN;
 
     return {
       monitorado: ultimaPosicao.monitorado as number,
@@ -414,6 +423,11 @@ export class RastreamentoM7 implements IRastreamentoProvider, OnModuleInit, OnMo
       latitude: ultimaPosicao.latitude as string,
       longitude: ultimaPosicao.longitude as string,
       velocidade: ultimaPosicao.velocidade as number,
+      tensao:
+        typeof tensaoRaw === 'string' || typeof tensaoRaw === 'number'
+          ? String(tensaoRaw)
+          : null,
+      voltagem: Number.isFinite(voltagemFromTensao) ? voltagemFromTensao : null,
       ignicao: ultimaPosicao.ignicao as boolean,
       cidade: ultimaPosicao.cidade as string,
       marca: ultimaPosicao.marca as string,

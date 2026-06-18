@@ -51,6 +51,7 @@ export interface SoftruckTrackingResponse {
     attributes: {
       ign: boolean;
       act: number;
+      pv?: number | string;
       spd: number;
       geometry: {
         coordinates: [number | string, number | string];

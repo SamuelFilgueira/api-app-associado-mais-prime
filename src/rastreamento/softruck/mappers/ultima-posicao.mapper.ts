@@ -14,6 +14,14 @@ export function mapearUltimaPosicaoSoftruck(
   const [longitudeRaw, latitudeRaw] = attributes.geometry.coordinates;
   const longitude = parseCoordinate(longitudeRaw);
   const latitude = parseCoordinate(latitudeRaw);
+  const voltagemRaw = attributes.pv;
+  const voltagemParsed =
+    typeof voltagemRaw === 'number'
+      ? voltagemRaw
+      : typeof voltagemRaw === 'string'
+        ? Number.parseFloat(voltagemRaw.replace(',', '.'))
+        : Number.NaN;
+  const voltagem = Number.isFinite(voltagemParsed) ? voltagemParsed : null;
 
   if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) {
     throw new InternalServerErrorException(
@@ -25,6 +33,7 @@ export function mapearUltimaPosicaoSoftruck(
     date,
     ign: attributes.ign,
     speed: attributes.spd,
+    voltagem,
     latitude,
     longitude,
     coordinates: {

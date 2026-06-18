@@ -72,7 +72,30 @@ export class AssociadoService {
     });
 
     if (existingUser) {
-      throw new ConflictException('Usuário já cadastrado');
+      if (!existingUser.primeiroLogin) {
+        // Usuário já concluiu o primeiro acesso normalmente
+        throw new ConflictException('Usuário já cadastrado');
+      }
+
+      // Cadastro parcial de tentativa anterior: redefine a senha padrão (CPF)
+      // e devolve um token válido para que o app prossiga normalmente.
+      this.logger.warn(
+        `[PrimeiroAcesso] Usuário parcialmente cadastrado detectado para CPF ${cpf} (id=${existingUser.id}). Reativando fluxo.`,
+      );
+      const passwordHash = await bcrypt.hash(cpf, 10);
+      await this.prisma.user.update({
+        where: { id: existingUser.id },
+        data: { passwordHash, updatedAt: new Date() },
+      });
+      const loginResult = await this.authService.login({
+        cpf,
+        id: existingUser.id,
+      });
+      return {
+        message: 'Associado cadastrado com sucesso',
+        access_token: loginResult.access_token,
+        primeiroLogin: true,
+      };
     }
 
     const baseOrigin = await this.detectBaseOrigin(cpf);
@@ -82,15 +105,28 @@ export class AssociadoService {
 
     let response;
     try {
-      response = await this.sgaAuthService.executeRequestWithAuth(baseOrigin, {
-        method: 'GET',
-        url,
-        validateStatus: () => true,
-      });
+      response = await this.callSgaWithRetry(
+        baseOrigin,
+        { method: 'GET', url, validateStatus: () => true },
+        `buscar associado CPF=${cpf}`,
+      );
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.error(
+        `[PrimeiroAcesso] Todas as tentativas de consulta ao SGA falharam para CPF ${cpf}: ${msg}`,
+      );
+      throw new InternalServerErrorException(
+        'Não foi possível validar seus dados neste momento devido a uma indisponibilidade temporária do sistema. Por favor, tente novamente em alguns minutos.',
+      );
+    }
 
-    } catch (err: any) {
-      this.logger.error(`Erro ao consultar SGA: ${err?.message}`);
-      throw new InternalServerErrorException('Erro ao consultar SGA');
+    if (response.status >= 500) {
+      this.logger.error(
+        `[PrimeiroAcesso] SGA retornou HTTP ${response.status} após todas as tentativas para CPF ${cpf}`,
+      );
+      throw new InternalServerErrorException(
+        'Não foi possível validar seus dados neste momento devido a uma indisponibilidade temporária do sistema. Por favor, tente novamente em alguns minutos.',
+      );
     }
 
     const data = response?.data;
@@ -165,32 +201,32 @@ export class AssociadoService {
       // continue to try external calls
     }
 
-    // Try sequentially to avoid duplicate calls
-    try {
-      const response = await this.sgaAuthService.executeRequestWithAuth('MAIS_PRIME', {
-        method: 'GET',
-        url,
-        validateStatus: () => true,
-        timeout: 20000,
-      });
-      if (response.status === 200) return 'MAIS_PRIME';
-
-      const responseRS = await this.sgaAuthService.executeRequestWithAuth('MAIS_PRIME_RS', {
-        method: 'GET',
-        url,
-        validateStatus: () => true,
-        timeout: 20000,
-      });
-      if (responseRS.status === 200) return 'MAIS_PRIME_RS';
-
-      throw new NotFoundException('Usuário não encontrado em nenhuma base');
-    } catch (error: any) {
-      if (error instanceof NotFoundException) {
-        throw error;
+    // Tenta cada base sequencialmente com retry automático
+    const bases: BaseOrigin[] = ['MAIS_PRIME', 'MAIS_PRIME_RS'];
+    for (const base of bases) {
+      try {
+        const response = await this.callSgaWithRetry(
+          base,
+          { method: 'GET', url, validateStatus: () => true, timeout: 20000 },
+          `detectBaseOrigin CPF=${cpf} base=${base}`,
+        );
+        if (response.status === 200) {
+          this.logger.log(`[DetectBase] CPF ${cpf} encontrado na base ${base}`);
+          return base;
+        }
+        this.logger.log(
+          `[DetectBase] CPF ${cpf} não encontrado na base ${base} (status=${response.status})`,
+        );
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.error(
+          `[DetectBase] Falha ao consultar base ${base} para CPF ${cpf} após todas as tentativas: ${msg}`,
+        );
+        // Continua para a próxima base antes de desistir
       }
-      this.logger.error(`Erro ao detectar base: ${error?.message}`);
-      throw new InternalServerErrorException('Erro ao consultar API SGA');
     }
+
+    throw new NotFoundException('Usuário não encontrado em nenhuma base');
   }
 
   async verificarSituacao(rawCpf: string) {
@@ -341,5 +377,105 @@ export class AssociadoService {
       where: { id },
       data,
     });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Helpers de resiliência
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Determina se um erro é transitório (rede, timeout, 5xx), ou seja, elegível
+   * para retry automático.
+   */
+  private isTransientError(err: any): boolean {
+    const message: string = err?.message ?? '';
+    const transientCodes = [
+      'ECONNRESET',
+      'ECONNREFUSED',
+      'ETIMEDOUT',
+      'ENOTFOUND',
+      'EAI_AGAIN',
+      'ECONNABORTED',
+    ];
+    if (transientCodes.some((code) => message.includes(code))) return true;
+    if (message.toLowerCase().includes('network request failed')) return true;
+    if (message.toLowerCase().includes('timeout')) return true;
+    // Axios pode empacotar o status HTTP em err.response.status
+    const status: number | undefined = err?.response?.status;
+    if (status !== undefined && status >= 500) return true;
+    return false;
+  }
+
+  /**
+   * Executa uma chamada ao SGA com retry automático e exponential backoff.
+   * Também trata respostas 5xx como falhas transitórias.
+   *
+   * @param baseOrigin Base de origem do associado
+   * @param config     Configuração da requisição axios
+   * @param label      Rótulo para os logs (ex.: 'buscar associado')
+   * @param maxAttempts Número máximo de tentativas (padrão: 3)
+   * @param baseDelayMs Atraso base em ms para o backoff (padrão: 1 000 ms)
+   */
+  private async callSgaWithRetry(
+    baseOrigin: BaseOrigin,
+    config: Parameters<SgaAuthService['executeRequestWithAuth']>[1],
+    label: string,
+    maxAttempts = 3,
+    baseDelayMs = 1000,
+  ) {
+    let lastError: unknown;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const start = Date.now();
+      try {
+        const response = await this.sgaAuthService.executeRequestWithAuth(
+          baseOrigin,
+          config,
+        );
+        const elapsed = Date.now() - start;
+
+        if (response.status >= 500) {
+          this.logger.warn(
+            `[SGA Retry] ${label} – tentativa ${attempt}/${maxAttempts} retornou HTTP ${response.status} em ${elapsed}ms`,
+          );
+          if (attempt < maxAttempts) {
+            const delay = baseDelayMs * Math.pow(2, attempt - 1);
+            this.logger.log(
+              `[SGA Retry] Aguardando ${delay}ms antes da tentativa ${attempt + 1}…`,
+            );
+            await new Promise((resolve) => setTimeout(resolve, delay));
+            continue;
+          }
+          // Esgotou as tentativas com 5xx – retorna para o caller decidir
+          return response;
+        }
+
+        if (attempt > 1) {
+          this.logger.log(
+            `[SGA Retry] ${label} – sucesso na tentativa ${attempt} em ${elapsed}ms`,
+          );
+        }
+        return response;
+      } catch (err: unknown) {
+        lastError = err;
+        const elapsed = Date.now() - start;
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(
+          `[SGA Retry] ${label} – tentativa ${attempt}/${maxAttempts} falhou em ${elapsed}ms: ${msg}`,
+        );
+
+        if (attempt < maxAttempts && this.isTransientError(err)) {
+          const delay = baseDelayMs * Math.pow(2, attempt - 1);
+          this.logger.log(
+            `[SGA Retry] Aguardando ${delay}ms antes da tentativa ${attempt + 1}…`,
+          );
+          await new Promise((resolve) => setTimeout(resolve, delay));
+        } else {
+          break;
+        }
+      }
+    }
+
+    throw lastError;
   }
 }

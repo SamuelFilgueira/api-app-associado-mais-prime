@@ -54,7 +54,7 @@ export class RastreamentoController {
     };
   }
 
-  // ROTAS REFERENTES AO RASTREAMENTO M7
+  //ROTA PRINCIPAL DE RASTREAMENTO UNIFICADO (SOFTRUCK + M7 + LÓGICA SOLUÇÕES)
   @UseGuards(JwtAuthGuard)
   @Post()
   rastreamento(@Body() body: { cnpj: string; chassi: string }) {

@@ -699,9 +699,6 @@ export class RastreamentoSoftruck {
       );
 
       const mapped = mapearUltimaPosicaoSoftruck(trackingData, vehicleData);
-      this.logger.debug(
-        `Softruck payload mapeado vehicleId=${vehicleData.id} body=${this.stringifyForLog(mapped)}`,
-      );
       return mapped;
     } catch (error) {
       if (error instanceof InternalServerErrorException) throw error;

@@ -121,10 +121,6 @@ export class LogicaRastreamentoService implements IRastreamentoProvider {
       throw new InternalServerErrorException('LOGICA_TOKEN não definido nas variáveis de ambiente');
     }
 
-    this.logger.debug(
-      `Consultando Lógica para chassi=${normalizedChassi} baseOrigin=${context?.baseOrigin ?? 'N/A'} tokenKey=${context?.tokenKey ?? 'LOGICA_TOKEN'} token=${maskSecret(usedToken)} (tokenProvided=${!!token})`,
-    );
-
     let data: unknown;
     try {
       data = await this.consultarListaVeiculo(normalizedChassi, usedToken);
@@ -194,6 +190,7 @@ export class LogicaRastreamentoService implements IRastreamentoProvider {
       timeout: LOGICA_REQUEST_TIMEOUT,
     });
 
+    this.logger.debug(`Resposta da Lógica para chassi=${chassi}: status=${response.status} body=${JSON.stringify(response.data)}`);
     return response.data;
   }
 
