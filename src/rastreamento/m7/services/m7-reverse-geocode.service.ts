@@ -577,61 +577,61 @@ export class M7ReverseGeocodeService {
     }
   }
 
-  private async buscarReverseGeocodeCacheMysql(
-    latitude: string,
-    longitude: string,
-    baseOrigin: BaseOrigin,
-  ): Promise<string | null> {
-    const latKey = this.montarChaveCacheCoordenada(latitude);
-    const lngKey = this.montarChaveCacheCoordenada(longitude);
-    const radius = Number.isFinite(M7_REV_GEOCODE_CACHE_RADIUS_KEYS)
-      ? Math.max(0, M7_REV_GEOCODE_CACHE_RADIUS_KEYS)
-      : 30;
+  // private async buscarReverseGeocodeCacheMysql(
+  //   latitude: string,
+  //   longitude: string,
+  //   baseOrigin: BaseOrigin,
+  // ): Promise<string | null> {
+  //   const latKey = this.montarChaveCacheCoordenada(latitude);
+  //   const lngKey = this.montarChaveCacheCoordenada(longitude);
+  //   const radius = Number.isFinite(M7_REV_GEOCODE_CACHE_RADIUS_KEYS)
+  //     ? Math.max(0, M7_REV_GEOCODE_CACHE_RADIUS_KEYS)
+  //     : 30;
 
-    try {
-      const registros = await this.prisma.reverse_geocode_cache.findMany({
-        where: {
-          provider: { in: M7_REV_GEOCODE_CACHE_PROVIDERS },
-          lat_key: { gte: latKey - radius, lte: latKey + radius },
-          lng_key: { gte: lngKey - radius, lte: lngKey + radius },
-        },
-        select: {
-          address: true,
-          latitude: true,
-          longitude: true,
-          confidence: true,
-        },
-        take: 50,
-      });
+  //   try {
+  //     const registros = await this.prisma.reverse_geocode_cache.findMany({
+  //       where: {
+  //         provider: { in: M7_REV_GEOCODE_CACHE_PROVIDERS },
+  //         lat_key: { gte: latKey - radius, lte: latKey + radius },
+  //         lng_key: { gte: lngKey - radius, lte: lngKey + radius },
+  //       },
+  //       select: {
+  //         address: true,
+  //         latitude: true,
+  //         longitude: true,
+  //         confidence: true,
+  //       },
+  //       take: 50,
+  //     });
 
-      if (!registros.length) return null;
+  //     if (!registros.length) return null;
 
-      const latitudeNumero = Number(latitude);
-      const longitudeNumero = Number(longitude);
-      const melhor = registros
-        .map((registro) => {
-          const diffLat = Number(registro.latitude) - latitudeNumero;
-          const diffLng = Number(registro.longitude) - longitudeNumero;
+  //     const latitudeNumero = Number(latitude);
+  //     const longitudeNumero = Number(longitude);
+  //     const melhor = registros
+  //       .map((registro) => {
+  //         const diffLat = Number(registro.latitude) - latitudeNumero;
+  //         const diffLng = Number(registro.longitude) - longitudeNumero;
 
-          return {
-            address: registro.address,
-            confidence: registro.confidence,
-            distance: diffLat * diffLat + diffLng * diffLng,
-          };
-        })
-        .sort((a, b) => a.distance - b.distance)[0];
+  //         return {
+  //           address: registro.address,
+  //           confidence: registro.confidence,
+  //           distance: diffLat * diffLat + diffLng * diffLng,
+  //         };
+  //       })
+  //       .sort((a, b) => a.distance - b.distance)[0];
 
-      if (!melhor?.address) return null;
+  //     if (!melhor?.address) return null;
 
-      this.logger.debug(
-        `[${baseOrigin}] reverse geocode cache MySQL hit para ${latitude},${longitude} (${melhor.confidence})`,
-      );
-      return melhor.address;
-    } catch (error) {
-      this.logger.warn(
-        `[${baseOrigin}] reverse geocode cache MySQL indisponível para ${latitude},${longitude}: ${error instanceof Error ? error.message : 'erro desconhecido'}`,
-      );
-      return null;
-    }
-  }
+  //     this.logger.debug(
+  //       `[${baseOrigin}] reverse geocode cache MySQL hit para ${latitude},${longitude} (${melhor.confidence})`,
+  //     );
+  //     return melhor.address;
+  //   } catch (error) {
+  //     this.logger.warn(
+  //       `[${baseOrigin}] reverse geocode cache MySQL indisponível para ${latitude},${longitude}: ${error instanceof Error ? error.message : 'erro desconhecido'}`,
+  //     );
+  //     return null;
+  //   }
+  // }
 }
