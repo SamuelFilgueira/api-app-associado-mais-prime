@@ -11,14 +11,7 @@ type ReverseGeocodeItem = {
   cidade?: string;
 };
 
-const M7_REV_GEOCODE_CONCURRENCY_RAW = Number(
-  process.env.M7_REV_GEOCODE_CONCURRENCY ?? 16,
-);
-const M7_REV_GEOCODE_CONCURRENCY = Number.isFinite(
-  M7_REV_GEOCODE_CONCURRENCY_RAW,
-)
-  ? Math.max(1, Math.min(64, Math.trunc(M7_REV_GEOCODE_CONCURRENCY_RAW)))
-  : 16;
+const M7_REV_GEOCODE_CONCURRENCY = 6;
 const M7_REV_GEOCODE_CACHE_PROVIDERS = (
   process.env.M7_REV_GEOCODE_CACHE_PROVIDERS ??
   'osm_rj,external_reverse_geocode'
@@ -33,23 +26,15 @@ const M7_NOMINATIM_DB = process.env.M7_NOMINATIM_DB ?? 'nominatim_rj';
 const M7_NOMINATIM_TABLE = process.env.M7_NOMINATIM_TABLE ?? 'placex';
 const M7_NOMINATIM_ENABLED =
   (process.env.M7_NOMINATIM_ENABLED ?? 'true').toLowerCase() !== 'false';
-const M7_NOMINATIM_AUTO_ENSURE_INDEXES =
-  (process.env.M7_NOMINATIM_AUTO_ENSURE_INDEXES ?? 'true').toLowerCase() !==
-  'false';
 const M7_REV_GEOCODE_LEGACY_CACHE_FALLBACK = (
   process.env.M7_REV_GEOCODE_LEGACY_CACHE_FALLBACK ?? 'false'
 ).toLowerCase() === 'true';
-
-type NominatimSqlMode = 'db_prefixed' | 'table_only';
 
 @Injectable()
 export class M7ReverseGeocodeService {
   private readonly logger = new Logger(M7ReverseGeocodeService.name);
   private readonly reverseGeocodeCache = new Map<string, string>();
   private readonly reverseGeocodeInFlight = new Map<string, Promise<string>>();
-  private nominatimSqlMode: NominatimSqlMode = 'db_prefixed';
-  private nominatimFallbackModeWarned = false;
-  private nominatimIndexesBootstrapPromise: Promise<void> | null = null;
 
   constructor(private readonly prisma: PrismaService) {}
 
@@ -114,17 +99,17 @@ export class M7ReverseGeocodeService {
         return enderecoNominatimMysql;
       }
 
-      // if (M7_REV_GEOCODE_LEGACY_CACHE_FALLBACK) {
-      //   const enderecoCacheMysql = await this.buscarReverseGeocodeCacheMysql(
-      //     latitude,
-      //     longitude,
-      //     baseOrigin,
-      //   );
-      //   if (enderecoCacheMysql) {
-      //     this.reverseGeocodeCache.set(key, enderecoCacheMysql);
-      //     return enderecoCacheMysql;
-      //   }
-      // }
+      if (M7_REV_GEOCODE_LEGACY_CACHE_FALLBACK) {
+        const enderecoCacheMysql = await this.buscarReverseGeocodeCacheMysql(
+          latitude,
+          longitude,
+          baseOrigin,
+        );
+        if (enderecoCacheMysql) {
+          this.reverseGeocodeCache.set(key, enderecoCacheMysql);
+          return enderecoCacheMysql;
+        }
+      }
 
       this.logger.warn(
         `[${baseOrigin}] reverse geocode sem correspondência local para ${key}; usando fallback de coordenadas`,
@@ -208,10 +193,6 @@ export class M7ReverseGeocodeService {
     items: ReverseGeocodeItem[],
     baseOrigin: BaseOrigin,
   ): Promise<Map<string, string>> {
-    if (M7_NOMINATIM_ENABLED && M7_NOMINATIM_AUTO_ENSURE_INDEXES) {
-      this.dispararBootstrapIndicesNominatim();
-    }
-
     const resultado = new Map<string, string>();
 
     for (
@@ -277,20 +258,27 @@ export class M7ReverseGeocodeService {
       const dist = `((latitude-(${lat}))*(latitude-(${lat}))+(longitude-(${lon}))*(longitude-(${lon})))`;
       const cols =
         'name, name_pt, type, postcode, admin_level, address_suburb, address_city';
-      const sqlComDb =
-        `SELECT ${cols} FROM \`${db}\`.\`${tbl}\` ` +
-        `WHERE latitude BETWEEN ? AND ? AND longitude BETWEEN ? AND ?${extraWhere} ` +
-        `ORDER BY ${dist} ASC LIMIT ${limit}`;
-      const sqlSemDb =
-        `SELECT ${cols} FROM \`${tbl}\` ` +
-        `WHERE latitude BETWEEN ? AND ? AND longitude BETWEEN ? AND ?${extraWhere} ` +
-        `ORDER BY ${dist} ASC LIMIT ${limit}`;
+      const sqls = [
+        `SELECT ${cols} FROM \`${db}\`.\`${tbl}\` WHERE latitude BETWEEN ? AND ? AND longitude BETWEEN ? AND ?${extraWhere} ORDER BY ${dist} ASC LIMIT ${limit}`,
+        `SELECT ${cols} FROM \`${tbl}\` WHERE latitude BETWEEN ? AND ? AND longitude BETWEEN ? AND ?${extraWhere} ORDER BY ${dist} ASC LIMIT ${limit}`,
+      ];
 
-      return this.executarQueryNominatimComFallback<PlacexRow>(
-        sqlComDb,
-        sqlSemDb,
-        [lat - rLat, lat + rLat, lon - rLon, lon + rLon],
-      );
+      for (const sql of sqls) {
+        try {
+          const rows = await this.prisma.$queryRawUnsafe<PlacexRow[]>(
+            sql,
+            lat - rLat,
+            lat + rLat,
+            lon - rLon,
+            lon + rLon,
+          );
+          if (Array.isArray(rows) && rows.length) return rows;
+        } catch {
+          // tenta sem prefixo de banco
+        }
+      }
+
+      return [];
     };
 
     const pickName = (row: PlacexRow): string | null => {
@@ -388,34 +376,36 @@ export class M7ReverseGeocodeService {
           longitude: number | string | null;
         };
 
-        try {
-          const houseRows = await this.executarQueryNominatimComFallback<HouseRow>(
-            houseSqls[0],
-            houseSqls[1],
-            houseParams,
-          );
+        for (const hsql of houseSqls) {
+          try {
+            const houseRows = await this.prisma.$queryRawUnsafe<HouseRow[]>(
+              hsql,
+              ...houseParams,
+            );
+            if (Array.isArray(houseRows) && houseRows.length) {
+              const chosen = houseRows[0];
+              numeroPredial =
+                typeof chosen.housenumber === 'string' &&
+                chosen.housenumber.trim()
+                  ? chosen.housenumber.trim()
+                  : null;
 
-          if (houseRows.length) {
-            const chosen = houseRows[0];
-            numeroPredial =
-              typeof chosen.housenumber === 'string' && chosen.housenumber.trim()
-                ? chosen.housenumber.trim()
-                : null;
-
-            if (numeroPredial) {
-              const distApprox = Math.round(
-                Math.sqrt(
-                  (Number(chosen.latitude) - lat) ** 2 +
-                    (Number(chosen.longitude) - lon) ** 2,
-                ) * 111_000,
-              );
-              this.logger.debug(
-                `[${baseOrigin}] housenumber | rua="${rua}" imóveis=${houseRows.length} número="${numeroPredial}" dist≈${distApprox}m`,
-              );
+              if (numeroPredial) {
+                const distApprox = Math.round(
+                  Math.sqrt(
+                    (Number(chosen.latitude) - lat) ** 2 +
+                      (Number(chosen.longitude) - lon) ** 2,
+                  ) * 111_000,
+                );
+                this.logger.debug(
+                  `[${baseOrigin}] housenumber | rua="${rua}" imóveis=${houseRows.length} número="${numeroPredial}" dist≈${distApprox}m`,
+                );
+              }
+              break;
             }
+          } catch {
+            // coluna address_street pode não existir - ignora silenciosamente
           }
-        } catch {
-          // coluna address_street pode não existir - ignora silenciosamente
         }
       }
 
@@ -445,193 +435,61 @@ export class M7ReverseGeocodeService {
     return null;
   }
 
-  private dispararBootstrapIndicesNominatim() {
-    if (!this.nominatimIndexesBootstrapPromise) {
-      this.nominatimIndexesBootstrapPromise = this.assegurarIndicesNominatim();
-    }
-  }
-
-  private async executarQueryNominatimComFallback<T>(
-    sqlComDb: string,
-    sqlSemDb: string,
-    params: unknown[],
-  ): Promise<T[]> {
-    if (this.nominatimSqlMode === 'table_only') {
-      try {
-        const rows = await this.prisma.$queryRawUnsafe<T[]>(sqlSemDb, ...params);
-        if (Array.isArray(rows)) return rows;
-      } catch {
-        // tenta restabelecer modo com prefixo de DB
-      }
-
-      try {
-        const rows = await this.prisma.$queryRawUnsafe<T[]>(sqlComDb, ...params);
-        this.nominatimSqlMode = 'db_prefixed';
-        return Array.isArray(rows) ? rows : [];
-      } catch {
-        return [];
-      }
-    }
+  private async buscarReverseGeocodeCacheMysql(
+    latitude: string,
+    longitude: string,
+    baseOrigin: BaseOrigin,
+  ): Promise<string | null> {
+    const latKey = this.montarChaveCacheCoordenada(latitude);
+    const lngKey = this.montarChaveCacheCoordenada(longitude);
+    const radius = Number.isFinite(M7_REV_GEOCODE_CACHE_RADIUS_KEYS)
+      ? Math.max(0, M7_REV_GEOCODE_CACHE_RADIUS_KEYS)
+      : 30;
 
     try {
-      const rows = await this.prisma.$queryRawUnsafe<T[]>(sqlComDb, ...params);
-      return Array.isArray(rows) ? rows : [];
-    } catch {
-      try {
-        const rows = await this.prisma.$queryRawUnsafe<T[]>(sqlSemDb, ...params);
-        if (!this.nominatimFallbackModeWarned) {
-          this.logger.warn(
-            'nominatim_rj com prefixo de banco indisponivel; usando tabela sem prefixo para reduzir latencia de fallback',
-          );
-          this.nominatimFallbackModeWarned = true;
-        }
-        this.nominatimSqlMode = 'table_only';
-        return Array.isArray(rows) ? rows : [];
-      } catch {
-        return [];
-      }
-    }
-  }
+      const registros = await this.prisma.reverse_geocode_cache.findMany({
+        where: {
+          provider: { in: M7_REV_GEOCODE_CACHE_PROVIDERS },
+          lat_key: { gte: latKey - radius, lte: latKey + radius },
+          lng_key: { gte: lngKey - radius, lte: lngKey + radius },
+        },
+        select: {
+          address: true,
+          latitude: true,
+          longitude: true,
+          confidence: true,
+        },
+        take: 50,
+      });
 
-  private async assegurarIndicesNominatim(): Promise<void> {
-    const db = this.sanitizarSqlIdentifier(M7_NOMINATIM_DB, 'nominatim_rj');
-    const tbl = this.sanitizarSqlIdentifier(M7_NOMINATIM_TABLE, 'placex');
+      if (!registros.length) return null;
 
-    type ColumnRow = { COLUMN_NAME: string };
-    type IndexRow = { INDEX_NAME: string };
+      const latitudeNumero = Number(latitude);
+      const longitudeNumero = Number(longitude);
+      const melhor = registros
+        .map((registro) => {
+          const diffLat = Number(registro.latitude) - latitudeNumero;
+          const diffLng = Number(registro.longitude) - longitudeNumero;
 
-    try {
-      const colunas = await this.prisma.$queryRawUnsafe<ColumnRow[]>(
-        'SELECT COLUMN_NAME FROM information_schema.columns WHERE table_schema = ? AND table_name = ?',
-        db,
-        tbl,
+          return {
+            address: registro.address,
+            confidence: registro.confidence,
+            distance: diffLat * diffLat + diffLng * diffLng,
+          };
+        })
+        .sort((a, b) => a.distance - b.distance)[0];
+
+      if (!melhor?.address) return null;
+
+      this.logger.debug(
+        `[${baseOrigin}] reverse geocode cache MySQL hit para ${latitude},${longitude} (${melhor.confidence})`,
       );
-      const colunasSet = new Set(
-        (Array.isArray(colunas) ? colunas : []).map((item) => item.COLUMN_NAME),
-      );
-
-      if (!colunasSet.size) {
-        this.logger.warn(
-          `nominatim_rj index bootstrap ignorado: tabela ${db}.${tbl} nao encontrada`,
-        );
-        return;
-      }
-
-      const indices = await this.prisma.$queryRawUnsafe<IndexRow[]>(
-        'SELECT DISTINCT INDEX_NAME FROM information_schema.statistics WHERE table_schema = ? AND table_name = ?',
-        db,
-        tbl,
-      );
-      const indicesSet = new Set(
-        (Array.isArray(indices) ? indices : []).map((item) => item.INDEX_NAME),
-      );
-
-      const criarIndiceSeNecessario = async (
-        nomeIndice: string,
-        sql: string,
-        colunasObrigatorias: string[],
-      ) => {
-        if (indicesSet.has(nomeIndice)) return;
-        if (!colunasObrigatorias.every((coluna) => colunasSet.has(coluna))) {
-          return;
-        }
-
-        await this.prisma.$executeRawUnsafe(sql);
-        indicesSet.add(nomeIndice);
-      };
-
-      await criarIndiceSeNecessario(
-        'idx_m7_plx_class_lat_lng',
-        `CREATE INDEX idx_m7_plx_class_lat_lng ON \`${db}\`.\`${tbl}\` (\`class\`, \`latitude\`, \`longitude\`)`,
-        ['class', 'latitude', 'longitude'],
-      );
-
-      await criarIndiceSeNecessario(
-        'idx_m7_plx_class_type_lat_lng',
-        `CREATE INDEX idx_m7_plx_class_type_lat_lng ON \`${db}\`.\`${tbl}\` (\`class\`, \`type\`, \`latitude\`, \`longitude\`)`,
-        ['class', 'type', 'latitude', 'longitude'],
-      );
-
-      await criarIndiceSeNecessario(
-        'idx_m7_plx_cls_type_admin_lat_lng',
-        `CREATE INDEX idx_m7_plx_cls_type_admin_lat_lng ON \`${db}\`.\`${tbl}\` (\`class\`, \`type\`, \`admin_level\`, \`latitude\`, \`longitude\`)`,
-        ['class', 'type', 'admin_level', 'latitude', 'longitude'],
-      );
-
-      await criarIndiceSeNecessario(
-        'idx_m7_plx_house_lookup',
-        `CREATE INDEX idx_m7_plx_house_lookup ON \`${db}\`.\`${tbl}\` (\`address_street\`(120), \`address_city\`(80), \`address_suburb\`(80), \`housenumber\`(20), \`latitude\`, \`longitude\`)`,
-        [
-          'address_street',
-          'address_city',
-          'address_suburb',
-          'housenumber',
-          'latitude',
-          'longitude',
-        ],
-      );
+      return melhor.address;
     } catch (error) {
       this.logger.warn(
-        `nominatim_rj index bootstrap falhou: ${error instanceof Error ? error.message : 'erro desconhecido'}`,
+        `[${baseOrigin}] reverse geocode cache MySQL indisponível para ${latitude},${longitude}: ${error instanceof Error ? error.message : 'erro desconhecido'}`,
       );
+      return null;
     }
   }
-
-  // private async buscarReverseGeocodeCacheMysql(
-  //   latitude: string,
-  //   longitude: string,
-  //   baseOrigin: BaseOrigin,
-  // ): Promise<string | null> {
-  //   const latKey = this.montarChaveCacheCoordenada(latitude);
-  //   const lngKey = this.montarChaveCacheCoordenada(longitude);
-  //   const radius = Number.isFinite(M7_REV_GEOCODE_CACHE_RADIUS_KEYS)
-  //     ? Math.max(0, M7_REV_GEOCODE_CACHE_RADIUS_KEYS)
-  //     : 30;
-
-  //   try {
-  //     const registros = await this.prisma.reverse_geocode_cache.findMany({
-  //       where: {
-  //         provider: { in: M7_REV_GEOCODE_CACHE_PROVIDERS },
-  //         lat_key: { gte: latKey - radius, lte: latKey + radius },
-  //         lng_key: { gte: lngKey - radius, lte: lngKey + radius },
-  //       },
-  //       select: {
-  //         address: true,
-  //         latitude: true,
-  //         longitude: true,
-  //         confidence: true,
-  //       },
-  //       take: 50,
-  //     });
-
-  //     if (!registros.length) return null;
-
-  //     const latitudeNumero = Number(latitude);
-  //     const longitudeNumero = Number(longitude);
-  //     const melhor = registros
-  //       .map((registro) => {
-  //         const diffLat = Number(registro.latitude) - latitudeNumero;
-  //         const diffLng = Number(registro.longitude) - longitudeNumero;
-
-  //         return {
-  //           address: registro.address,
-  //           confidence: registro.confidence,
-  //           distance: diffLat * diffLat + diffLng * diffLng,
-  //         };
-  //       })
-  //       .sort((a, b) => a.distance - b.distance)[0];
-
-  //     if (!melhor?.address) return null;
-
-  //     this.logger.debug(
-  //       `[${baseOrigin}] reverse geocode cache MySQL hit para ${latitude},${longitude} (${melhor.confidence})`,
-  //     );
-  //     return melhor.address;
-  //   } catch (error) {
-  //     this.logger.warn(
-  //       `[${baseOrigin}] reverse geocode cache MySQL indisponível para ${latitude},${longitude}: ${error instanceof Error ? error.message : 'erro desconhecido'}`,
-  //     );
-  //     return null;
-  //   }
-  // }
 }

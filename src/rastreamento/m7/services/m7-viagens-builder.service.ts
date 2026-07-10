@@ -57,7 +57,7 @@ export class M7ViagensBuilderService {
       const tempoMovimento = atual.tempo_movimento ?? '00:00:00';
 
       if (distanciaKm === 0 || isZeroTempo(tempoMovimento)) continue;
-      if (tempoEmSegundos(tempoMovimento) <= 180) continue;
+      if (tempoEmSegundos(tempoMovimento) <= 40) continue;
 
       let origemEndereco = '';
       for (let j = i - 1; j >= 0; j--) {
@@ -355,7 +355,7 @@ export class M7ViagensBuilderService {
         descartes.distanciaZerada += 1;
         continue;
       }
-      if (tempoMovSec <= 180) {
+      if (tempoMovSec <= 40) {
         descartes.tempoMovCurto += 1;
         continue;
       }
@@ -386,7 +386,7 @@ export class M7ViagensBuilderService {
     }
 
     this.logger.log(
-      `[${baseOrigin}] [V2] funil ciclos=${ciclos.length} aprovados=${viagensIntermediarias.length} descartes={seqCurta:${descartes.seqCurta},semMovimento:${descartes.semMovimento},movInvalido:${descartes.movimentoInvalido},dist0:${descartes.distanciaZerada},tempo<=180s:${descartes.tempoMovCurto}}`,
+      `[${baseOrigin}] [V2] funil ciclos=${ciclos.length} aprovados=${viagensIntermediarias.length} descartes={seqCurta:${descartes.seqCurta},semMovimento:${descartes.semMovimento},movInvalido:${descartes.movimentoInvalido},dist0:${descartes.distanciaZerada},tempo<=40s:${descartes.tempoMovCurto}}`,
     );
 
     const viagens: ViagemM7Dto[] = await Promise.all(
@@ -495,7 +495,7 @@ export class M7ViagensBuilderService {
     lat2: number,
     lon2: number,
   ): number {
-    const toRad = (deg: number) => (deg * Math.PI) / 180;
+    const toRad = (deg: number) => (deg * Math.PI) / 40;
     const R = 6371;
     const dLat = toRad(lat2 - lat1);
     const dLon = toRad(lon2 - lon1);

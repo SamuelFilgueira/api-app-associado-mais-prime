@@ -8,7 +8,6 @@ import {
 import axios from 'axios';
 import { BaseOrigin } from 'src/shared/token-resolver.service';
 import {
-  M7ConsultaMonitoradoResponse,
   M7ConsultaVeiculoResponse,
   M7HistoricoApiResponse,
   M7TrajetosApiResponse,
@@ -35,7 +34,7 @@ import { HistoricoPdfM7Service } from '../pdf/historico-pdf-m7.service';
 import { M7ReverseGeocodeService } from './m7-reverse-geocode.service';
 import { M7ViagensBuilderService } from './m7-viagens-builder.service';
 
-const M7_REQUEST_TIMEOUT = 55_000;
+const M7_REQUEST_TIMEOUT = 25_000;
 const MAX_LOG_PAYLOAD_LENGTH = 1_500;
 
 const M7_CREDENTIALS: Record<
@@ -208,37 +207,6 @@ export class HistoricoM7Service {
   // ---------------------------------------------------------------------------
   // M7 API calls
   // ---------------------------------------------------------------------------
-
-  private async consultarMonitorado(
-    placa: string,
-    baseOrigin: BaseOrigin,
-  ): Promise<M7ConsultaMonitoradoResponse> {
-    const url = `${process.env.M7_API_BASE_URL}api/monitorados/${placa}`;
-    this.logger.debug(`[${baseOrigin}] consultarMonitorado → GET ${url}`);
-
-    try {
-      const data = await this.executarComReautenticacao(baseOrigin, (token) =>
-        axios.get(url, {
-          headers: { Authorization: `Bearer ${token}` },
-          timeout: M7_REQUEST_TIMEOUT,
-        }),
-      );
-      this.logger.debug(
-        `[${baseOrigin}] consultarMonitorado ← resposta: ${JSON.stringify(data)}`,
-      );
-      return data as M7ConsultaMonitoradoResponse;
-    } catch (error) {
-      if (error instanceof InternalServerErrorException) throw error;
-      const status = axios.isAxiosError(error) ? error.response?.status : 'N/A';
-      const body = axios.isAxiosError(error)
-        ? JSON.stringify(error.response?.data)
-        : '';
-      this.logger.error(
-        `[${baseOrigin}] consultarMonitorado ERRO: status=${status} body=${body} msg=${error instanceof Error ? error.message : JSON.stringify(error)}`,
-      );
-      throw new BadGatewayException('Falha ao consultar monitorado na API M7');
-    }
-  }
 
   private async consultarVeiculo(
     cnpj: string,
@@ -492,11 +460,7 @@ export class HistoricoM7Service {
       throw new NotFoundException('Veículo não encontrado na plataforma M7');
     }
 
-    const {placa, chassi: chassiM7 } = veiculoData.veiculo;
-
-    const monitoradoData = await this.consultarMonitorado(placa, baseOrigin);
-
-    const codigo = monitoradoData?.monitorados?.[0]?.codigo;
+    const { codigo, placa, chassi: chassiM7 } = veiculoData.veiculo;
 
     const trajetosRaw = await this.buscarTrajetos(
       codigo,
@@ -608,12 +572,11 @@ export class HistoricoM7Service {
 
     const veiculoData = await this.consultarVeiculo(cnpj, chassi, baseOrigin);
 
+    if (!veiculoData?.veiculo?.codigo) {
+      throw new NotFoundException('Veículo não encontrado na plataforma M7');
+    }
 
-    const { placa, chassi: chassiM7 } = veiculoData.veiculo;
-
-    const monitoradoData = await this.consultarMonitorado(placa, baseOrigin);
-
-    const codigo = monitoradoData?.monitorados?.[0]?.codigo;
+    const { codigo, placa, chassi: chassiM7 } = veiculoData.veiculo;
 
     const historicoRaw = await this.buscarHistoricoGps(
       codigo,
@@ -661,11 +624,7 @@ export class HistoricoM7Service {
       throw new NotFoundException('Veículo não encontrado na plataforma M7');
     }
 
-    const { placa, chassi: chassiM7 } = veiculoData.veiculo;
-
-    const monitoradoData = await this.consultarMonitorado(placa, baseOrigin);
-
-    const codigo = monitoradoData?.monitorados?.[0]?.codigo;
+    const { codigo, placa, chassi: chassiM7 } = veiculoData.veiculo;
 
     const trajetosRaw = await this.buscarTrajetos(
       codigo,
