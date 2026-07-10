@@ -24,6 +24,54 @@ export class M7ViagensBuilderService {
     private readonly reverseGeocodeService: M7ReverseGeocodeService,
   ) {}
 
+  construirEventosViagemParaPdf(rawList: M7TrajetoRaw[]): DiaM7ResumoDto[] {
+    const parseNum = (value: number | string | undefined): number => {
+      const numero = Number(value ?? 0);
+      return Number.isFinite(numero) ? numero : 0;
+    };
+
+    const isZeroTempo = (tempo: string | undefined): boolean => {
+      if (!tempo) return true;
+      return /^0{1,2}:0{1,2}:0{1,2}$/.test(tempo.trim());
+    };
+
+    const viagens: ViagemM7Dto[] = [];
+
+    for (let i = 0; i < rawList.length; i++) {
+      const atual = rawList[i];
+      if (atual.tipo !== 'VIAGEM') continue;
+
+      const tempoMovimento = String(atual.tempo_movimento ?? '00:00:00');
+      if (isZeroTempo(tempoMovimento)) continue;
+
+      let origemEndereco = '';
+      for (let j = i - 1; j >= 0; j--) {
+        const anterior = rawList[j];
+        if (anterior.tipo !== 'PARADO') continue;
+
+        const origem = formatarEnderecoM7(String(anterior.destino ?? ''));
+        origemEndereco = isEnderecoValido(origem) ? origem : '';
+        break;
+      }
+
+      const destinoEndereco = formatarEnderecoM7(String(atual.destino ?? ''));
+
+      viagens.push({
+        origem: origemEndereco,
+        saida: String(atual.data_inicio ?? ''),
+        destino: isEnderecoValido(destinoEndereco) ? destinoEndereco : '',
+        chegada: String(atual.data_fim ?? ''),
+        distanciaKm: parseNum(atual.distancia),
+        tempoMovimento,
+        tempoParado: String(atual.tempo_parado ?? '00:00:00'),
+        tempoTotal: String(atual.tempo_total ?? '00:00:00'),
+        velocidadeMaxima: parseNum(atual.velocidade_maxima),
+      });
+    }
+
+    return agruparViagensPorDia(viagens);
+  }
+
   construirViagensEDias(rawList: M7TrajetoRaw[]): {
     viagens: ViagemM7Dto[];
     dias: DiaM7ResumoDto[];

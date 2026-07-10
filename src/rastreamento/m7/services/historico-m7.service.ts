@@ -34,7 +34,7 @@ import { HistoricoPdfM7Service } from '../pdf/historico-pdf-m7.service';
 import { M7ReverseGeocodeService } from './m7-reverse-geocode.service';
 import { M7ViagensBuilderService } from './m7-viagens-builder.service';
 
-const M7_REQUEST_TIMEOUT = 25_000;
+const M7_REQUEST_TIMEOUT = 50_000;
 const MAX_LOG_PAYLOAD_LENGTH = 1_500;
 
 const M7_CREDENTIALS: Record<
