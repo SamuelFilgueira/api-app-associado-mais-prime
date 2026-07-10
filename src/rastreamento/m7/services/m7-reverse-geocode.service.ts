@@ -114,17 +114,17 @@ export class M7ReverseGeocodeService {
         return enderecoNominatimMysql;
       }
 
-      if (M7_REV_GEOCODE_LEGACY_CACHE_FALLBACK) {
-        const enderecoCacheMysql = await this.buscarReverseGeocodeCacheMysql(
-          latitude,
-          longitude,
-          baseOrigin,
-        );
-        if (enderecoCacheMysql) {
-          this.reverseGeocodeCache.set(key, enderecoCacheMysql);
-          return enderecoCacheMysql;
-        }
-      }
+      // if (M7_REV_GEOCODE_LEGACY_CACHE_FALLBACK) {
+      //   const enderecoCacheMysql = await this.buscarReverseGeocodeCacheMysql(
+      //     latitude,
+      //     longitude,
+      //     baseOrigin,
+      //   );
+      //   if (enderecoCacheMysql) {
+      //     this.reverseGeocodeCache.set(key, enderecoCacheMysql);
+      //     return enderecoCacheMysql;
+      //   }
+      // }
 
       this.logger.warn(
         `[${baseOrigin}] reverse geocode sem correspondência local para ${key}; usando fallback de coordenadas`,
