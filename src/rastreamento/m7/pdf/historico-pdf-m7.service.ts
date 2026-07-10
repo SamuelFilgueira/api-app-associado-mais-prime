@@ -4,6 +4,8 @@ import * as path from 'path';
 import puppeteer from 'puppeteer';
 import {
   DiaM7ResumoDto,
+  HistoricoM7ContestacaoPdfDataDto,
+  HistoricoM7ContestacaoPontoDto,
   HistoricoM7PdfDataDto,
   ViagemM7Dto,
 } from '../dto/historico-m7-response.dto';
@@ -28,14 +30,16 @@ function escapeHtml(value: string): string {
     .replaceAll("'", '&#39;');
 }
 
-function formatarHora(valor: string): string {
+function formatarDataHoraCompacta(valor: string): string {
   if (!valor) return 'N/D';
   try {
     const d = new Date(valor);
     if (isNaN(d.getTime())) return valor;
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
     const hours = String(d.getHours()).padStart(2, '0');
     const minutes = String(d.getMinutes()).padStart(2, '0');
-    return `${hours}:${minutes}`;
+    return `${day}/${month} ${hours}:${minutes}`;
   } catch {
     return valor;
   }
@@ -67,6 +71,18 @@ function formatarDataBR(isoDate: string): string {
 function formatarDistanciaKm(km: number): string {
   if (!Number.isFinite(km) || km < 0) return '0 km';
   return `${km} km`;
+}
+
+function montarDescricaoTempo(v: ViagemM7Dto): string {
+  const tempoMovimento = escapeHtml(v.tempoMovimento || '00:00:00');
+  const tempoParado = escapeHtml(v.tempoParado || '00:00:00');
+  const tempoTotal = escapeHtml(v.tempoTotal || '00:00:00');
+
+  return `
+    <div>${tempoMovimento}</div>
+    <div style="font-size:9px;color:#6b7280;">Parado: ${tempoParado}</div>
+    <div style="font-size:9px;color:#9ca3af;">Evento: ${tempoTotal}</div>
+  `;
 }
 
 function gerarGraficoDistribuicaoDias(dias: DiaM7ResumoDto[]): string {
@@ -178,11 +194,11 @@ function gerarLinhasViagens(dia: DiaM7ResumoDto): string {
       const bgStyle = idx % 2 !== 0 ? 'background:#f9fafb;' : '';
       return `
       <tr style="${bgStyle}">
-        <td>${escapeHtml(formatarHora(v.saida))}</td>
-        <td>${escapeHtml(formatarHora(v.chegada))}</td>
+        <td>${escapeHtml(formatarDataHoraCompacta(v.saida))}</td>
+        <td>${escapeHtml(formatarDataHoraCompacta(v.chegada))}</td>
         <td class="addr">${escapeHtml(v.origem || '—')}</td>
         <td class="addr">${escapeHtml(v.destino || '—')}</td>
-        <td>${escapeHtml(v.tempoMovimento)}</td>
+        <td>${montarDescricaoTempo(v)}</td>
         <td>${escapeHtml(formatarDistanciaKm(v.distanciaKm))}</td>
         <td>${escapeHtml(String(v.velocidadeMaxima))} km/h</td>
       </tr>
@@ -438,6 +454,10 @@ function gerarHtmlRelatorio(dados: HistoricoM7PdfDataDto): string {
       </div>
 
       <h2>Viagens do Período</h2>
+      <p style="font-size:10px;color:#6b7280;margin-bottom:8px;">
+        Saída/Chegada representam início/fim do evento de ignição informado pela API M7.
+        O deslocamento efetivo está em Tempo Movimento e pode coexistir com períodos parados dentro do mesmo evento.
+      </p>
       <table>
         <thead>
           <tr>
@@ -458,6 +478,306 @@ function gerarHtmlRelatorio(dados: HistoricoM7PdfDataDto): string {
       <div class="footer">
         Relatório gerado pelo sistema Mais Prime — ${escapeHtml(dataGeracao)}
       </div>
+    </body>
+    </html>
+  `;
+}
+
+// ---------------------------------------------------------------------------
+// Contestação V2 — todos os pontos GPS com geocode (sem gráficos)
+// ---------------------------------------------------------------------------
+
+function formatarDataHoraContestacao(valor: string): { data: string; hora: string } {
+  if (!valor) return { data: '—', hora: '—' };
+  try {
+    const iso = valor.includes('T') ? valor : valor.replace(' ', 'T');
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return { data: valor, hora: '' };
+    const data =
+      String(d.getDate()).padStart(2, '0') + '/' +
+      String(d.getMonth() + 1).padStart(2, '0') + '/' +
+      String(d.getFullYear());
+    const hora =
+      String(d.getHours()).padStart(2, '0') + ':' +
+      String(d.getMinutes()).padStart(2, '0') + ':' +
+      String(d.getSeconds()).padStart(2, '0');
+    return { data, hora };
+  } catch {
+    return { data: valor, hora: '' };
+  }
+}
+
+function gerarLinhasContestacaoV2(pontos: HistoricoM7ContestacaoPontoDto[]): string {
+  if (pontos.length === 0) {
+    return `<tr><td colspan="6" style="text-align:center;color:#6b7280;font-style:italic;padding:20px;">Nenhum ponto encontrado para o período informado.</td></tr>`;
+  }
+
+  return pontos
+    .map((ponto, indice) => {
+      const bgStyle = indice % 2 !== 0 ? 'background:#f9fafb;' : '';
+      const { data, hora } = formatarDataHoraContestacao(ponto.dataGps);
+      const vel = Number(ponto.velocidade ?? 0);
+      const velStyle = vel > 0 ? 'font-weight:600;' : '';
+      return `
+        <tr style="${bgStyle}">
+          <td>${escapeHtml(data)}</td>
+          <td>${escapeHtml(hora)}</td>
+          <td style="${velStyle}">${escapeHtml(String(vel))} km/h</td>
+          <td class="addr">${escapeHtml(ponto.endereco || '—')}</td>
+          <td style="font-family:monospace;font-size:9px;">${escapeHtml(ponto.latitude || '—')}</td>
+          <td style="font-family:monospace;font-size:9px;">${escapeHtml(ponto.longitude || '—')}</td>
+        </tr>
+      `;
+    })
+    .join('');
+}
+
+function gerarHtmlRelatorioContestacaoV2(
+  dados: HistoricoM7ContestacaoPdfDataDto,
+): string {
+  const { veiculo, periodo, pontos } = dados;
+  const agora = new Date();
+  const dataGeracao = formatarDataHora(agora.toISOString());
+
+  const logoTag = LOGO_BASE64
+    ? `<img src="data:image/png;base64,${LOGO_BASE64}" alt="Logo" style="height:44px;object-fit:contain;"/>`
+    : '';
+
+  return `
+    <!DOCTYPE html>
+    <html lang="pt-BR">
+    <head>
+      <meta charset="UTF-8" />
+      <title>Relatório de Contestação de Multa — ${escapeHtml(veiculo.placa)}</title>
+      <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+          font-family: Arial, Helvetica, sans-serif;
+          font-size: 10px;
+          color: #1f2937;
+          padding: 22px;
+        }
+        .header {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          border-bottom: 2px solid #FF0000;
+          padding-bottom: 12px;
+          margin-bottom: 14px;
+        }
+        .header-left { display: flex; align-items: center; gap: 14px; }
+        .header h1 { font-size: 17px; color: #101010; }
+        .header .sub { color: #6b7280; margin-top: 3px; font-size: 10px; }
+        .header .meta-right { text-align: right; font-size: 9px; color: #6b7280; }
+        .info-grid {
+          display: grid;
+          grid-template-columns: repeat(4, 1fr);
+          gap: 8px;
+          margin-bottom: 14px;
+        }
+        .info-card {
+          background: #f3f4f6;
+          border-left: 3px solid #FF0000;
+          border-radius: 0 6px 6px 0;
+          padding: 8px 12px;
+        }
+        .info-card label {
+          font-size: 9px;
+          color: #6b7280;
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+          display: block;
+          margin-bottom: 3px;
+        }
+        .info-card span { font-size: 12px; font-weight: 700; color: #111827; }
+        .aviso {
+          background: #fffbeb;
+          border: 1px solid #fcd34d;
+          border-radius: 6px;
+          padding: 8px 12px;
+          font-size: 9px;
+          color: #92400e;
+          margin-bottom: 12px;
+        }
+        table { width: 100%; border-collapse: collapse; font-size: 9px; }
+        th {
+          background: #101010;
+          color: #fff;
+          padding: 7px 8px;
+          text-align: left;
+          font-weight: 600;
+          white-space: nowrap;
+        }
+        td { border: 1px solid #e5e7eb; padding: 5px 7px; vertical-align: top; }
+        .addr { max-width: 220px; word-break: break-word; }
+        .footer {
+          margin-top: 12px;
+          text-align: center;
+          font-size: 8px;
+          color: #9ca3af;
+          border-top: 1px solid #e5e7eb;
+          padding-top: 6px;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="header">
+        <div class="header-left">
+          ${logoTag}
+          <div>
+            <h1>Relatório de Contestação de Multa</h1>
+            <p class="sub">Pontos GPS completos com geocode — para análise de infração</p>
+          </div>
+        </div>
+        <div class="meta-right">
+          <p>Gerado em: ${escapeHtml(dataGeracao)}</p>
+          <p style="margin-top:3px;">Total de pontos: <strong>${pontos.length}</strong></p>
+        </div>
+      </div>
+
+      <div class="info-grid">
+        <div class="info-card">
+          <label>Placa</label>
+          <span>${escapeHtml(veiculo.placa)}</span>
+        </div>
+        <div class="info-card">
+          <label>Chassi</label>
+          <span>${escapeHtml(veiculo.chassi)}</span>
+        </div>
+        <div class="info-card">
+          <label>Período Inicial</label>
+          <span>${escapeHtml(formatarDataBR(periodo.dataInicial))}</span>
+        </div>
+        <div class="info-card">
+          <label>Período Final</label>
+          <span>${escapeHtml(formatarDataBR(periodo.dataFinal))}</span>
+        </div>
+      </div>
+
+      <div class="aviso">
+        ⚠ Este relatório contém <strong>todos os pontos GPS</strong> registrados pelo rastreador no período,
+        com velocidade instantânea e endereço obtido por geocodificação reversa.
+        Os dados são provenientes da plataforma M7 e destinam-se exclusivamente à contestação de infrações de trânsito.
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Data</th>
+            <th>Hora</th>
+            <th>Velocidade</th>
+            <th>Endereço</th>
+            <th>Latitude</th>
+            <th>Longitude</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${gerarLinhasContestacaoV2(pontos)}
+        </tbody>
+      </table>
+
+      <div class="footer">
+        Relatório gerado pelo sistema Mais Prime — ${escapeHtml(dataGeracao)}
+      </div>
+    </body>
+    </html>
+  `;
+}
+
+function gerarLinhasContestacao(pontos: HistoricoM7ContestacaoPontoDto[]): string {
+  if (pontos.length === 0) {
+    return `<tr><td colspan="6" style="text-align:center;color:#6b7280;font-style:italic;padding:20px;">Nenhum ponto encontrado para o período informado.</td></tr>`;
+  }
+
+  return pontos
+    .map((ponto, indice) => {
+      const bgStyle = indice % 2 !== 0 ? 'background:#f9fafb;' : '';
+      return `
+        <tr style="${bgStyle}">
+          <td>${escapeHtml(ponto.placa || '—')}</td>
+          <td>${escapeHtml(ponto.dataGps || '—')}</td>
+          <td>${escapeHtml(String(ponto.velocidade ?? 0))}</td>
+          <td class="addr">${escapeHtml(ponto.endereco || '—')}</td>
+          <td>${escapeHtml(ponto.latitude || '—')}</td>
+          <td>${escapeHtml(ponto.longitude || '—')}</td>
+        </tr>
+      `;
+    })
+    .join('');
+}
+
+function gerarHtmlRelatorioContestacao(
+  dados: HistoricoM7ContestacaoPdfDataDto,
+): string {
+  const { pontos } = dados;
+  const logoTag = LOGO_BASE64
+    ? `<img src="data:image/png;base64,${LOGO_BASE64}" alt="Logo" style="height:44px;object-fit:contain;"/>`
+    : '';
+
+  return `
+    <!DOCTYPE html>
+    <html lang="pt-BR">
+    <head>
+      <meta charset="UTF-8" />
+      <title>Relatório de Contestação de Multa</title>
+      <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+          font-family: Arial, Helvetica, sans-serif;
+          font-size: 10px;
+          color: #1f2937;
+          padding: 22px;
+        }
+        .header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          border-bottom: 2px solid #FF0000;
+          padding-bottom: 10px;
+          margin-bottom: 14px;
+        }
+        .header-left { display: flex; align-items: center; gap: 14px; }
+        .header h1 { font-size: 17px; color: #101010; }
+        .header p { color: #6b7280; margin-top: 3px; }
+        table { width: 100%; border-collapse: collapse; font-size: 9px; }
+        th {
+          background: #101010;
+          color: #fff;
+          padding: 7px 8px;
+          text-align: left;
+          font-weight: 600;
+          white-space: nowrap;
+        }
+        td { border: 1px solid #e5e7eb; padding: 6px 8px; vertical-align: top; }
+        .addr { max-width: 240px; word-break: break-word; }
+      </style>
+    </head>
+    <body>
+      <div class="header">
+        <div class="header-left">
+          ${logoTag}
+          <div>
+            <h1>Relatório de Contestação de Multa</h1>
+            <p>Histórico M7 com reverse geocode para análise de infração</p>
+          </div>
+        </div>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Placa</th>
+            <th>Data GPS</th>
+            <th>Velocidade</th>
+            <th>Endereço</th>
+            <th>Latitude</th>
+            <th>Longitude</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${gerarLinhasContestacao(pontos)}
+        </tbody>
+      </table>
     </body>
     </html>
   `;
@@ -499,6 +819,88 @@ export class HistoricoPdfM7Service {
         `Erro ao gerar PDF M7: ${error instanceof Error ? error.message : JSON.stringify(error)}`,
       );
       throw new InternalServerErrorException('Erro ao gerar PDF de histórico M7');
+    } finally {
+      await browser.close();
+    }
+  }
+
+  async gerarPdfContestacao(
+    dados: HistoricoM7ContestacaoPdfDataDto,
+  ): Promise<Buffer> {
+    const browser = await puppeteer.launch({
+      headless: true,
+      ...(process.env.PUPPETEER_EXECUTABLE_PATH && {
+        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
+      }),
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+      ],
+    });
+
+    try {
+      const page = await browser.newPage();
+      const html = gerarHtmlRelatorioContestacao(dados);
+      await page.setContent(html, { waitUntil: 'networkidle0' });
+
+      const pdf = await page.pdf({
+        format: 'A4',
+        landscape: true,
+        printBackground: true,
+        margin: { top: '18px', right: '14px', bottom: '18px', left: '14px' },
+      });
+
+      return Buffer.from(pdf);
+    } catch (error) {
+      this.logger.error(
+        `Erro ao gerar PDF M7 de contestação: ${error instanceof Error ? error.message : JSON.stringify(error)}`,
+      );
+      throw new InternalServerErrorException(
+        'Erro ao gerar PDF de contestação M7',
+      );
+    } finally {
+      await browser.close();
+    }
+  }
+
+  async gerarPdfContestacaoV2(
+    dados: HistoricoM7ContestacaoPdfDataDto,
+  ): Promise<Buffer> {
+    const browser = await puppeteer.launch({
+      headless: true,
+      ...(process.env.PUPPETEER_EXECUTABLE_PATH && {
+        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
+      }),
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+      ],
+    });
+
+    try {
+      const page = await browser.newPage();
+      const html = gerarHtmlRelatorioContestacaoV2(dados);
+      await page.setContent(html, { waitUntil: 'networkidle0' });
+
+      const pdf = await page.pdf({
+        format: 'A4',
+        landscape: true,
+        printBackground: true,
+        margin: { top: '18px', right: '14px', bottom: '18px', left: '14px' },
+      });
+
+      return Buffer.from(pdf);
+    } catch (error) {
+      this.logger.error(
+        `Erro ao gerar PDF M7 de contestação v2: ${error instanceof Error ? error.message : JSON.stringify(error)}`,
+      );
+      throw new InternalServerErrorException(
+        'Erro ao gerar PDF de contestação M7 v2',
+      );
     } finally {
       await browser.close();
     }

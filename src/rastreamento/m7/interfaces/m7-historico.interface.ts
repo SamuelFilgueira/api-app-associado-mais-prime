@@ -14,6 +14,19 @@ export interface M7ConsultaVeiculoResponse {
   };
 }
 
+
+export interface M7ConsultaMonitoradoResponse{
+  monitorados: [ { 
+    codigo: number;
+    identificador: string;
+    data_gps: string;
+    data_sistema: string;
+    latitude: number | string;
+    longitude: number | string;
+    endereco: string;
+  } ]
+}
+
 /** Item bruto retornado pelo GET /api/monitorado/{codigo}/trajetos */
 export interface M7TrajetoRaw {
   id?: number | string;
@@ -34,10 +47,12 @@ export interface M7PontoHistoricoRaw {
   identificador?: string;
   monitorado?: number;
   data_gps?: string;
+  data_sistema?: string;
   cidade?: string;
   latitude?: number | string;
   longitude?: number | string;
   velocidade?: number | string;
+  odometro?: number | string;
   ignicao?: boolean | number | string;
   tensao?: string;
   bateria?: string;

@@ -88,7 +88,7 @@ export class RastreamentoService {
           evento,
           tipoevento,
           provider: 'M7',
-          payload: payload as Prisma.InputJsonValue,
+          payload: JSON.stringify(payload),
         },
       });
     } catch (err) {

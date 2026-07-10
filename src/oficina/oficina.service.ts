@@ -55,10 +55,12 @@ export class OficinaService {
       );
     }
 
-    const payload: CreateWorkshopDto & {
+    const { services, ...workshopData } = data;
+    const payload: Omit<CreateWorkshopDto, 'services'> & {
+      services?: string;
       latitude?: number;
       longitude?: number;
-    } = { ...data };
+    } = { ...workshopData };
 
     if (typeof payload.cep === 'string') {
       payload.cep = this.normalizeCep(payload.cep);
@@ -67,8 +69,8 @@ export class OficinaService {
     // Normalizar telefones com prefixo +55
     this.normalizePhoneNumbers(payload);
 
-    if (Array.isArray(payload.services)) {
-      payload.services = this.normalizeServices(payload.services);
+    if (Array.isArray(services)) {
+      payload.services = this.serializeServices(services);
     }
 
     if (files?.photoFront) {
@@ -140,10 +142,12 @@ export class OficinaService {
       }
     }
 
-    const payload: Omit<UpdateWorkshopDto, 'id'> & {
+    const { services, ...workshopData } = data;
+    const payload: Omit<UpdateWorkshopDto, 'id' | 'services'> & {
+      services?: string;
       latitude?: number;
       longitude?: number;
-    } = { ...data };
+    } = { ...workshopData };
 
     if (typeof payload.cep === 'string') {
       payload.cep = this.normalizeCep(payload.cep);
@@ -152,8 +156,8 @@ export class OficinaService {
     // Normalizar telefones com prefixo +55
     this.normalizePhoneNumbers(payload);
 
-    if (Array.isArray(payload.services)) {
-      payload.services = this.normalizeServices(payload.services);
+    if (Array.isArray(services)) {
+      payload.services = this.serializeServices(services);
     }
 
     if (files?.photoFront) {
@@ -316,12 +320,24 @@ export class OficinaService {
   }
 
   private normalizeServices(services: unknown): string[] {
+    if (typeof services === 'string' && services.trim()) {
+      try {
+        return this.normalizeServices(JSON.parse(services));
+      } catch {
+        return [];
+      }
+    }
+
     if (!Array.isArray(services)) return [];
 
     return services
       .filter((service): service is string => typeof service === 'string')
       .map((service) => service.trim())
       .filter((service) => service.length > 0);
+  }
+
+  private serializeServices(services: unknown): string {
+    return JSON.stringify(this.normalizeServices(services));
   }
 
   private normalizeCep(cep: string): string {

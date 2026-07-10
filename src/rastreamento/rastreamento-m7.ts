@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Injectable,
   InternalServerErrorException,
   Logger,
@@ -250,8 +251,9 @@ export class RastreamentoM7 implements IRastreamentoProvider, OnModuleInit, OnMo
       }
 
       if (axios.isAxiosError(error)) {
+        const responseBody = error.response?.data;
         this.logger.error(
-          `[${baseOrigin}] Erro HTTP ${error.response?.status ?? 'sem resposta'}`,
+          `[${baseOrigin}] Erro HTTP ${error.response?.status ?? 'sem resposta'} | url=${error.config?.url ?? 'N/A'} | body=${JSON.stringify(responseBody ?? null)}`,
         );
       }
 
@@ -371,8 +373,14 @@ export class RastreamentoM7 implements IRastreamentoProvider, OnModuleInit, OnMo
       return await this._enviarComandoVeiculo(cnpj, chassi, ancoraAtiva, evtIgn, baseOrigin);
     } catch (error) {
       if (error instanceof InternalServerErrorException) throw error;
+      const upstreamMessage = this.extractM7ErrorMessage(error);
+
+      if (axios.isAxiosError(error) && error.response?.status === 404 && upstreamMessage) {
+        throw new BadRequestException(`M7 rejeitou atualização da âncora: ${upstreamMessage}`);
+      }
+
       this.logger.error(
-        `[${baseOrigin}] ancoraM7 ERRO: ${error instanceof Error ? error.message : JSON.stringify(error)}`,
+        `[${baseOrigin}] ancoraM7 ERRO: ${error instanceof Error ? error.message : JSON.stringify(error)}${upstreamMessage ? ` | upstream=${upstreamMessage}` : ''}`,
       );
       throw new InternalServerErrorException('Erro ao atualizar âncora');
     }
@@ -393,11 +401,40 @@ export class RastreamentoM7 implements IRastreamentoProvider, OnModuleInit, OnMo
       return await this._enviarComandoVeiculo(cnpj, chassi, ancoraAtiva, evtIgn, baseOrigin);
     } catch (error) {
       if (error instanceof InternalServerErrorException) throw error;
+      const upstreamMessage = this.extractM7ErrorMessage(error);
+
+      if (axios.isAxiosError(error) && error.response?.status === 404 && upstreamMessage) {
+        throw new BadRequestException(`M7 rejeitou atualização da ignição: ${upstreamMessage}`);
+      }
+
       this.logger.error(
-        `[${baseOrigin}] ignicaoM7 ERRO: ${error instanceof Error ? error.message : JSON.stringify(error)}`,
+        `[${baseOrigin}] ignicaoM7 ERRO: ${error instanceof Error ? error.message : JSON.stringify(error)}${upstreamMessage ? ` | upstream=${upstreamMessage}` : ''}`,
       );
       throw new InternalServerErrorException('Erro ao atualizar ignição');
     }
+  }
+
+  private extractM7ErrorMessage(error: unknown): string | null {
+    if (!axios.isAxiosError(error)) {
+      return null;
+    }
+
+    const data = error.response?.data;
+    if (!data || typeof data !== 'object') {
+      return null;
+    }
+
+    const erro = (data as Record<string, unknown>).erro;
+    if (typeof erro === 'string' && erro.trim().length > 0) {
+      return erro.trim();
+    }
+
+    const mensagem = (data as Record<string, unknown>).mensagem;
+    if (typeof mensagem === 'string' && mensagem.trim().length > 0) {
+      return mensagem.trim();
+    }
+
+    return null;
   }
 
   // -------------------------------------------------------------------------

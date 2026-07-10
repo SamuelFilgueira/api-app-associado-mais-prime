@@ -28,6 +28,7 @@ import { ReinspectionModule } from './reinspection/reinspection.module';
 import { SliderModule } from './slider/slider.module';
 import { AdminPanelModule } from './admin-panel/admin-panel.module';
 import { FuelSessionModule } from './fuel-session/fuel-session.module';
+import { AnalyticsModule } from './analytics/analytics.module';
 
 @Module({
   imports: [
@@ -48,6 +49,7 @@ import { FuelSessionModule } from './fuel-session/fuel-session.module';
     SliderModule,
     AdminPanelModule,
     FuelSessionModule,
+    AnalyticsModule,
   ],
   controllers: [
     AppController,

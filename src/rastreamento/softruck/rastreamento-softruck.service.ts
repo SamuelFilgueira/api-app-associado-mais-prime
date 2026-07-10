@@ -131,6 +131,31 @@ export class RastreamentoSoftruck {
     return `${serialized.slice(0, RastreamentoSoftruck.MAX_LOG_PAYLOAD_LENGTH)}... [truncated ${serialized.length - RastreamentoSoftruck.MAX_LOG_PAYLOAD_LENGTH} chars]`;
   }
 
+  private logExternalRequest(
+    baseOrigin: BaseOrigin,
+    method: 'GET' | 'POST',
+    url: string,
+    payload?: unknown,
+  ): void {
+    const payloadLabel = method === 'GET' ? 'params' : 'body';
+    const details = payload
+      ? ` | ${payloadLabel}: ${this.stringifyForLog(payload)}`
+      : '';
+    this.logger.debug(`[${baseOrigin}] Softruck → ${method} ${url}${details}`);
+  }
+
+  private logExternalResponse(
+    baseOrigin: BaseOrigin,
+    method: 'GET' | 'POST',
+    url: string,
+    status: number,
+    data: unknown,
+  ): void {
+    this.logger.debug(
+      `[${baseOrigin}] Softruck ← ${method} ${url} | status=${status} | response: ${this.stringifyForLog(data)}`,
+    );
+  }
+
   private buildSoftruckUrl(path: string): string {
     const baseUrl = process.env.SOFTRUCK_API_BASE_URL;
 
@@ -279,9 +304,11 @@ export class RastreamentoSoftruck {
     }
 
     const loginUrl = this.buildSoftruckUrl('/auth/login');
+    const loginPayload = { username, password: '***' };
     this.logger.log(
       `[${baseOrigin}] Iniciando autenticação Softruck com public-key=${this.maskSecret(publicKey)}`,
     );
+    this.logExternalRequest(baseOrigin, 'POST', loginUrl, loginPayload);
 
     try {
       const response = await this.axiosInstance.post<{
@@ -300,8 +327,12 @@ export class RastreamentoSoftruck {
         },
       );
 
-      this.logger.debug(
-        `[LOGIN] Resposta HTTP ${response.status}: ${JSON.stringify(response.data)}`,
+      this.logExternalResponse(
+        baseOrigin,
+        'POST',
+        loginUrl,
+        response.status,
+        response.data,
       );
 
       const token = response.data?.data?.token;
@@ -378,22 +409,27 @@ export class RastreamentoSoftruck {
     }
 
     try {
+      const url = this.buildSoftruckUrl('/vehicles');
+      const params = { search: chassi };
+      this.logExternalRequest(baseOrigin, 'GET', url, params);
+
       const response = await this.executarComReautenticacao(
         () =>
-          this.axiosInstance.get<SoftruckVehicleResponse>(
-            this.buildSoftruckUrl('/vehicles'),
-            {
-              params: { search: chassi },
-              headers: this.getRequestHeaders(baseOrigin, publicKey, tokenOverride),
-              timeout: SOFTRUCK_REQUEST_TIMEOUT,
-            },
-          ),
+          this.axiosInstance.get<SoftruckVehicleResponse>(url, {
+            params,
+            headers: this.getRequestHeaders(baseOrigin, publicKey, tokenOverride),
+            timeout: SOFTRUCK_REQUEST_TIMEOUT,
+          }),
         baseOrigin,
         publicKey,
       );
 
-      this.logger.debug(
-        `[${baseOrigin}] Softruck /vehicles response status=${response.status} chassi=${chassi} body=${this.stringifyForLog(response.data)}`,
+      this.logExternalResponse(
+        baseOrigin,
+        'GET',
+        url,
+        response.status,
+        response.data,
       );
 
       if (!response.data?.data?.length) {
@@ -432,21 +468,27 @@ export class RastreamentoSoftruck {
     tokenOverride?: string,
   ): Promise<{ vehicleId: string; deviceId: string }> {
     try {
+      const url = this.buildSoftruckUrl(
+        `/vehicles/${vehicleId}/associations/devices`,
+      );
+      this.logExternalRequest(baseOrigin, 'GET', url);
+
       const response = await this.executarComReautenticacao(
         () =>
-          this.axiosInstance.get<SoftruckDeviceAssociationResponse>(
-            this.buildSoftruckUrl(`/vehicles/${vehicleId}/associations/devices`),
-            {
-              headers: this.getRequestHeaders(baseOrigin, publicKey, tokenOverride),
-              timeout: SOFTRUCK_REQUEST_TIMEOUT,
-            },
-          ),
+          this.axiosInstance.get<SoftruckDeviceAssociationResponse>(url, {
+            headers: this.getRequestHeaders(baseOrigin, publicKey, tokenOverride),
+            timeout: SOFTRUCK_REQUEST_TIMEOUT,
+          }),
         baseOrigin,
         publicKey,
       );
 
-      this.logger.debug(
-        `[${baseOrigin}] Softruck /vehicles/${vehicleId}/associations/devices response status=${response.status} body=${this.stringifyForLog(response.data)}`,
+      this.logExternalResponse(
+        baseOrigin,
+        'GET',
+        url,
+        response.status,
+        response.data,
       );
 
       if (!response.data?.data?.length) {
@@ -578,25 +620,30 @@ export class RastreamentoSoftruck {
     publicKey: string,
   ): Promise<SoftruckByKeysApiResponse | null> {
     try {
+      const url = this.buildSoftruckUrl(`/vehicles/${vehicleId}/trajectories/by-keys`);
+      const params = {
+        'filters[acc][eq]': acc,
+        'filters[did][eq]': deviceId,
+      };
+      this.logExternalRequest(baseOrigin, 'GET', url, params);
+
       const response = await this.executarComReautenticacao(
         () =>
-          this.axiosInstance.get<SoftruckByKeysApiResponse>(
-            this.buildSoftruckUrl(`/vehicles/${vehicleId}/trajectories/by-keys`),
-            {
-              params: {
-                'filters[acc][eq]': acc,
-                'filters[did][eq]': deviceId,
-              },
-              headers: this.getRequestHeaders(baseOrigin, publicKey),
-              timeout: SOFTRUCK_REQUEST_TIMEOUT,
-            },
-          ),
+          this.axiosInstance.get<SoftruckByKeysApiResponse>(url, {
+            params,
+            headers: this.getRequestHeaders(baseOrigin, publicKey),
+            timeout: SOFTRUCK_REQUEST_TIMEOUT,
+          }),
         baseOrigin,
         publicKey,
       );
 
-      this.logger.debug(
-        `[${baseOrigin}] by-keys vehicle=${vehicleId} acc=${acc} status=${response.status}`,
+      this.logExternalResponse(
+        baseOrigin,
+        'GET',
+        url,
+        response.status,
+        response.data,
       );
 
       return response.data ?? null;
@@ -619,26 +666,31 @@ export class RastreamentoSoftruck {
     publicKey: string,
   ): Promise<SoftruckGeomFeatureCollection | null> {
     try {
+      const url = this.buildSoftruckUrl(`/vehicles/${vehicleId}/trajectories/geom`);
+      const params = {
+        'filters[acc][eq]': acc,
+        'filters[did][eq]': deviceId,
+        'filters[eid][eq]': enterpriseId,
+      };
+      this.logExternalRequest(baseOrigin, 'GET', url, params);
+
       const response = await this.executarComReautenticacao(
         () =>
-          this.axiosInstance.get<{ data: SoftruckGeomFeatureCollection }>(
-            this.buildSoftruckUrl(`/vehicles/${vehicleId}/trajectories/geom`),
-            {
-              params: {
-                'filters[acc][eq]': acc,
-                'filters[did][eq]': deviceId,
-                'filters[eid][eq]': enterpriseId,
-              },
-              headers: this.getRequestHeaders(baseOrigin, publicKey),
-              timeout: SOFTRUCK_REQUEST_TIMEOUT,
-            },
-          ),
+          this.axiosInstance.get<{ data: SoftruckGeomFeatureCollection }>(url, {
+            params,
+            headers: this.getRequestHeaders(baseOrigin, publicKey),
+            timeout: SOFTRUCK_REQUEST_TIMEOUT,
+          }),
         baseOrigin,
         publicKey,
       );
 
-      this.logger.debug(
-        `[${baseOrigin}] geom vehicle=${vehicleId} acc=${acc} status=${response.status}`,
+      this.logExternalResponse(
+        baseOrigin,
+        'GET',
+        url,
+        response.status,
+        response.data,
       );
 
       return response.data?.data ?? null;

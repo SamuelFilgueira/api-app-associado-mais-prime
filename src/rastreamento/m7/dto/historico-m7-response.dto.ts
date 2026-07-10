@@ -16,6 +16,21 @@ export interface HistoricoM7PdfDataDto {
   dias: DiaM7ResumoDto[];
 }
 
+export interface HistoricoM7ContestacaoPontoDto {
+  placa: string;
+  dataGps: string;
+  velocidade: number;
+  endereco: string;
+  latitude: string;
+  longitude: string;
+}
+
+export interface HistoricoM7ContestacaoPdfDataDto {
+  veiculo: VeiculoM7InfoDto;
+  periodo: PeriodoM7Dto;
+  pontos: HistoricoM7ContestacaoPontoDto[];
+}
+
 export interface HistoricoM7RotasPontoDto {
   latitude: number;
   longitude: number;
@@ -50,6 +65,8 @@ export interface ViagemM7Dto {
   chegada: string;
   distanciaKm: number;
   tempoMovimento: string;
+  tempoParado?: string;
+  tempoTotal?: string;
   velocidadeMaxima: number;
 }
 

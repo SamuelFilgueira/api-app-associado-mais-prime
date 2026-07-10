@@ -103,6 +103,10 @@ export class RastreamentoController {
   ) {
     const ctx = this.buildRastreamentoContext();
 
+    this.logger.log(
+      `[${ctx.baseOrigin}] gerarRelatorioHistoricoSoftruckPDF solicitado | chassi=${query.chassi} dataInicial=${query.dataInicial} dataFinal=${query.dataFinal}`,
+    );
+
     const pdfBuffer = await this.rastreamentoService.gerarRelatorioHistoricoSoftruckPDF(
       query.chassi,
       query.dataInicial,

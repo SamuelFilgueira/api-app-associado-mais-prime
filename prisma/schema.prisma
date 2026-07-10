@@ -1,4 +1,3 @@
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -8,44 +7,61 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum UserRole {
-  USER
-  ADMIN
-}
-
-enum AdminPanelRole {
-  REVISTORIA
-  EVENTOS
-  MARKETING
-  COBRANCA
-}
-
 model user {
-  id               Int            @id @default(autoincrement())
-  name             String
-  cpf              String         @unique(map: "User_cpf_key")
-  email            String         @unique(map: "User_email_key")
-  baseOrigin UserBaseOrigin?
-  passwordHash     String
-  expoPushToken    String?        @db.VarChar(255)
-  cep              String?
-  address          String?
-  plate            String?
-  primeiroLogin    Boolean        @default(false)
+  id                            Int             @id @default(autoincrement())
+  name                          String
+  cpf                           String          @unique(map: "User_cpf_key")
+  email                         String          @unique(map: "User_email_key")
+  passwordHash                  String
+  isActive                      Boolean         @default(true)
+  createdAt                     DateTime        @default(now())
+  updatedAt                     DateTime        @updatedAt
+  latitude                      Float?
+  longitude                     Float?
+  primeiroLogin                 Boolean         @default(false)
+  profilePhotoUrl               String?
+  address                       String?
+  cep                           String?
+  plate                         String?
+  acceptsMarketingNotifications Boolean         @default(true)
+  notificacaoIgnicao            Boolean         @default(false)
+  role                          UserRole        @default(USER)
+  ancoraAtiva                   Boolean         @default(false)
+  expoPushToken                 String?         @db.VarChar(255)
+  baseOrigin                    UserBaseOrigin?
+  totalEconomizado              Float           @default(0)
+  notifications                 Notification[]
+  userVehicles                  UserVehicle[]
+  fuelSessions                  FuelSession[]
+}
+
+model workshop {
+  id               Int               @id @default(autoincrement())
+  name             String            @db.VarChar(150)
+  email            String?           @db.VarChar(150)
+  shortDescription String            @db.VarChar(100)
+  phone            String
+  phoneSecondary   String?
+  whatsapp         String?
+  description      String            @db.VarChar(400)
+  isActive         Boolean           @default(true)
+  featuredInApp    Boolean           @default(false)
   latitude         Float?
   longitude        Float?
-  profilePhotoUrl  String?
-  isActive         Boolean        @default(true)
-  acceptsMarketingNotifications Boolean @default(true)
-  notificacaoIgnicao Boolean @default(false)
-  ancoraAtiva      Boolean        @default(false)
-  totalEconomizado Float          @default(0)
-  role             UserRole       @default(USER)
-  createdAt        DateTime       @default(now())
-  updatedAt        DateTime
-  notifications    Notification[]
-  userVehicles     UserVehicle[]
-  fuelSessions     FuelSession[]
+  cep              String
+  address          String
+  district         String
+  number           String
+  complement       String?
+  city             String
+  state            State
+  mapFrameUrl      String?
+  photoFrontUrl    String?
+  photoBackUrl     String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  services         Json?
+  specialty        WorkshopSpecialty @default(CARRO)
 }
 
 model AdminPanelUser {
@@ -60,58 +76,242 @@ model AdminPanelUser {
   @@index([role], map: "AdminPanelUser_role_idx")
 }
 
-// model BaseOrigin {
-//   id Int @id @default(autoincrement())
-//   nameOrigin UserBaseOrigin 
-//   userId             Int
-//   user               user     @relation(fields: [userId], references: [id], onDelete: Cascade)
-//   createdAt DateTime @default(now())
-// }
+model AnalyticsActionDaily {
+  id         Int      @id @default(autoincrement())
+  day        DateTime @db.Date
+  platform   String   @db.VarChar(10)
+  appVersion String   @db.VarChar(20)
+  action     String   @db.VarChar(60)
+  count      Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
-enum UserBaseOrigin {
-  MAIS_PRIME
-  MAIS_PRIME_RS
+  @@unique([day, platform, appVersion, action], map: "AnalyticsActionDaily_composite_key")
+  @@index([appVersion], map: "AnalyticsActionDaily_appVersion_idx")
+  @@index([day], map: "AnalyticsActionDaily_day_idx")
+  @@index([platform], map: "AnalyticsActionDaily_platform_idx")
+}
+
+model AnalyticsDailyUniqueInstall {
+  id          Int      @id @default(autoincrement())
+  day         DateTime @db.Date
+  platform    String   @db.VarChar(10)
+  appVersion  String   @db.VarChar(20)
+  installHash String   @db.VarChar(64)
+  createdAt   DateTime @default(now())
+
+  @@unique([day, platform, appVersion, installHash], map: "AnalyticsDailyUniqueInstall_unique_key")
+  @@index([day], map: "AnalyticsDailyUniqueInstall_day_idx")
+}
+
+model AnalyticsDailyUniqueSession {
+  id          Int      @id @default(autoincrement())
+  day         DateTime @db.Date
+  platform    String   @db.VarChar(10)
+  appVersion  String   @db.VarChar(20)
+  sessionHash String   @db.VarChar(64)
+  createdAt   DateTime @default(now())
+
+  @@unique([day, platform, appVersion, sessionHash], map: "AnalyticsDailyUniqueSession_unique_key")
+  @@index([day], map: "AnalyticsDailyUniqueSession_day_idx")
+}
+
+model AnalyticsFormDaily {
+  id             Int      @id @default(autoincrement())
+  day            DateTime @db.Date
+  platform       String   @db.VarChar(10)
+  appVersion     String   @db.VarChar(20)
+  screen         String   @db.VarChar(60)
+  form           String   @db.VarChar(60)
+  startedCount   Int      @default(0)
+  submittedCount Int      @default(0)
+  successCount   Int      @default(0)
+  errorCount     Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([day, platform, appVersion, screen, form], map: "AnalyticsFormDaily_composite_key")
+  @@index([appVersion], map: "AnalyticsFormDaily_appVersion_idx")
+  @@index([day], map: "AnalyticsFormDaily_day_idx")
+  @@index([platform], map: "AnalyticsFormDaily_platform_idx")
+}
+
+model AnalyticsScreenDaily {
+  id          Int      @id @default(autoincrement())
+  day         DateTime @db.Date
+  platform    String   @db.VarChar(10)
+  appVersion  String   @db.VarChar(20)
+  screen      String   @db.VarChar(60)
+  viewCount   Int      @default(0)
+  totalTimeMs Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([day, platform, appVersion, screen], map: "AnalyticsScreenDaily_composite_key")
+  @@index([appVersion], map: "AnalyticsScreenDaily_appVersion_idx")
+  @@index([day], map: "AnalyticsScreenDaily_day_idx")
+  @@index([platform], map: "AnalyticsScreenDaily_platform_idx")
+}
+
+model AnalyticsSessionDaily {
+  id            Int      @id @default(autoincrement())
+  day           DateTime @db.Date
+  platform      String   @db.VarChar(10)
+  appVersion    String   @db.VarChar(20)
+  sessionsCount Int      @default(0)
+  installsCount Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([day, platform, appVersion], map: "AnalyticsSessionDaily_composite_key")
+  @@index([day], map: "AnalyticsSessionDaily_day_idx")
+}
+
+model AnalyticsSummaryReceipt {
+  id                   Int      @id @default(autoincrement())
+  receivedAt           DateTime @default(now())
+  periodStart          DateTime
+  periodEnd            DateTime
+  platform             String   @db.VarChar(10)
+  appVersion           String   @db.VarChar(20)
+  runtimeVersion       String?  @db.VarChar(20)
+  installHash          String   @db.VarChar(64)
+  sessionHash          String   @db.VarChar(64)
+  acceptedScreensCount Int      @default(0)
+  acceptedActionsCount Int      @default(0)
+  acceptedFormsCount   Int      @default(0)
+  discardedItemsCount  Int      @default(0)
+  validationStatus     String   @db.VarChar(20)
+  payloadHash          String   @db.VarChar(64)
+  createdAt            DateTime @default(now())
+  analyticsUserId      Int?
+
+  @@index([appVersion], map: "AnalyticsSummaryReceipt_appVersion_idx")
+  @@index([payloadHash], map: "AnalyticsSummaryReceipt_payloadHash_idx")
+  @@index([periodStart], map: "AnalyticsSummaryReceipt_periodStart_idx")
+  @@index([platform], map: "AnalyticsSummaryReceipt_platform_idx")
+  @@index([receivedAt], map: "AnalyticsSummaryReceipt_receivedAt_idx")
+}
+
+model Document {
+  id               Int          @id @default(autoincrement())
+  description      String       @db.VarChar(255)
+  documentUrl      String       @db.VarChar(500)
+  type             DocumentType
+  visibleConsultor Boolean      @default(false)
+  visibleAssociado Boolean      @default(false)
+  visibleBoth      Boolean      @default(false)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+}
+
+model FuelSession {
+  id          String   @id @default(uuid())
+  userId      Int
+  valorAntes  Float
+  valorDepois Float?
+  diferenca   Float?
+  status      String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  user        user     @relation(fields: [userId], references: [id], onDelete: Cascade, map: "FuelSession_userId_fkey")
+
+  @@index([userId, status], map: "FuelSession_userId_status_idx")
+}
+
+model Notification {
+  id            Int       @id @default(autoincrement())
+  userId        Int
+  expoPushToken String    @db.VarChar(255)
+  title         String    @db.VarChar(255)
+  body          String    @db.Text
+  data          Json
+  read          Boolean   @default(false)
+  sentAt        DateTime  @default(now())
+  readAt        DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  deleted       Boolean   @default(false)
+  user          user      @relation(fields: [userId], references: [id], onDelete: Cascade, map: "Notification_userId_fkey")
+
+  @@index([createdAt], map: "Notification_createdAt_idx")
+  @@index([sentAt], map: "Notification_sentAt_idx")
+  @@index([userId, read], map: "Notification_userId_read_idx")
+}
+
+model Reinspection {
+  id            Int                     @id @default(autoincrement())
+  userVehicleId Int
+  vehicleType   ReinspectionVehicleType
+  status        ReinspectionStatus      @default(PENDENTE)
+  createdAt     DateTime                @default(now())
+  updatedAt     DateTime                @updatedAt
+  codigoVeiculo Int?
+  userVehicle   UserVehicle             @relation(fields: [userVehicleId], references: [id], onDelete: Cascade, map: "Reinspection_userVehicleId_fkey")
+  photos        ReinspectionPhoto[]
+
+  @@index([status], map: "Reinspection_status_idx")
+  @@index([userVehicleId], map: "Reinspection_userVehicleId_idx")
 }
 
 model ReinspectionAnalyst {
   id        Int      @id @default(autoincrement())
-  email     String   @db.VarChar(150) 
+  email     String   @db.VarChar(150)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
 
-model UserVehicle {
-  id                 Int      @id @default(autoincrement())
-  userId             Int
-  chassi             String   @db.VarChar(100)
-  plate              String?  @db.VarChar(20)
-  externalVehicleCode String? @db.VarChar(50)
-  isActive           Boolean  @default(true)
-  reinspectionRequired Boolean @default(false)
-  cortarRastreamento Boolean  @default(false)
-  lastSyncAt         DateTime @default(now())
-  user               user     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  reinspections      Reinspection[]
-  reinspectionPayments ReinspectionPayment[]
+model ReinspectionPayment {
+  id             Int         @id @default(autoincrement())
+  userVehicleId  Int
+  nossoNumero    String?     @unique(map: "ReinspectionPayment_nossoNumero_key") @db.VarChar(50)
+  linhaDigitavel String?     @db.VarChar(255)
+  linkBoleto     String?     @db.VarChar(500)
+  situacaoBoleto String      @default("PENDENTE") @db.VarChar(100)
+  boletoCriadoEm DateTime    @default(now())
+  pago           Boolean     @default(false)
+  pagoEm         DateTime?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  cancelado      Boolean     @default(false)
+  userVehicle    UserVehicle @relation(fields: [userVehicleId], references: [id], onDelete: Cascade, map: "ReinspectionPayment_userVehicleId_fkey")
 
-  @@unique([userId, chassi], map: "UserVehicle_userId_chassi_key")
-  @@index([chassi], map: "UserVehicle_chassi_idx")
-  @@index([userId], map: "UserVehicle_userId_idx")
+  @@index([boletoCriadoEm], map: "ReinspectionPayment_boletoCriadoEm_idx")
+  @@index([pago], map: "ReinspectionPayment_pago_idx")
+  @@index([situacaoBoleto], map: "ReinspectionPayment_situacaoBoleto_idx")
+  @@index([userVehicleId], map: "ReinspectionPayment_userVehicleId_idx")
 }
 
-model VehicleWebhookEvent {
-  id          Int      @id @default(autoincrement())
-  chassi      String   @db.VarChar(100)
-  evento      String?  @db.VarChar(255)
-  tipoevento  Int?
-  provider    String   @default("M7") @db.VarChar(32)
-  payload     Json
-  receivedAt  DateTime @default(now())
-  processed   Boolean  @default(false)
+model ReinspectionPhoto {
+  id              Int                        @id @default(autoincrement())
+  reinspectionId  Int
+  nomeArquivo     String                     @db.VarChar(255)
+  codigoTipo      Int?
+  url             String?                    @db.VarChar(500)
+  hinovaSituacao  String?                    @db.VarChar(50)
+  sentToHinova    Boolean                    @default(false)
+  createdAt       DateTime                   @default(now())
+  status          ReinspectionPhotoStatus
+  templatePhotoId Int?
+  reinspection    Reinspection               @relation(fields: [reinspectionId], references: [id], onDelete: Cascade, map: "ReinspectionPhoto_reinspectionId_fkey")
+  templatePhoto   ReinspectionTemplatePhoto? @relation(fields: [templatePhotoId], references: [id], map: "ReinspectionPhoto_templatePhotoId_fkey")
 
-  @@index([chassi], map: "VehicleWebhookEvent_chassi_idx")
-  @@index([tipoevento], map: "VehicleWebhookEvent_tipoevento_idx")
-  @@index([receivedAt], map: "VehicleWebhookEvent_receivedAt_idx")
+  @@index([reinspectionId], map: "ReinspectionPhoto_reinspectionId_idx")
+  @@index([status], map: "ReinspectionPhoto_status_idx")
+  @@index([templatePhotoId], map: "ReinspectionPhoto_templatePhotoId_fkey")
+}
+
+model ReinspectionTemplatePhoto {
+  id          Int                     @id @default(autoincrement())
+  vehicleType ReinspectionVehicleType
+  photoUrl    String                  @db.VarChar(500)
+  ordem       Int
+  createdAt   DateTime                @default(now())
+  updatedAt   DateTime                @updatedAt
+  photos      ReinspectionPhoto[]
+
+  @@unique([vehicleType, ordem], map: "ReinspectionTemplatePhoto_vehicleType_ordem_key")
+  @@index([vehicleType], map: "ReinspectionTemplatePhoto_vehicleType_idx")
 }
 
 
@@ -128,50 +328,48 @@ model SliderInfo {
   updatedAt   DateTime @updatedAt
 }
 
-//
-// ======================================================
-// NOVO MODEL — WORKSHOP (OFICINA)
-// ======================================================
-//
+model UserVehicle {
+  id                   Int                   @id @default(autoincrement())
+  userId               Int
+  chassi               String                @db.VarChar(100)
+  plate                String?               @db.VarChar(20)
+  externalVehicleCode  String?               @db.VarChar(50)
+  isActive             Boolean               @default(true)
+  lastSyncAt           DateTime              @default(now())
+  reinspectionRequired Boolean               @default(false)
+  cortarRastreamento   Boolean               @default(false)
+  reinspections        Reinspection[]
+  reinspectionPayments ReinspectionPayment[]
+  user                 user                  @relation(fields: [userId], references: [id], onDelete: Cascade, map: "UserVehicle_userId_fkey")
 
-model workshop {
-  id                Int       @id @default(autoincrement())
+  @@unique([userId, chassi], map: "UserVehicle_userId_chassi_key")
+  @@index([chassi], map: "UserVehicle_chassi_idx")
+  @@index([userId], map: "UserVehicle_userId_idx")
+}
 
-  // Dados principais
-  name              String    @db.VarChar(150)
-  email             String?   @db.VarChar(150)
-  shortDescription  String   @db.VarChar(100)
-  phone             String
-  phoneSecondary    String?
-  whatsapp          String?
-  description       String   @db.VarChar(400)
-  services          Json?
-  specialty         WorkshopSpecialty @default(CARRO)
+model VehicleWebhookEvent {
+  id         Int      @id @default(autoincrement())
+  chassi     String   @db.VarChar(100)
+  evento     String?  @db.VarChar(255)
+  tipoevento Int?
+  provider   String   @default("M7") @db.VarChar(32)
+  payload    Json
+  receivedAt DateTime @default(now())
+  processed  Boolean  @default(false)
 
-  // Flags
-  isActive          Boolean   @default(true)
-  featuredInApp     Boolean   @default(false)
+  @@index([chassi], map: "VehicleWebhookEvent_chassi_idx")
+  @@index([receivedAt], map: "VehicleWebhookEvent_receivedAt_idx")
+  @@index([tipoevento], map: "VehicleWebhookEvent_tipoevento_idx")
+}
 
-  // Coordenadas
-  latitude          Float?
-  longitude         Float?
+enum UserRole {
+  USER
+  ADMIN
+}
 
-  // Endereço
-  cep               String
-  address           String
-  district          String     // bairro
-  number            String
-  complement        String?
-  city              String
-  state             State
-  mapFrameUrl       String?     // iframe embed
-
-  // Fotos
-  photoFrontUrl     String?
-  photoBackUrl      String?
-
-  createdAt         DateTime    @default(now())
-  updatedAt         DateTime    @updatedAt
+enum UserBaseOrigin {
+  MAIS_PRIME
+  MAIS_PRIME_RS
 }
 
 enum State {
@@ -209,24 +407,10 @@ enum WorkshopSpecialty {
   MOTO
 }
 
-// ======================================================
-// NOVO MODEL — DOCUMENTS
-// ======================================================
-
-model Document {
-  id                Int           @id @default(autoincrement())
-
-  description       String        @db.VarChar(255)   // descrição do documento
-  documentUrl       String        @db.VarChar(500)   // link do documento (PDF, imagem, etc.)
-  type              DocumentType  // tipo do documento
-
-  // Flags de visibilidade
-  visibleConsultor  Boolean       @default(false)    // visível no app do consultor
-  visibleAssociado  Boolean       @default(false)    // visível no app do associado
-  visibleBoth       Boolean       @default(false)    // visível em ambos
-
-  createdAt         DateTime      @default(now())
-  updatedAt         DateTime      @updatedAt
+enum ReinspectionVehicleType {
+  VEICULOS_LEVES
+  MOTOS
+  CAMINHOES
 }
 
 enum DocumentType {
@@ -234,20 +418,6 @@ enum DocumentType {
   TERMO_PAYMENTS
   TERMO_REVISTORIA
   TERMO_USO_REGULAMENTO
-}
-
-// ======================================================
-// NOVO MODEL — NOTIFICATIONS
-// ======================================================
-
-// ======================================================
-// NOVO MODEL — REVISTORIA
-// ======================================================
-
-enum ReinspectionVehicleType {
-  VEICULOS_LEVES
-  MOTOS
-  CAMINHOES
 }
 
 enum ReinspectionStatus {
@@ -258,122 +428,15 @@ enum ReinspectionStatus {
   REPROVADA
 }
 
+enum AdminPanelRole {
+  REVISTORIA
+  EVENTOS
+  MARKETING
+  COBRANCA
+}
+
 enum ReinspectionPhotoStatus {
   PENDENTE
   APROVADA
   REPROVADA
-}
-
-model Reinspection {
-  id              Int                     @id @default(autoincrement())
-  userVehicleId   Int
-  vehicleType     ReinspectionVehicleType
-  status          ReinspectionStatus      @default(PENDENTE)
-  codigoVeiculo   Int?                    // código do veículo na Hinova (usado no reenvio)
-  createdAt       DateTime                @default(now())
-  updatedAt       DateTime                @updatedAt
-
-  userVehicle     UserVehicle             @relation(fields: [userVehicleId], references: [id], onDelete: Cascade)
-  photos          ReinspectionPhoto[]
-
-  @@index([userVehicleId], map: "Reinspection_userVehicleId_idx")
-  @@index([status], map: "Reinspection_status_idx")
-}
-
-model ReinspectionPhoto {
-  id              Int          @id @default(autoincrement())
-  reinspectionId  Int
-  nomeArquivo     String       @db.VarChar(255)
-  codigoTipo      Int?
-  url             String?      @db.VarChar(500)
-  status          ReinspectionPhotoStatus
-  hinovaSituacao  String?      @db.VarChar(50)   // retorno da Hinova: "Inserido", erro, etc.
-  sentToHinova    Boolean      @default(false)   // controle de envio
-  templatePhotoId Int?                           // relação com o template correspondente
-  createdAt       DateTime     @default(now())
-
-  reinspection    Reinspection @relation(fields: [reinspectionId], references: [id], onDelete: Cascade)
-  templatePhoto   ReinspectionTemplatePhoto? @relation(fields: [templatePhotoId], references: [id])
-
-  @@index([reinspectionId], map: "ReinspectionPhoto_reinspectionId_idx")
-  @@index([status], map: "ReinspectionPhoto_status_idx")
-}
-
-model ReinspectionPayment {
-  id               Int         @id @default(autoincrement())
-  userVehicleId    Int
-  nossoNumero      String?     @unique(map: "ReinspectionPayment_nossoNumero_key") @db.VarChar(50)
-  linhaDigitavel   String?     @db.VarChar(255)
-  linkBoleto       String?     @db.VarChar(500)
-  situacaoBoleto   String      @default("PENDENTE") @db.VarChar(100)
-  cancelado        Boolean     @default(false)
-  boletoCriadoEm   DateTime    @default(now())
-  pago             Boolean     @default(false)
-  pagoEm           DateTime?
-  createdAt        DateTime    @default(now())
-  updatedAt        DateTime    @updatedAt
-
-  userVehicle      UserVehicle @relation(fields: [userVehicleId], references: [id], onDelete: Cascade)
-
-  @@index([userVehicleId], map: "ReinspectionPayment_userVehicleId_idx")
-  @@index([situacaoBoleto], map: "ReinspectionPayment_situacaoBoleto_idx")
-  @@index([pago], map: "ReinspectionPayment_pago_idx")
-  @@index([boletoCriadoEm], map: "ReinspectionPayment_boletoCriadoEm_idx")
-}
-
-// ======================================================
-// NOVO MODEL — TEMPLATE DE REVISTORIA
-// ======================================================
-
-model ReinspectionTemplatePhoto {
-  id           Int                     @id @default(autoincrement())
-  vehicleType  ReinspectionVehicleType
-  photoUrl     String                  @db.VarChar(500)
-  ordem        Int
-
-  createdAt    DateTime                @default(now())
-  updatedAt    DateTime                @updatedAt
-
-  photos       ReinspectionPhoto[]
-
-  @@unique([vehicleType, ordem], map: "ReinspectionTemplatePhoto_vehicleType_ordem_key")
-  @@index([vehicleType], map: "ReinspectionTemplatePhoto_vehicleType_idx")
-}
-
-model Notification {
-  id              Int       @id @default(autoincrement())
-  userId          Int
-  expoPushToken   String    @db.VarChar(255)
-  title           String    @db.VarChar(255)
-  body            String    @db.Text
-  data            Json      // { plate: string, ignition: 'on' | 'off', ... }
-  read            Boolean   @default(false)
-  sentAt          DateTime  @default(now())
-  readAt          DateTime? 
-  deleted         Boolean   @default(false)
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-  
-  // Relação com user
-  user            user      @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  // Índices para performance
-  @@index([userId, read], map: "Notification_userId_read_idx")
-  @@index([sentAt], map: "Notification_sentAt_idx")
-  @@index([createdAt], map: "Notification_createdAt_idx")
-}
-
-model FuelSession {
-  id          String   @id @default(uuid())
-  userId      Int
-  valorAntes  Float
-  valorDepois Float?
-  diferenca   Float?
-  status      String   // PENDING | COMPLETED | EXPIRED
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  user        user     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId, status], map: "FuelSession_userId_status_idx")
 }

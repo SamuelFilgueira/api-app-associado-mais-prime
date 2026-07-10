@@ -14,6 +14,7 @@ const REQUIRED = [
   'PUBLIC_KEY_SOFTRUCK',
   'PUBLIC_KEY_SOFTRUCK_RS',
   'REDIS_HOST',
+  'ANALYTICS_SECRET',
 ];
 
 // Variáveis importantes — app sobe mas emite warning visível
@@ -28,7 +29,7 @@ const WARN_IF_MISSING = [
   'LOGICA_API_BASE_URL',
   'LOGICA_API_NUMBER',
   'SOFTRUCK_API_BASE_URL',
-  'PUPPETEER_EXECUTABLE_PATH',
+  //'PUPPETEER_EXECUTABLE_PATH',
   'suri_baseUrl',
   'token_suri',
   'suri_template_id',

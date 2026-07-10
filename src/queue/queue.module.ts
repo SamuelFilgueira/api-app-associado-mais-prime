@@ -5,6 +5,7 @@ export const WEBHOOK_QUEUE = 'webhook-events';
 export const NOTIFICATION_QUEUE = 'notifications';
 export const FUEL_ECONOMY_QUEUE = 'fuel-economy';
 export const BOLETO_VERIFICACAO_QUEUE = 'boleto-verificacao';
+export const ANALYTICS_QUEUE = 'analytics-summaries';
 
 /**
  * Módulo global que configura o BullMQ com Redis.
@@ -32,6 +33,7 @@ export const BOLETO_VERIFICACAO_QUEUE = 'boleto-verificacao';
       { name: NOTIFICATION_QUEUE },
       { name: FUEL_ECONOMY_QUEUE },
       { name: BOLETO_VERIFICACAO_QUEUE },
+      { name: ANALYTICS_QUEUE },
     ),
   ],
   exports: [BullModule],

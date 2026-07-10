@@ -1,0 +1,75 @@
+export const ALLOWED_SCREENS: ReadonlySet<string> = new Set([
+  'screen_login',
+  'screen_primeiro_acesso',
+  'screen_trocar_senha',
+  'screen_home',
+  'screen_selecionar_veiculo',
+  'screen_combustivel',
+  'screen_beneficios',
+  'screen_beneficios_veiculo',
+  'screen_meus_cupons',
+  'screen_ofertas',
+  'screen_beneficio_categoria',
+  'screen_beneficio_organizacao',
+  'screen_documentos',
+  'screen_financeiro',
+  'screen_telemedicina',
+  'screen_odonto',
+  'screen_pet',
+  'screen_sos',
+  'screen_oficinas',
+  'screen_rastreamento',
+  'screen_monitoramento_rotas',
+  'screen_revistoria_iniciar',
+  'screen_revistoria_fotos',
+  'screen_revistoria_status',
+  'screen_perfil',
+]);
+
+export const ALLOWED_ACTIONS: ReadonlySet<string> = new Set([
+  'auth_login_success',
+  'auth_login_error',
+  'auth_logout',
+  'auth_biometric_success',
+  'auth_biometric_error',
+  'auth_primeiro_acesso_submit',
+  'auth_password_changed',
+  'vehicle_selected',
+  'fuel_station_viewed',
+  'fuel_card_opened',
+  'fuel_filter_applied',
+  'benefit_category_opened',
+  'benefit_organization_opened',
+  'coupon_redeem_success',
+  'coupon_redeem_error',
+  'offer_opened',
+  'document_opened',
+  'sos_phone_triggered',
+  'sos_whatsapp_triggered',
+  'workshop_contact_triggered',
+  'boleto_copied',
+  'boleto_shared',
+  'inspection_started',
+  'inspection_photo_captured',
+  'inspection_submitted',
+  'inspection_error',
+  'tracking_period_selected',
+  'webview_telemedicina_opened',
+  'webview_odonto_opened',
+  'webview_pet_opened',
+  'notification_opened',
+  'drawer_opened',
+]);
+
+export const ALLOWED_FORMS: ReadonlySet<string> = new Set([
+  'form_login',
+  'form_primeiro_acesso',
+  'form_trocar_senha',
+  'form_revistoria',
+]);
+
+export const MAX_SCREENS = 30;
+export const MAX_ACTIONS = 40;
+export const MAX_FORMS = 5;
+export const MAX_PERIOD_MS = 60 * 60 * 1000; // 1 hora
+export const MAX_PAYLOAD_BYTES = 32 * 1024; // 32 KB

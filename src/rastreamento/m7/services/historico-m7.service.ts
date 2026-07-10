@@ -8,39 +8,35 @@ import {
 import axios from 'axios';
 import { BaseOrigin } from 'src/shared/token-resolver.service';
 import {
+  M7ConsultaMonitoradoResponse,
   M7ConsultaVeiculoResponse,
   M7HistoricoApiResponse,
   M7TrajetosApiResponse,
-  M7TrajetoRaw,
 } from '../interfaces/m7-historico.interface';
 import {
-  DiaM7ResumoDto,
+  HistoricoM7ContestacaoPdfDataDto,
   HistoricoM7PdfDataDto,
   HistoricoM7ResumoResponseDto,
   HistoricoM7RotasResponseDto,
-  ViagemM7Dto,
 } from '../dto/historico-m7-response.dto';
+import {
+  complementarDiasParaPdf,
+  filtrarHistoricoPorPeriodo,
+  filtrarTrajetosPorPeriodo,
+  M7BuscaPeriodoOptions,
+  obterPrimeiroParadoComDestino,
+  obterUltimoParadoComDestino,
+  shiftIsoDate,
+  toDateTimeParam,
+  validarPeriodoMaximoContestacao,
+} from '../helpers/historico-m7-utils.helper';
 import { sanitizarPontosGps } from '../helpers/m7-gps-sanitizer.helper';
 import { HistoricoPdfM7Service } from '../pdf/historico-pdf-m7.service';
+import { M7ReverseGeocodeService } from './m7-reverse-geocode.service';
+import { M7ViagensBuilderService } from './m7-viagens-builder.service';
 
-/**
- * Trunca endereços verbosos do M7/Nominatim mantendo somente até
- * a primeira ocorrência de "Rio de Janeiro" na string.
- * Ex.: "Rua Cobé, Rio da Prata, Bangu, Zona Oeste do Rio de Janeiro, Rio de Janeiro, Região..."
- *   → "Rua Cobé, Rio da Prata, Bangu, Zona Oeste do Rio de Janeiro"
- */
-function truncarEndereco(endereco: string): string {
-  if (!endereco) return endereco;
-  const marker = 'Rio de Janeiro';
-  const idx = endereco.indexOf(marker);
-  if (idx === -1) return endereco;
-  return endereco
-    .slice(0, idx + marker.length)
-    .replace(/,\s*$/, '')
-    .trim();
-}
-
-const M7_REQUEST_TIMEOUT = 25_000;
+const M7_REQUEST_TIMEOUT = 55_000;
+const MAX_LOG_PAYLOAD_LENGTH = 1_500;
 
 const M7_CREDENTIALS: Record<
   BaseOrigin,
@@ -56,14 +52,23 @@ type TokenState = {
   tokenRenewalPromise: Promise<void> | null;
 };
 
-/** Converte YYYY-MM-DD para 'YYYY-MM-DD 00:00:00' (trajetos API) */
-function toDateTimeParam(date: string): string {
-  return `${date} 00:00:00`;
-}
-
 @Injectable()
 export class HistoricoM7Service {
   private readonly logger = new Logger(HistoricoM7Service.name);
+
+  private stringifyForLog(data: unknown): string {
+    const serialized = JSON.stringify(data);
+
+    if (!serialized) {
+      return '(vazio)';
+    }
+
+    if (serialized.length <= MAX_LOG_PAYLOAD_LENGTH) {
+      return serialized;
+    }
+
+    return `${serialized.slice(0, MAX_LOG_PAYLOAD_LENGTH)}... [truncated ${serialized.length - MAX_LOG_PAYLOAD_LENGTH} chars]`;
+  }
 
   private readonly tokenState: Record<BaseOrigin, TokenState> = {
     MAIS_PRIME: { token: null, tokenExpires: null, tokenRenewalPromise: null },
@@ -74,7 +79,11 @@ export class HistoricoM7Service {
     },
   };
 
-  constructor(private readonly pdfService: HistoricoPdfM7Service) {
+  constructor(
+    private readonly pdfService: HistoricoPdfM7Service,
+    private readonly reverseGeocodeService: M7ReverseGeocodeService,
+    private readonly viagensBuilderService: M7ViagensBuilderService,
+  ) {
     void this.renovarToken('MAIS_PRIME');
     void this.renovarToken('MAIS_PRIME_RS');
 
@@ -200,6 +209,37 @@ export class HistoricoM7Service {
   // M7 API calls
   // ---------------------------------------------------------------------------
 
+  private async consultarMonitorado(
+    placa: string,
+    baseOrigin: BaseOrigin,
+  ): Promise<M7ConsultaMonitoradoResponse> {
+    const url = `${process.env.M7_API_BASE_URL}api/monitorados/${placa}`;
+    this.logger.debug(`[${baseOrigin}] consultarMonitorado → GET ${url}`);
+
+    try {
+      const data = await this.executarComReautenticacao(baseOrigin, (token) =>
+        axios.get(url, {
+          headers: { Authorization: `Bearer ${token}` },
+          timeout: M7_REQUEST_TIMEOUT,
+        }),
+      );
+      this.logger.debug(
+        `[${baseOrigin}] consultarMonitorado ← resposta: ${JSON.stringify(data)}`,
+      );
+      return data as M7ConsultaMonitoradoResponse;
+    } catch (error) {
+      if (error instanceof InternalServerErrorException) throw error;
+      const status = axios.isAxiosError(error) ? error.response?.status : 'N/A';
+      const body = axios.isAxiosError(error)
+        ? JSON.stringify(error.response?.data)
+        : '';
+      this.logger.error(
+        `[${baseOrigin}] consultarMonitorado ERRO: status=${status} body=${body} msg=${error instanceof Error ? error.message : JSON.stringify(error)}`,
+      );
+      throw new BadGatewayException('Falha ao consultar monitorado na API M7');
+    }
+  }
+
   private async consultarVeiculo(
     cnpj: string,
     chassi: string,
@@ -242,12 +282,16 @@ export class HistoricoM7Service {
     dataInicial: string,
     dataFinal: string,
     baseOrigin: BaseOrigin,
+    options?: M7BuscaPeriodoOptions,
   ): Promise<M7TrajetosApiResponse> {
-    const params = new URLSearchParams({
-      data_inicio: toDateTimeParam(dataInicial),
-      data_fim: toDateTimeParam(dataFinal),
-    });
-    const endpoint = `${process.env.M7_API_BASE_URL}api/monitorado/${codigoVeiculo}/trajetos?${params.toString()}`;
+    const expandirDataFinal = options?.expandirDataFinal ?? true;
+    const filtrarPeriodoSelecionado =
+      options?.filtrarPeriodoSelecionado ?? true;
+    const dataFinalConsulta = expandirDataFinal
+      ? shiftIsoDate(dataFinal, 1)
+      : dataFinal;
+
+    const endpoint = `${process.env.M7_API_BASE_URL}api/monitorado/${codigoVeiculo}/trajetos?data_inicio=${toDateTimeParam(dataInicial)}&data_fim=${toDateTimeParam(dataFinalConsulta)}`;
     this.logger.debug(`[${baseOrigin}] buscarTrajetos → GET ${endpoint}`);
 
     try {
@@ -258,9 +302,34 @@ export class HistoricoM7Service {
         }),
       );
       this.logger.debug(
-        `[${baseOrigin}] buscarTrajetos ← trajetos recebidos: ${(data as M7TrajetosApiResponse)?.trajetos?.length ?? 0}`,
+        `[${baseOrigin}] buscarTrajetos ← resposta: ${this.stringifyForLog(data)}`,
       );
-      return data as M7TrajetosApiResponse;
+
+      const resposta = data as M7TrajetosApiResponse;
+      const trajetosOriginais = Array.isArray(resposta?.trajetos)
+        ? resposta.trajetos
+        : [];
+
+      if (!filtrarPeriodoSelecionado) {
+        return resposta;
+      }
+
+      const trajetosFiltrados = filtrarTrajetosPorPeriodo(
+        trajetosOriginais,
+        dataInicial,
+        dataFinal,
+      );
+
+      if (trajetosFiltrados.length !== trajetosOriginais.length) {
+        this.logger.debug(
+          `[${baseOrigin}] buscarTrajetos filtro período aplicado: ${trajetosOriginais.length} → ${trajetosFiltrados.length} (janela UI ${dataInicial}..${dataFinal})`,
+        );
+      }
+
+      return {
+        ...resposta,
+        trajetos: trajetosFiltrados,
+      };
     } catch (error) {
       if (error instanceof InternalServerErrorException) throw error;
       const status = axios.isAxiosError(error) ? error.response?.status : 'N/A';
@@ -279,8 +348,17 @@ export class HistoricoM7Service {
     dataInicial: string,
     dataFinal: string,
     baseOrigin: BaseOrigin,
+    options?: M7BuscaPeriodoOptions,
   ): Promise<M7HistoricoApiResponse> {
-    const endpoint = `${process.env.M7_API_BASE_URL}api/historico/${dataInicial}/${dataFinal}/${codigoVeiculo}`;
+    const expandirDataFinal = options?.expandirDataFinal ?? true;
+    const filtrarPeriodoSelecionado =
+      options?.filtrarPeriodoSelecionado ?? true;
+    const dataFinalConsulta = expandirDataFinal
+      ? shiftIsoDate(dataFinal, 1)
+      : dataFinal;
+
+    const endpoint = `${process.env.M7_API_BASE_URL}api/historico/${dataInicial}/${dataFinalConsulta}/${codigoVeiculo}`;
+    this.logger.debug(`[${baseOrigin}] buscarHistoricoGps → GET ${endpoint}`);
 
     try {
       const data = await this.executarComReautenticacao(baseOrigin, (token) =>
@@ -289,111 +367,117 @@ export class HistoricoM7Service {
           timeout: M7_REQUEST_TIMEOUT,
         }),
       );
-      return data as M7HistoricoApiResponse;
+
+      this.logger.debug(
+        `[${baseOrigin}] buscarHistoricoGps ← resposta: ${this.stringifyForLog(data)}`,
+      );
+
+      const resposta = data as M7HistoricoApiResponse;
+      const historicoOriginal = Array.isArray(resposta?.historico)
+        ? resposta.historico
+        : [];
+
+      if (!filtrarPeriodoSelecionado) {
+        return resposta;
+      }
+
+      const historicoFiltrado = filtrarHistoricoPorPeriodo(
+        historicoOriginal,
+        dataInicial,
+        dataFinal,
+      );
+
+      if (historicoFiltrado.length !== historicoOriginal.length) {
+        this.logger.debug(
+          `[${baseOrigin}] buscarHistoricoGps filtro período aplicado: ${historicoOriginal.length} → ${historicoFiltrado.length} (janela UI ${dataInicial}..${dataFinal})`,
+        );
+      }
+
+      return {
+        ...resposta,
+        historico: historicoFiltrado,
+      };
     } catch (error) {
       if (error instanceof InternalServerErrorException) throw error;
+      const status = axios.isAxiosError(error) ? error.response?.status : 'N/A';
+      const body = axios.isAxiosError(error)
+        ? JSON.stringify(error.response?.data)
+        : '';
       this.logger.error(
-        `[${baseOrigin}] buscarHistoricoGps ERRO: ${error instanceof Error ? error.message : JSON.stringify(error)}`,
+        `[${baseOrigin}] buscarHistoricoGps ERRO: status=${status} body=${body} msg=${error instanceof Error ? error.message : JSON.stringify(error)}`,
       );
       throw new BadGatewayException('Falha ao buscar histórico GPS na API M7');
     }
   }
 
   // ---------------------------------------------------------------------------
-  // Private helpers
-  // ---------------------------------------------------------------------------
-
-  private construirViagensEDias(rawList: M7TrajetoRaw[]): {
-    viagens: ViagemM7Dto[];
-    dias: DiaM7ResumoDto[];
-    distanciaTotalKm: number;
-    velocidadeMaxima: number;
-  } {
-    const parseNum = (v: number | string | undefined): number => {
-      const n = Number(v ?? 0);
-      return Number.isFinite(n) ? n : 0;
-    };
-
-    const isZeroTempo = (tempo: string | undefined): boolean => {
-      if (!tempo) return true;
-      return /^0{1,2}:0{1,2}:0{1,2}$/.test(tempo.trim());
-    };
-
-    const tempoEmSegundos = (tempo: string): number => {
-      const parts = tempo.split(':');
-      const h = parseInt(parts[0] ?? '0', 10) || 0;
-      const m = parseInt(parts[1] ?? '0', 10) || 0;
-      const s = parseInt(parts[2] ?? '0', 10) || 0;
-      return h * 3600 + m * 60 + s;
-    };
-
-    // Modelo de estados: PARADO → VIAGEM → PARADO
-    // Origem vem do PARADO anterior, destino vem da VIAGEM.
-    const viagens: ViagemM7Dto[] = [];
-    for (let i = 0; i < rawList.length; i++) {
-      const atual = rawList[i];
-      if (atual.tipo !== 'VIAGEM') continue;
-
-      const distanciaKm = parseNum(atual.distancia);
-      const tempoMovimento = atual.tempo_movimento ?? '00:00:00';
-
-      // Ignorar viagens inválidas / ruído de telemetria
-      if (distanciaKm === 0 || isZeroTempo(tempoMovimento)) continue;
-
-      // Ignorar viagens com menos de 3 minutos (180 segundos)
-      if (tempoEmSegundos(tempoMovimento) <= 180) continue;
-
-      // Encontrar o PARADO mais próximo anterior para obter a origem
-      let origemEndereco = '';
-      for (let j = i - 1; j >= 0; j--) {
-        if (rawList[j].tipo === 'PARADO') {
-          origemEndereco = truncarEndereco(String(rawList[j].destino ?? ''));
-          break;
-        }
-      }
-
-      viagens.push({
-        origem: origemEndereco,
-        saida: String(atual.data_inicio ?? ''),
-        destino: truncarEndereco(String(atual.destino ?? '')),
-        chegada: String(atual.data_fim ?? ''),
-        distanciaKm,
-        tempoMovimento,
-        velocidadeMaxima: parseNum(atual.velocidade_maxima),
-      });
-    }
-
-    // Agrupar por data de saída
-    const porData = new Map<string, DiaM7ResumoDto>();
-    for (const viagem of viagens) {
-      const data: string = viagem.saida.slice(0, 10);
-      if (!porData.has(data)) {
-        porData.set(data, { data, viagens: [], distanciaTotalKm: 0 });
-      }
-      const dia = porData.get(data)!;
-      dia.viagens.push(viagem);
-      dia.distanciaTotalKm =
-        Math.round((dia.distanciaTotalKm + viagem.distanciaKm) * 100) / 100;
-    }
-
-    const dias = Array.from(porData.values()).sort((a, b) =>
-      a.data.localeCompare(b.data),
-    );
-
-    const distanciaTotalKm =
-      Math.round(viagens.reduce((acc, v) => acc + v.distanciaKm, 0) * 100) /
-      100;
-    const velocidadeMaxima = viagens.reduce<number>(
-      (max, v) => Math.max(max, v.velocidadeMaxima),
-      0,
-    );
-
-    return { viagens, dias, distanciaTotalKm, velocidadeMaxima };
-  }
-
-  // ---------------------------------------------------------------------------
   // Public orchestrators
   // ---------------------------------------------------------------------------
+
+  async gerarPdfV2(
+    cnpj: string,
+    chassi: string,
+    dataInicial: string,
+    dataFinal: string,
+    baseOrigin: BaseOrigin,
+  ): Promise<Buffer> {
+    this.logger.log(
+      `[${baseOrigin}] [V2] gerarPdfV2 início | cnpj=${cnpj} chassi=${chassi} período=${dataInicial}..${dataFinal}`,
+    );
+
+    const veiculoData = await this.consultarVeiculo(cnpj, chassi, baseOrigin);
+
+    if (!veiculoData?.veiculo?.codigo) {
+      throw new NotFoundException('Veículo não encontrado na plataforma M7');
+    }
+
+    const { codigo, placa, chassi: chassiM7 } = veiculoData.veiculo;
+
+    const historicoRaw = await this.buscarHistoricoGps(
+      codigo,
+      dataInicial,
+      dataFinal,
+      baseOrigin,
+    );
+
+    const pontosRaw = Array.isArray(historicoRaw?.historico)
+      ? historicoRaw.historico
+      : [];
+
+    this.logger.log(
+      `[${baseOrigin}] [V2] histórico recebido | pontos=${pontosRaw.length}`,
+    );
+
+    const { viagens, dias, distanciaTotalKm, velocidadeMaxima } =
+      await this.viagensBuilderService.construirViagensEDiasPorHistorico(
+        pontosRaw,
+        baseOrigin,
+      );
+
+    if (!viagens.length) {
+      this.logger.warn(
+        `[${baseOrigin}] [V2] nenhuma viagem gerada após reconstrução | pontos=${pontosRaw.length} período=${dataInicial}..${dataFinal}`,
+      );
+    }
+
+    const dadosPdf: HistoricoM7PdfDataDto = {
+      veiculo: { codigo, placa, chassi: chassiM7 },
+      periodo: { dataInicial, dataFinal },
+      resumo: {
+        diasComDados: dias.length,
+        totalViagens: viagens.length,
+        distanciaTotalKm,
+        velocidadeMaxima,
+      },
+      dias,
+    };
+
+    this.logger.log(
+      `[${baseOrigin}] [V2] gerarPdfV2 fim | dias=${dias.length} viagens=${viagens.length} distanciaTotalKm=${distanciaTotalKm} velocidadeMaxima=${velocidadeMaxima}`,
+    );
+
+    return this.pdfService.gerarPdf(dadosPdf);
+  }
 
   async gerarPdf(
     cnpj: string,
@@ -408,7 +492,11 @@ export class HistoricoM7Service {
       throw new NotFoundException('Veículo não encontrado na plataforma M7');
     }
 
-    const { codigo, placa, chassi: chassiM7 } = veiculoData.veiculo;
+    const {placa, chassi: chassiM7 } = veiculoData.veiculo;
+
+    const monitoradoData = await this.consultarMonitorado(placa, baseOrigin);
+
+    const codigo = monitoradoData?.monitorados?.[0]?.codigo;
 
     const trajetosRaw = await this.buscarTrajetos(
       codigo,
@@ -421,7 +509,32 @@ export class HistoricoM7Service {
       : [];
 
     const { viagens, dias, distanciaTotalKm, velocidadeMaxima } =
-      this.construirViagensEDias(rawList);
+      this.viagensBuilderService.construirViagensEDias(rawList);
+
+    const existeEnderecoFaltando = viagens.some(
+      (viagem) =>
+        !viagem.origem?.trim() ||
+        viagem.origem === '—' ||
+        !viagem.destino?.trim() ||
+        viagem.destino === '—',
+    );
+
+    let diasParaPdf = dias;
+
+    if (existeEnderecoFaltando) {
+      const origemReferenciaAnterior = obterUltimoParadoComDestino(rawList);
+      const origemReferenciaPosterior = obterPrimeiroParadoComDestino(rawList);
+      const destinoReferenciaPosterior = obterUltimoParadoComDestino(rawList);
+      const destinoReferenciaAnterior = obterPrimeiroParadoComDestino(rawList);
+
+      diasParaPdf = complementarDiasParaPdf(
+        dias,
+        origemReferenciaAnterior,
+        origemReferenciaPosterior,
+        destinoReferenciaPosterior,
+        destinoReferenciaAnterior,
+      );
+    }
 
     const dadosPdf: HistoricoM7PdfDataDto = {
       veiculo: { codigo, placa, chassi: chassiM7 },
@@ -432,10 +545,107 @@ export class HistoricoM7Service {
         distanciaTotalKm,
         velocidadeMaxima,
       },
-      dias,
+      dias: diasParaPdf,
     };
 
     return this.pdfService.gerarPdf(dadosPdf);
+  }
+
+  async gerarPdfContestacao(
+    cnpj: string,
+    chassi: string,
+    dataInicial: string,
+    dataFinal: string,
+    baseOrigin: BaseOrigin,
+  ): Promise<Buffer> {
+    validarPeriodoMaximoContestacao(dataInicial, dataFinal);
+
+    const veiculoData = await this.consultarVeiculo(cnpj, chassi, baseOrigin);
+
+    if (!veiculoData?.veiculo?.codigo) {
+      throw new NotFoundException('Veículo não encontrado na plataforma M7');
+    }
+
+    const { codigo, placa, chassi: chassiM7 } = veiculoData.veiculo;
+
+    const historicoRaw = await this.buscarHistoricoGps(
+      codigo,
+      dataInicial,
+      dataFinal,
+      baseOrigin,
+    );
+
+    const pontosRaw = Array.isArray(historicoRaw?.historico)
+      ? historicoRaw.historico
+      : [];
+
+    this.logger.debug(
+      `[${baseOrigin}] gerarPdfContestacao: ${pontosRaw.length} registros brutos recebidos`,
+    );
+
+    const pontos = await this.reverseGeocodeService.montarPontosContestacao(
+      pontosRaw,
+      baseOrigin,
+    );
+
+    const dadosPdf: HistoricoM7ContestacaoPdfDataDto = {
+      veiculo: { codigo, placa, chassi: chassiM7 },
+      periodo: { dataInicial, dataFinal },
+      pontos,
+    };
+
+    return this.pdfService.gerarPdfContestacao(dadosPdf);
+  }
+
+  async gerarPdfContestacaoV2(
+    cnpj: string,
+    chassi: string,
+    dataInicial: string,
+    dataFinal: string,
+    baseOrigin: BaseOrigin,
+  ): Promise<Buffer> {
+    validarPeriodoMaximoContestacao(dataInicial, dataFinal);
+
+    const veiculoData = await this.consultarVeiculo(cnpj, chassi, baseOrigin);
+
+
+    const { placa, chassi: chassiM7 } = veiculoData.veiculo;
+
+    const monitoradoData = await this.consultarMonitorado(placa, baseOrigin);
+
+    const codigo = monitoradoData?.monitorados?.[0]?.codigo;
+
+    const historicoRaw = await this.buscarHistoricoGps(
+      codigo,
+      dataInicial,
+      dataFinal,
+      baseOrigin,
+    );
+
+    const pontosRaw = Array.isArray(historicoRaw?.historico)
+      ? historicoRaw.historico
+      : [];
+
+    this.logger.log(
+      `[${baseOrigin}] gerarPdfContestacaoV2: ${pontosRaw.length} pontos recebidos | período=${dataInicial}..${dataFinal}`,
+    );
+
+    const pontos = await this.reverseGeocodeService.montarPontosContestacao(
+      pontosRaw,
+      baseOrigin,
+    );
+
+    this.logger.log(
+      `[${baseOrigin}] gerarPdfContestacaoV2: ${pontos.length} pontos geocodificados`,
+    );
+
+    const dadosPdf: HistoricoM7ContestacaoPdfDataDto = {
+      veiculo: { codigo, placa, chassi: chassiM7 },
+      periodo: { dataInicial, dataFinal },
+      pontos,
+    };
+
+    return this.pdfService.gerarPdfContestacaoV2(dadosPdf);
   }
 
   async obterResumo(
@@ -451,7 +661,11 @@ export class HistoricoM7Service {
       throw new NotFoundException('Veículo não encontrado na plataforma M7');
     }
 
-    const { codigo, placa, chassi: chassiM7 } = veiculoData.veiculo;
+    const { placa, chassi: chassiM7 } = veiculoData.veiculo;
+
+    const monitoradoData = await this.consultarMonitorado(placa, baseOrigin);
+
+    const codigo = monitoradoData?.monitorados?.[0]?.codigo;
 
     const trajetosRaw = await this.buscarTrajetos(
       codigo,
@@ -468,7 +682,7 @@ export class HistoricoM7Service {
     );
 
     const { viagens, dias, distanciaTotalKm, velocidadeMaxima } =
-      this.construirViagensEDias(rawList);
+      this.viagensBuilderService.construirViagensEDias(rawList);
 
     this.logger.debug(
       `[${baseOrigin}] obterResumo: ${viagens.length} viagens válidas mapeadas`,
