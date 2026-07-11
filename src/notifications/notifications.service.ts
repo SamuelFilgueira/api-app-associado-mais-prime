@@ -574,19 +574,6 @@ export class NotificationsService {
     },
     adminUserId?: number,
   ): Promise<{ sentCount: number; skippedCount: number }> {
-    if (adminUserId) {
-      const admin = await this.prisma.user.findUnique({
-        where: { id: adminUserId },
-        select: { role: true },
-      });
-
-      if (!admin || admin.role !== 'ADMIN') {
-        throw new ForbiddenException(
-          'Apenas usuarios com role ADMIN podem enviar notificacoes de marketing.',
-        );
-      }
-    }
-
     const dataPayload = payload.data ?? { type: 'marketing' };
 
     const recipients = await this.prisma.user.findMany({
