@@ -433,6 +433,7 @@ enum AdminPanelRole {
   EVENTOS
   MARKETING
   COBRANCA
+  ADMIN
 }
 
 enum ReinspectionPhotoStatus {
