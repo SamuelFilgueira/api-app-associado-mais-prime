@@ -20,7 +20,7 @@ export class AdminPanelRoleGuard implements CanActivate {
     private readonly prisma: PrismaService,
   ) {}
 
-  async canActivate(context: ExecutionContext): Promise<boolean> {
+  canActivate(context: ExecutionContext): boolean {
     const requiredRoles = this.reflector.getAllAndOverride<AdminPanelRole[]>(
       ADMIN_PANEL_ROLES_KEY,
       [context.getHandler(), context.getClass()],
@@ -43,51 +43,7 @@ export class AdminPanelRoleGuard implements CanActivate {
       );
     }
 
-    // Tokens novos incluem adminRole no payload — sem DB query
-    if (tokenUser.adminRole) {
-      if (!requiredRoles.includes(tokenUser.adminRole as AdminPanelRole)) {
-        throw new ForbiddenException(
-          'Perfil administrativo sem permissão para esta rota',
-        );
-      }
-      return true;
-    }
-
-    // Fallback para tokens antigos sem adminRole no payload
-    let userEmail: string | undefined = tokenUser.email;
-
-    if (!userEmail) {
-      const baseUser = await this.prisma.user.findUnique({
-        where: { id: tokenUser.userId },
-        select: { email: true },
-      });
-
-      userEmail = baseUser?.email;
-    }
-
-    if (!userEmail) {
-      throw new ForbiddenException(
-        'Usuário sem e-mail para validação de perfil',
-      );
-    }
-
-    const adminPanelUser = await this.prisma.adminPanelUser.findUnique({
-      where: { email: userEmail },
-      select: { role: true },
-    });
-
-    if (!adminPanelUser) {
-      throw new ForbiddenException(
-        'Usuário não cadastrado na tabela administrativa',
-      );
-    }
-
-    if (!requiredRoles.includes(adminPanelUser.role as AdminPanelRole)) {
-      throw new ForbiddenException(
-        'Perfil administrativo sem permissão para esta rota',
-      );
-    }
-
+    // ADMIN tem acesso total ao painel, independentemente das roles da rota.
     return true;
   }
 }

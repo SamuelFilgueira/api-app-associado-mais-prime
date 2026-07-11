@@ -255,7 +255,7 @@ export class NotificationsController {
    * Envia notificacoes de marketing em massa (painel administrativo)
    */
   @UseGuards(JwtAuthGuard, AdminRoleGuard, AdminPanelRoleGuard)
-  @AdminPanelRoles(AdminPanelRole.MARKETING)
+  @AdminPanelRoles(AdminPanelRole.MARKETING, AdminPanelRole.ADMIN)
   @Post('admin/marketing')
   @HttpCode(HttpStatus.OK)
   async sendMarketingNotification(

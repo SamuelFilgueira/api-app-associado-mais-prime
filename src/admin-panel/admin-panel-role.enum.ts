@@ -3,6 +3,7 @@ export enum AdminPanelRole {
   EVENTOS = 'EVENTOS',
   MARKETING = 'MARKETING',
   COBRANCA = 'COBRANCA',
+  ADMIN = 'ADMIN',
 }
 
 export const ALL_ADMIN_PANEL_ROLES: AdminPanelRole[] = [
@@ -10,4 +11,5 @@ export const ALL_ADMIN_PANEL_ROLES: AdminPanelRole[] = [
   AdminPanelRole.EVENTOS,
   AdminPanelRole.MARKETING,
   AdminPanelRole.COBRANCA,
+  AdminPanelRole.ADMIN,
 ];
