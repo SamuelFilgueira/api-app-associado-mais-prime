@@ -548,7 +548,7 @@ function gerarHtmlRelatorioContestacaoV2(
     <html lang="pt-BR">
     <head>
       <meta charset="UTF-8" />
-      <title>Relatório de Contestação de Multa — ${escapeHtml(veiculo.placa)}</title>
+      <title>Relatório de Rotas de Detalhadas — ${escapeHtml(veiculo.placa)}</title>
       <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
@@ -625,7 +625,7 @@ function gerarHtmlRelatorioContestacaoV2(
         <div class="header-left">
           ${logoTag}
           <div>
-            <h1>Relatório de Contestação de Multa</h1>
+            <h1>Relatório de Rotas Detalhadas</h1>
             <p class="sub">Pontos GPS completos com geocode — para análise de infração</p>
           </div>
         </div>
@@ -657,7 +657,6 @@ function gerarHtmlRelatorioContestacaoV2(
       <div class="aviso">
         ⚠ Este relatório contém <strong>todos os pontos GPS</strong> registrados pelo rastreador no período,
         com velocidade instantânea e endereço obtido por geocodificação reversa.
-        Os dados são provenientes da plataforma M7 e destinam-se exclusivamente à contestação de infrações de trânsito.
       </div>
 
       <table>
@@ -719,7 +718,7 @@ function gerarHtmlRelatorioContestacao(
     <html lang="pt-BR">
     <head>
       <meta charset="UTF-8" />
-      <title>Relatório de Contestação de Multa</title>
+      <title>Relatório de Rotas Detalhadas</title>
       <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
@@ -757,8 +756,8 @@ function gerarHtmlRelatorioContestacao(
         <div class="header-left">
           ${logoTag}
           <div>
-            <h1>Relatório de Contestação de Multa</h1>
-            <p>Histórico M7 com reverse geocode para análise de infração</p>
+            <h1>Relatório de Rotas Detalhadas</h1>
+            <p>Histórico M7 com reverse geocode para análise de rotas</p>
           </div>
         </div>
       </div>
