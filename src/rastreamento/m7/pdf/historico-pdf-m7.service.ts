@@ -80,8 +80,7 @@ function montarDescricaoTempo(v: ViagemM7Dto): string {
 
   return `
     <div>${tempoMovimento}</div>
-    <div style="font-size:9px;color:#6b7280;">Parado: ${tempoParado}</div>
-    <div style="font-size:9px;color:#9ca3af;">Evento: ${tempoTotal}</div>
+    <div style="font-size:9px;color:#6b7280;">${tempoParado}</div>
   `;
 }
 
@@ -138,10 +137,10 @@ function gerarRegioesMaisVisitadas(dias: DiaM7ResumoDto[]): string {
 
   for (const dia of dias) {
     for (const v of dia.viagens) {
-      const locs = [v.origem, v.destino];
+      const locs = [v.destino];
       for (const loc of locs) {
         const key = (loc ?? '').trim();
-        if (key && key !== '—') {
+        if (key !== '—') {
           contagem[key] = (contagem[key] ?? 0) + 1;
         }
       }
@@ -455,17 +454,17 @@ function gerarHtmlRelatorio(dados: HistoricoM7PdfDataDto): string {
 
       <h2>Viagens do Período</h2>
       <p style="font-size:10px;color:#6b7280;margin-bottom:8px;">
-        Saída/Chegada representam início/fim do evento de ignição informado pela API M7.
-        O deslocamento efetivo está em Tempo Movimento e pode coexistir com períodos parados dentro do mesmo evento.
+        Saída/Chegada representam início/fim do evento de ignição.
+        O deslocamento efetivo está em Tempo Movimento.
       </p>
       <table>
         <thead>
           <tr>
             <th>Saída</th>
             <th>Chegada</th>
-            <th>Origem</th>
+            <th>Tipo</th>
             <th>Destino</th>
-            <th>Tempo Movimento</th>
+            <th>Tempo</th>
             <th>Distância</th>
             <th>Vel. Máx.</th>
           </tr>

@@ -29,6 +29,7 @@ import { SliderModule } from './slider/slider.module';
 import { AdminPanelModule } from './admin-panel/admin-panel.module';
 import { FuelSessionModule } from './fuel-session/fuel-session.module';
 import { AnalyticsModule } from './analytics/analytics.module';
+import { AppVersionModule } from './app-version/app-version.module';
 
 @Module({
   imports: [
@@ -50,6 +51,7 @@ import { AnalyticsModule } from './analytics/analytics.module';
     AdminPanelModule,
     FuelSessionModule,
     AnalyticsModule,
+    AppVersionModule,
   ],
   controllers: [
     AppController,

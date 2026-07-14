@@ -19,12 +19,9 @@ import {
   HistoricoM7RotasResponseDto,
 } from '../dto/historico-m7-response.dto';
 import {
-  complementarDiasParaPdf,
   filtrarHistoricoPorPeriodo,
   filtrarTrajetosPorPeriodo,
   M7BuscaPeriodoOptions,
-  obterPrimeiroParadoComDestino,
-  obterUltimoParadoComDestino,
   shiftIsoDate,
   toDateTimeParam,
   validarPeriodoMaximoContestacao,
@@ -472,39 +469,76 @@ export class HistoricoM7Service {
       ? trajetosRaw.trajetos
       : [];
 
-    const { viagens, dias, distanciaTotalKm, velocidadeMaxima } =
-      this.viagensBuilderService.construirViagensEDias(rawList);
+    const parseNum = (value: number | string | undefined): number => {
+      const numero = Number(value ?? 0);
+      return Number.isFinite(numero) ? numero : 0;
+    };
 
-    const existeEnderecoFaltando = viagens.some(
-      (viagem) =>
-        !viagem.origem?.trim() ||
-        viagem.origem === '—' ||
-        !viagem.destino?.trim() ||
-        viagem.destino === '—',
-    );
+    const isZeroTempo = (tempo: string | undefined): boolean => {
+      if (!tempo) return true;
+      return /^0{1,2}:0{1,2}:0{1,2}$/.test(tempo.trim());
+    };
 
-    let diasParaPdf = dias;
+    const viagens = rawList.map((item) => {
+      const tipo = String(item.tipo ?? '').toUpperCase();
+      const tempoMovimentoBruto = String(item.tempo_movimento ?? '00:00:00');
+      const tempoParadoBruto = String(item.tempo_parado ?? '00:00:00');
+      const tempoTotalBruto = String(item.tempo_total ?? '00:00:00');
 
-    if (existeEnderecoFaltando) {
-      const origemReferenciaAnterior = obterUltimoParadoComDestino(rawList);
-      const origemReferenciaPosterior = obterPrimeiroParadoComDestino(rawList);
-      const destinoReferenciaPosterior = obterUltimoParadoComDestino(rawList);
-      const destinoReferenciaAnterior = obterPrimeiroParadoComDestino(rawList);
+      const ehParado = tipo === 'PARADO' || isZeroTempo(tempoMovimentoBruto);
 
-      diasParaPdf = complementarDiasParaPdf(
-        dias,
-        origemReferenciaAnterior,
-        origemReferenciaPosterior,
-        destinoReferenciaPosterior,
-        destinoReferenciaAnterior,
-      );
+      return {
+        origem: tipo || '—',
+        saida: String(item.data_inicio ?? ''),
+        destino: String(item.destino ?? '').trim(),
+        chegada: String(item.data_fim ?? ''),
+        distanciaKm: parseNum(item.distancia),
+        tempoMovimento: `Total: ${tempoTotalBruto}`,
+        tempoParado: `${ehParado ? 'Parado' : 'Viagem'}: ${
+          ehParado ? tempoParadoBruto : tempoMovimentoBruto
+        }`,
+        tempoTotal: '',
+        velocidadeMaxima: parseNum(item.velocidade_maxima),
+      };
+    });
+
+    const porData = new Map<string, (typeof viagens)[number][]>();
+    for (const viagem of viagens) {
+      const dataBase = (viagem.saida || viagem.chegada || '').slice(0, 10);
+      const data = /^\d{4}-\d{2}-\d{2}$/.test(dataBase)
+        ? dataBase
+        : 'Sem data';
+      if (!porData.has(data)) {
+        porData.set(data, []);
+      }
+      porData.get(data)!.push(viagem);
     }
+
+    const diasParaPdf = Array.from(porData.entries())
+      .map(([data, viagensDia]) => ({
+        data,
+        viagens: viagensDia,
+        distanciaTotalKm:
+          Math.round(
+            viagensDia.reduce((acc, viagem) => acc + viagem.distanciaKm, 0) *
+              100,
+          ) / 100,
+      }))
+      .sort((a, b) => a.data.localeCompare(b.data));
+
+    const distanciaTotalKm =
+      Math.round(viagens.reduce((acc, viagem) => acc + viagem.distanciaKm, 0) * 100) /
+      100;
+    const velocidadeMaxima = viagens.reduce(
+      (max, viagem) => Math.max(max, viagem.velocidadeMaxima),
+      0,
+    );
 
     const dadosPdf: HistoricoM7PdfDataDto = {
       veiculo: { codigo, placa, chassi: chassiM7 },
       periodo: { dataInicial, dataFinal },
       resumo: {
-        diasComDados: dias.length,
+        diasComDados: diasParaPdf.length,
         totalViagens: viagens.length,
         distanciaTotalKm,
         velocidadeMaxima,

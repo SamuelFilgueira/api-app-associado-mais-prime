@@ -362,6 +362,49 @@ model VehicleWebhookEvent {
   @@index([tipoevento], map: "VehicleWebhookEvent_tipoevento_idx")
 }
 
+model AppVersionPolicy {
+  id                         Int                       @id @default(autoincrement())
+  platform                   String                    @db.VarChar(10)
+  minSupportedVersion        String                    @db.VarChar(32)
+  minSupportedRuntimeVersion String?                   @db.VarChar(32)
+  minSupportedVersionCode    Int?
+  minSupportedBuildNumber    Int?
+  forceUpdateEnabled         Boolean                   @default(false)
+  title                      String                    @default("Atualizacao obrigatoria") @db.VarChar(120)
+  message                    String                    @default("Uma nova versao do app esta disponivel. Atualize para continuar.") @db.VarChar(500)
+  storeUrl                   String?                   @db.VarChar(500)
+  effectiveFrom              DateTime                  @default(now())
+  effectiveUntil             DateTime?
+  isActive                   Boolean                   @default(true)
+  createdBy                  String?                   @db.VarChar(120)
+  notes                      String?                   @db.Text
+  createdAt                  DateTime                  @default(now())
+  updatedAt                  DateTime                  @updatedAt
+  validationLogs             AppVersionValidationLog[]
+
+  @@index([platform, isActive, effectiveFrom(sort: Desc)], map: "AppVersionPolicy_platform_active_idx")
+}
+
+model AppVersionValidationLog {
+  id             Int               @id @default(autoincrement())
+  requestId      String?           @db.Char(36)
+  platform       String            @db.VarChar(10)
+  appVersion     String?           @db.VarChar(32)
+  runtimeVersion String?           @db.VarChar(32)
+  versionCode    Int?
+  buildNumber    Int?
+  policyId       Int?
+  blocked        Boolean
+  reason         String?           @db.VarChar(120)
+  userId         Int?
+  ipAddress      String?           @db.VarChar(45)
+  userAgent      String?           @db.VarChar(500)
+  createdAt      DateTime          @default(now())
+  policy         AppVersionPolicy? @relation(fields: [policyId], references: [id], onDelete: SetNull, map: "AppVersionValidationLog_policyId_fkey")
+
+  @@index([createdAt(sort: Desc)], map: "AppVersionValidationLog_createdAt_idx")
+}
+
 enum UserRole {
   USER
   ADMIN
