@@ -3,6 +3,7 @@ export interface UltimaPosicaoSoftruckResponse {
   ign?: boolean;
   speed: number;
   voltagem?: number | null;
+  endereco?: string | null;
   latitude: number;
   longitude: number;
   coordinates: {

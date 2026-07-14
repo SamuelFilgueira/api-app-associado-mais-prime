@@ -41,6 +41,7 @@ interface LogicaAuthResponse {
 interface LogicaUltimaPosicaoPayload {
   cidade: string;
   endereco: string;
+  numero: string;
   bairro: string;
   estado: string;
   latitude: number;
@@ -163,7 +164,7 @@ export class LogicaRastreamentoService implements IRastreamentoProvider {
       alertaIgnicao: item.alertaIgnicao,
       cidade: ultimaPosicao.cidade,
       estado: ultimaPosicao.estado,
-      endereco: ultimaPosicao.endereco,
+      endereco: ultimaPosicao.endereco + (ultimaPosicao.numero ? `, ${ultimaPosicao.numero}` : ''),
       bairro: ultimaPosicao.bairro,
       ultimaTrasmissao: ultimaPosicao.ultimaTrasmissao,
       latitude: ultimaPosicao.latitude,

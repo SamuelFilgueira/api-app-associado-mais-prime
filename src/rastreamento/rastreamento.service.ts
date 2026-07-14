@@ -207,7 +207,7 @@ export class RastreamentoService {
       selecionado.data,
       selecionado.origem,
     );
-
+    //.debug("Resposta para rastreamento unificado:", payload, "Origem selecionada:", selecionado.origem);
     return { ...payload, origem: selecionado.origem };
   }
 
@@ -659,12 +659,12 @@ export class RastreamentoService {
         condutorNome: null,
         alertaIgnicao: false,
         cidade: null,
-        endereco: null,
+        endereco: softruck.endereco ?? null,
         bairro: null,
         estado: null,
         direcao: null,
         hodometro: null,
-        voltagem: null,
+        voltagem: softruck.voltagem ?? null,
         identificador: softruck.plate,
       };
     }

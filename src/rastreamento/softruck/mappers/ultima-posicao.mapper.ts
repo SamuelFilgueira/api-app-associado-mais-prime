@@ -8,7 +8,7 @@ export function mapearUltimaPosicaoSoftruck(
   vehicleData: { id: string; plate: string; brandName: string; modelName: string },
 ): UltimaPosicaoSoftruckResponse {
   const attributes = data.data.attributes;
-
+  // console.debug(`Mapping Softruck tracking response: ${JSON.stringify(data)}`);
   const date = formatarData(attributes.act);
 
   const [longitudeRaw, latitudeRaw] = attributes.geometry.coordinates;
@@ -22,6 +22,7 @@ export function mapearUltimaPosicaoSoftruck(
         ? Number.parseFloat(voltagemRaw.replace(',', '.'))
         : Number.NaN;
   const voltagem = Number.isFinite(voltagemParsed) ? voltagemParsed : null;
+  //console.log(`Parsed coordinates: latitude=${latitude}, longitude=${longitude}, voltagem=${voltagem}`);
 
   if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) {
     throw new InternalServerErrorException(

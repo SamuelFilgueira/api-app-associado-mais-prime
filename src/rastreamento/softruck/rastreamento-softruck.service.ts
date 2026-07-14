@@ -20,6 +20,7 @@ import {
   SoftruckByKeysApiResponse,
   SoftruckGeomFeatureCollection,
 } from './interfaces/softruck-trajectories.interface';
+import { M7ReverseGeocodeService } from '../m7/services/m7-reverse-geocode.service';
 
 /** Timeout padrão para chamadas HTTP à API Softruck (em ms) */
 const SOFTRUCK_REQUEST_TIMEOUT = 15_000;
@@ -29,6 +30,9 @@ const CACHE_TTL = 10 * 60 * 1000;
 
 /** TTL do token JWT em ms (menos buffer para renovar antecipadamente) */
 const TOKEN_TTL_BUFFER_MS = 60_000; // 1 minuto antes de expirar
+const SOFTRUCK_REV_GEOCODE_TIMEOUT_MS = Number(
+  process.env.SOFTRUCK_REV_GEOCODE_TIMEOUT_MS ?? 900,
+);
 
 @Injectable()
 export class RastreamentoSoftruck {
@@ -63,7 +67,10 @@ export class RastreamentoSoftruck {
     }>
   >();
 
-  constructor(tokenResolver: TokenResolverService) {
+  constructor(
+    tokenResolver: TokenResolverService,
+    private readonly reverseGeocodeService: M7ReverseGeocodeService,
+  ) {
     this.tokenResolver = tokenResolver;
 
     this.axiosInstance = axios.create({
@@ -80,6 +87,49 @@ export class RastreamentoSoftruck {
         timeout: SOFTRUCK_REQUEST_TIMEOUT,
       }),
     });
+  }
+
+  private async obterEnderecoLocalPorCoordenadas(
+    latitude: number,
+    longitude: number,
+    baseOrigin: BaseOrigin,
+  ): Promise<string | null> {
+    const lat = this.reverseGeocodeService.normalizarCoordenada(latitude);
+    const lon = this.reverseGeocodeService.normalizarCoordenada(longitude);
+
+    if (!lat || !lon) {
+      return null;
+    }
+
+    const timeoutMs = Number.isFinite(SOFTRUCK_REV_GEOCODE_TIMEOUT_MS)
+      ? Math.max(100, SOFTRUCK_REV_GEOCODE_TIMEOUT_MS)
+      : 900;
+
+    try {
+      const endereco = await Promise.race<string | null>([
+        this.reverseGeocodeService.reverseGeocodeCoordenada(
+          lat,
+          lon,
+          baseOrigin,
+        ),
+        new Promise<null>((resolve) => {
+          setTimeout(() => resolve(null), timeoutMs);
+        }),
+      ]);
+
+      if (!endereco || endereco === `${lat}, ${lon}`) {
+        return null;
+      }
+
+      return endereco;
+    } catch (error) {
+      this.logger.warn(
+        `[${baseOrigin}] Falha no reverse geocode local Softruck (${lat},${lon}): ${
+          error instanceof Error ? error.message : 'erro desconhecido'
+        }`,
+      );
+      return null;
+    }
   }
 
   private getCached<T>(
@@ -751,7 +801,17 @@ export class RastreamentoSoftruck {
       );
 
       const mapped = mapearUltimaPosicaoSoftruck(trackingData, vehicleData);
-      return mapped;
+      //console.debug(`Mapped Softruck tracking data: ${JSON.stringify(mapped)}`);
+      const endereco = await this.obterEnderecoLocalPorCoordenadas(
+        mapped.latitude,
+        mapped.longitude,
+        baseOrigin,
+      );
+
+      return {
+        ...mapped,
+        endereco,
+      };
     } catch (error) {
       if (error instanceof InternalServerErrorException) throw error;
       this.logger.error(
