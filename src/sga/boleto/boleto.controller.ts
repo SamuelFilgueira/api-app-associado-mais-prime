@@ -1,5 +1,7 @@
-import { Controller, Post, Body, UseGuards, Logger } from '@nestjs/common';
+import { Body, Controller, Logger, Post, Req, UseGuards } from '@nestjs/common';
+import type { Request } from 'express';
 import { JwtAuthGuard } from '../../auth/jwt-auth.guard';
+import { JwtUser } from '../../auth/jwt-user.interface';
 import { BoletoService } from './boleto.service';
 
 @UseGuards(JwtAuthGuard)
@@ -10,10 +12,17 @@ export class BoletoController {
   constructor(private readonly boletoService: BoletoService) {}
 
   @Post('listar')
-  async listarBoletos(@Body() body: { codigo_veiculo: number }) {
+  async listarBoletos(
+    @Req() req: Request & { user: JwtUser },
+    @Body() body: { codigo_veiculo: number },
+  ) {
     this.logger.log(
       `Dados recebidos em listarBoletos: ${JSON.stringify(body)}`,
     );
-    return this.boletoService.consultarBoletosPorVeiculo(body.codigo_veiculo);
+    return this.boletoService.consultarBoletosPorVeiculo(
+      Number(req.user.userId),
+      body.codigo_veiculo,
+      req.user.baseOrigin,
+    );
   }
 }
