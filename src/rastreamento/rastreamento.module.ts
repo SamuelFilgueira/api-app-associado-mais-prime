@@ -17,10 +17,18 @@ import { M7ReverseGeocodeService } from './m7/services/m7-reverse-geocode.servic
 import { M7ViagensBuilderService } from './m7/services/m7-viagens-builder.service';
 import { RastreamentoM7 } from './rastreamento-m7';
 import { LogicaRastreamentoService } from './rastreamento.logica';
+import { TrajetosController } from './logica/controllers/trajetos.controller';
+import { TrajetosService } from './logica/services/trajetos.service';
+import { TrajetoPdfLogicaService } from './logica/pdf/trajeto-pdf-logica.service';
 
 @Module({
   imports: [NotificationsModule, SharedModule],
-  controllers: [RastreamentoController, HistoricoResumoController, HistoricoM7Controller],
+  controllers: [
+    RastreamentoController,
+    HistoricoResumoController,
+    HistoricoM7Controller,
+    TrajetosController,
+  ],
   providers: [
     RastreamentoService,
     WebhookProcessor,
@@ -35,6 +43,8 @@ import { LogicaRastreamentoService } from './rastreamento.logica';
     HistoricoPdfM7Service,
     M7ReverseGeocodeService,
     M7ViagensBuilderService,
+    TrajetosService,
+    TrajetoPdfLogicaService,
   ],
 })
 export class RastreamentoModule {}

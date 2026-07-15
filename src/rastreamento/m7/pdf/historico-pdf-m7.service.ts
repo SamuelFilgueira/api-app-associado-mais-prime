@@ -625,7 +625,7 @@ function gerarHtmlRelatorioContestacaoV2(
           ${logoTag}
           <div>
             <h1>Relatório de Rotas Detalhadas</h1>
-            <p class="sub">Pontos GPS completos com geocode — para análise de infração</p>
+            <p class="sub">Pontos GPS completos com geocode — para análise de rota</p>
           </div>
         </div>
         <div class="meta-right">
