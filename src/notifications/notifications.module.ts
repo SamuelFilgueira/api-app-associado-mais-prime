@@ -4,11 +4,13 @@ import { NotificationsController } from './notifications.controller';
 import { AdminTokenGuard } from './admin-token.guard';
 import { NotificationProcessor } from './notification.processor';
 import { AdminPanelRoleGuard } from '../admin-panel/admin-panel-role.guard';
+import { MarketingNotificationAuditService } from './marketing-notification-audit.service';
 
 @Module({
   controllers: [NotificationsController],
   providers: [
     NotificationsService,
+    MarketingNotificationAuditService,
     AdminTokenGuard,
     AdminPanelRoleGuard,
     NotificationProcessor,

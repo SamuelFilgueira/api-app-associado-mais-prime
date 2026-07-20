@@ -26,6 +26,7 @@ import { RegisterExpoTokenDto } from './DTOs/register-expo-token.dto';
 import { AdminPanelRoleGuard } from '../admin-panel/admin-panel-role.guard';
 import { AdminPanelRoles } from '../admin-panel/admin-panel-roles.decorator';
 import { AdminPanelRole } from '../admin-panel/admin-panel-role.enum';
+import { MarketingNotificationAuditService } from './marketing-notification-audit.service';
 
 @Controller('notifications')
 export class NotificationsController {
@@ -40,6 +41,7 @@ export class NotificationsController {
   constructor(
     private readonly notificationsService: NotificationsService,
     @InjectQueue(NOTIFICATION_QUEUE) private readonly notificationQueue: Queue,
+    private readonly marketingNotificationAuditService: MarketingNotificationAuditService,
   ) {}
 
   /**
@@ -262,6 +264,12 @@ export class NotificationsController {
     @Body() dto: SendMarketingNotificationDto,
     @Request() req: any,
   ) {
+    const auditId =
+      await this.marketingNotificationAuditService.createRequestAudit(
+        req.user?.userId,
+        dto,
+      );
+
     this.logger.log('[MARKETING] Iniciando envio de notificações de marketing');
     try {
       const result = await this.notificationsService.sendMarketingNotification(
@@ -269,11 +277,22 @@ export class NotificationsController {
         req.user?.userId,
       );
 
+      await this.marketingNotificationAuditService.markSuccess(
+        auditId,
+        result.sentCount,
+        result.skippedCount,
+      );
+
       this.logger.log(
         `[MARKETING] ✅ Envio concluído: ${result.sentCount} enviadas, ${result.skippedCount} puladas`,
       );
       return result;
     } catch (error) {
+      await this.marketingNotificationAuditService.markFailure(
+        auditId,
+        error?.message || 'Erro desconhecido',
+      );
+
       this.logger.error(`[MARKETING] ❌ Erro: ${error.message}`, error.stack);
       throw error;
     }

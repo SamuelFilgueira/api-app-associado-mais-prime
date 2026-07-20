@@ -72,8 +72,32 @@ model AdminPanelUser {
   role      AdminPanelRole
   createdAt DateTime       @default(now())
   updatedAt DateTime       @updatedAt
+  marketingNotificationAuditLogs MarketingNotificationAuditLog[]
 
   @@index([role], map: "AdminPanelUser_role_idx")
+}
+
+model MarketingNotificationAuditLog {
+  id                 Int            @id @default(autoincrement())
+  adminPanelUserId   Int
+  title              String         @db.VarChar(255)
+  body               String         @db.Text
+  messagePayload     Json
+  status             String         @default("REQUESTED") @db.VarChar(20)
+  sentCount          Int?
+  skippedCount       Int?
+  errorMessage       String?        @db.VarChar(500)
+  normalizedAt       String         @db.VarChar(19)
+  normalizedTimezone String         @db.VarChar(64)
+  requestedAt        DateTime       @default(now())
+  processedAt        DateTime?
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+  adminPanelUser     AdminPanelUser @relation(fields: [adminPanelUserId], references: [id], onDelete: Restrict, map: "MarketingNotificationAuditLog_adminPanelUserId_fkey")
+
+  @@index([adminPanelUserId], map: "MarketingNotificationAuditLog_adminPanelUserId_idx")
+  @@index([requestedAt], map: "MarketingNotificationAuditLog_requestedAt_idx")
+  @@index([status], map: "MarketingNotificationAuditLog_status_idx")
 }
 
 model AnalyticsActionDaily {
