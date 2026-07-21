@@ -92,7 +92,7 @@ export class MailService {
     const mailOptions: nodemailer.SendMailOptions = {
       from: `"Mais Prime App" <${process.env.GMAIL_USER}>`,
       to: 'previa@maisprime.org.br',
-      subject: '----TESTE DESENVOLVIMENTO----Nova Vistoria Recebida',
+      subject: 'Nova Vistoria Recebida',
       html: `
           <div style="font-family: Arial, sans-serif; max-width: 480px; margin: auto; padding: 24px; border: 1px solid #e0e0e0; border-radius: 8px;">
           <h2 style="color: #333;">Fotos de revistoria adicionadas para o chassi ${chassi} </h2>
