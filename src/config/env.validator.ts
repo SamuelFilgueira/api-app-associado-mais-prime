@@ -1,18 +1,10 @@
 import { Logger } from '@nestjs/common';
+import { TENANT, tenantEnvName } from './tenant.config';
 
-// Variáveis obrigatórias — app NÃO sobe sem elas
-const REQUIRED = [
+// Variáveis obrigatórias independentes de tenant — app NÃO sobe sem elas
+const REQUIRED_BASE = [
   'JWT_SECRET',
   'DATABASE_URL',
-  'USER_SGA_MAIS_PRIME',
-  'PASSWORD_SGA_MAIS_PRIME',
-  'TOKEN_BASE_SGA_MAIS_PRIME',
-  'USER_SGA_MAIS_PRIME_RS',
-  'PASSWORD_SGA_MAIS_PRIME_RS',
-  'TOKEN_BASE_SGA_MAIS_PRIME_RS',
-  'LOGICA_TOKEN',
-  'PUBLIC_KEY_SOFTRUCK',
-  'PUBLIC_KEY_SOFTRUCK_RS',
   'REDIS_HOST',
   'ANALYTICS_SECRET',
 ];
@@ -40,10 +32,41 @@ const WARN_IF_MISSING = [
   'x_clientemployee_token',
 ];
 
+/**
+ * Monta a lista de envs obrigatórias das integrações, por base configurada.
+ *
+ * Quais integrações entram é controlado por `TENANT_REQUIRED_INTEGRATIONS`
+ * (default: `sga,softruckPublicKey,logica`). Uma empresa que ainda não
+ * contratou Softruck ou Lógica pode reduzir a lista sem tocar em código.
+ *
+ * `LOGICA_TOKEN` é exigido apenas da base padrão, replicando o
+ * comportamento anterior à parametrização.
+ */
+function requiredTenantEnvVars(): string[] {
+  const vars = new Set<string>();
+
+  for (const base of TENANT.baseNames) {
+    for (const kind of TENANT.requiredIntegrations) {
+      if (kind === 'logica' && base !== TENANT.defaultBase) {
+        continue;
+      }
+      vars.add(tenantEnvName(base, kind));
+    }
+  }
+
+  return [...vars];
+}
+
 export function validateEnvOrThrow() {
   const logger = new Logger('EnvValidator');
 
-  const missing = REQUIRED.filter((k) => !process.env[k]);
+  logger.log(
+    `Tenant: ${TENANT.name} | bases=[${TENANT.baseNames.join(', ')}] | base padrão=${TENANT.defaultBase}`,
+  );
+
+  const required = [...REQUIRED_BASE, ...requiredTenantEnvVars()];
+
+  const missing = required.filter((k) => !process.env[k]);
   if (missing.length) {
     logger.error(`Variáveis de ambiente ausentes: ${missing.join(', ')}`);
     throw new Error(`Missing environment variables: ${missing.join(', ')}`);

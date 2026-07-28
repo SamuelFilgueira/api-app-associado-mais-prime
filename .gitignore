@@ -60,5 +60,14 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 # Uploads
 /uploads
 
+# Payloads reais de webhook (placas, chassis, coordenadas de associados).
+# Não devem ser versionados — vazam dados operacionais entre empresas do grupo.
+/webhook/payloads
 
-*.md
+# Notas de trabalho temporárias na raiz do projeto.
+# A documentação em docs/ e os arquivos de projeto (README, CLAUDE, CHANGELOG)
+# CONTINUAM versionados — a regra anterior "*.md" ignorava tudo, incluindo docs/.
+/*.md
+!README.md
+!CLAUDE.md
+!CHANGELOG.md

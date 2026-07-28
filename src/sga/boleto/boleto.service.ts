@@ -6,6 +6,7 @@ import {
 import axios from 'axios';
 import { PrismaService } from '../../prisma.service';
 import { BaseOrigin } from 'src/shared/token-resolver.service';
+import { TENANT } from 'src/config/tenant.config';
 import { SgaAuthService } from 'src/shared/sga-auth.service';
 
 function formatDateBR(date: Date) {
@@ -84,7 +85,7 @@ export class BoletoService {
 
       if (!userVehicle) {
         return {
-          baseOrigin: tokenBaseOrigin ?? 'MAIS_PRIME',
+          baseOrigin: tokenBaseOrigin ?? TENANT.defaultBase,
           vehicleBelongsToUser: false,
         };
       }
@@ -100,7 +101,7 @@ export class BoletoService {
         };
       }
 
-      return { baseOrigin: 'MAIS_PRIME', vehicleBelongsToUser: true };
+      return { baseOrigin: TENANT.defaultBase, vehicleBelongsToUser: true };
     } catch (error: unknown) {
       this.logger.warn(
         `Falha ao resolver contexto do veículo userId=${userId} codigo_veiculo=${codigoVeiculo}: ${error instanceof Error ? error.message : String(error)}`,
@@ -108,7 +109,7 @@ export class BoletoService {
     }
 
     return {
-      baseOrigin: tokenBaseOrigin ?? 'MAIS_PRIME',
+      baseOrigin: tokenBaseOrigin ?? TENANT.defaultBase,
       vehicleBelongsToUser: true,
     };
   }

@@ -2,12 +2,13 @@ import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common
 import * as fs from 'fs';
 import * as path from 'path';
 import puppeteer from 'puppeteer';
+import { TENANT } from 'src/config/tenant.config';
 import { HistoricoPdfDataDto, HistoricoSegmentoDto } from '../dto/historico-response.dto';
 import { escapeHtml, formatarDuracao } from '../utils/formatters';
 
 function carregarLogoBase64(): string {
   try {
-    const logoPath = path.join(process.cwd(), 'assets', 'Logo.png');
+    const logoPath = path.resolve(process.cwd(), TENANT.logoPath);
     return fs.readFileSync(logoPath).toString('base64');
   } catch {
     return '';

@@ -20,6 +20,7 @@ import { AddPhotosDto } from './dto/add-photos.dto';
 import { UpsertTemplatePhotoDto } from './dto/upsert-template-photo.dto';
 import { MailService } from 'src/common/services/mail.service';
 import { BaseOrigin } from 'src/shared/token-resolver.service';
+import { TENANT } from 'src/config/tenant.config';
 import { SgaAuthService } from 'src/shared/sga-auth.service';
 import { SgaService } from 'src/sga/sga.service';
 import { debugLog } from 'src/shared/debug-log.util';
@@ -817,7 +818,7 @@ export class ReinspectionService {
     const hinovaUrl = `https://api.hinova.com.br/api/sga/v2/veiculo/foto/cadastrar`;
     const baseOrigin =
       (reinspection.userVehicle?.user?.baseOrigin as BaseOrigin | null) ??
-      'MAIS_PRIME';
+      TENANT.defaultBase;
 
     this.logger.debug(
       `Enviando revistoria aprovada para Hinova | reinspectionId=${reinspection.id} | fotos=${payloadPhotos.length} | codigoVeiculo=${reinspection.codigoVeiculo ?? 'N/A'}`,

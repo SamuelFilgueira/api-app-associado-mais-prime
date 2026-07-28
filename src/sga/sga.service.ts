@@ -10,6 +10,7 @@ import { Queue } from 'bullmq';
 import axios from 'axios';
 import { PrismaService } from '../prisma.service';
 import { BaseOrigin } from 'src/shared/token-resolver.service';
+import { TENANT } from 'src/config/tenant.config';
 import { SgaAuthService } from 'src/shared/sga-auth.service';
 import { baseTag } from 'src/shared/log.util';
 import { debugLog } from 'src/shared/debug-log.util';
@@ -58,7 +59,7 @@ export class SgaService {
   ) {
     const url = `https://api.hinova.com.br/api/sga/v2/associado/buscar/${cpf}`;
 
-    let baseOrigin: BaseOrigin = baseOriginOverride ?? 'MAIS_PRIME';
+    let baseOrigin: BaseOrigin = baseOriginOverride ?? TENANT.defaultBase;
 
     if (!baseOriginOverride) {
       // Fallback: tenta resolver baseOrigin pelo CPF no banco
@@ -89,7 +90,7 @@ export class SgaService {
     const url = `https://api.hinova.com.br/api/sga/v2/veiculo/buscar/${chassi}`;
 
     // try to determine baseOrigin from vehicle owner
-    let baseOrigin: BaseOrigin = 'MAIS_PRIME';
+    let baseOrigin: BaseOrigin = TENANT.defaultBase;
     try {
       const userVehicle = await this.prisma.userVehicle.findFirst({
         where: { chassi },
@@ -349,7 +350,7 @@ export class SgaService {
 
     const cpf = userVehicle.user.cpf.replace(/\D/g, '');
     const baseOrigin: BaseOrigin =
-      (userVehicle.user.baseOrigin as BaseOrigin) ?? 'MAIS_PRIME';
+      (userVehicle.user.baseOrigin as BaseOrigin) ?? TENANT.defaultBase;
 
     // 2. Buscar dados do associado (codigo_associado, codigo_regional)
     // Passa baseOrigin explicitamente para evitar resolução errada por CPF formatado

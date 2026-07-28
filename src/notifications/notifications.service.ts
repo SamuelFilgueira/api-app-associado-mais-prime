@@ -2,10 +2,12 @@ import {
   Injectable,
   NotFoundException,
   ForbiddenException,
+  BadRequestException,
   Logger,
 } from '@nestjs/common';
 import { Expo, ExpoPushMessage } from 'expo-server-sdk';
 import { PrismaService } from '../prisma.service';
+import { FileUploadService } from '../common/services/file-upload.service';
 import { Notification } from '@prisma/client';
 import {
   GetNotificationsResponseDto,
@@ -24,7 +26,10 @@ export class NotificationsService {
   private expo = new Expo();
   private readonly logger = new Logger(NotificationsService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private readonly fileUploadService: FileUploadService,
+  ) {}
 
   private maskExpoPushToken(token?: string | null): string {
     if (!token) return 'ausente';
@@ -674,5 +679,55 @@ export class NotificationsService {
       sentCount: sentNotifications.length,
       skippedCount,
     };
+  }
+
+  async getActivePopup() {
+    return this.prisma.notificationPopup.findFirst({
+      where: { active: true },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async upsertPopup(
+    id: number | undefined,
+    data: { imageUrl?: string; linkUrl?: string; linkLabel?: string; active?: boolean },
+    userId: number,
+    image?: Express.Multer.File,
+  ) {
+    let imageUrl = data.imageUrl;
+
+    if (image) {
+      const uploadedPath = await this.fileUploadService.uploadPopupPhoto(image);
+      imageUrl = this.fileUploadService.buildUrl(uploadedPath) ?? undefined;
+    }
+
+    const upsertData: any = {
+      linkUrl: data.linkUrl,
+      linkLabel: data.linkLabel,
+      active: data.active,
+      userId,
+    };
+
+    if (imageUrl) {
+      upsertData.imageUrl = imageUrl;
+    }
+
+    if (!imageUrl && upsertData.active) {
+      upsertData.active = false;
+    }
+
+    if (!imageUrl && !id) {
+      throw new BadRequestException('A imagem do pop-up é obrigatória');
+    }
+
+    if (id) {
+      const existing = await this.prisma.notificationPopup.findUnique({ where: { id } });
+      if (!existing) {
+        throw new NotFoundException('Popup não encontrado');
+      }
+      return this.prisma.notificationPopup.update({ where: { id }, data: upsertData });
+    }
+
+    return this.prisma.notificationPopup.create({ data: upsertData });
   }
 }

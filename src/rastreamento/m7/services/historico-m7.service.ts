@@ -8,6 +8,11 @@ import {
 import axios from 'axios';
 import { BaseOrigin } from 'src/shared/token-resolver.service';
 import {
+  mapTenantBases,
+  TENANT,
+  tenantEnvName,
+} from 'src/config/tenant.config';
+import {
   M7ConsultaVeiculoResponse,
   M7HistoricoApiResponse,
   M7TrajetosApiResponse,
@@ -34,14 +39,6 @@ import { M7ViagensBuilderService } from './m7-viagens-builder.service';
 const M7_REQUEST_TIMEOUT = 50_000;
 const MAX_LOG_PAYLOAD_LENGTH = 1_500;
 
-const M7_CREDENTIALS: Record<
-  BaseOrigin,
-  { tokenEnvVar: string; codigoEnvVar: string }
-> = {
-  MAIS_PRIME: { tokenEnvVar: 'MO7_TOKEN', codigoEnvVar: 'M07_CODIGO' },
-  MAIS_PRIME_RS: { tokenEnvVar: 'MO7_TOKEN_RS', codigoEnvVar: 'M07_CODIGO_RS' },
-};
-
 type TokenState = {
   token: string | null;
   tokenExpires: number | null;
@@ -66,26 +63,23 @@ export class HistoricoM7Service {
     return `${serialized.slice(0, MAX_LOG_PAYLOAD_LENGTH)}... [truncated ${serialized.length - MAX_LOG_PAYLOAD_LENGTH} chars]`;
   }
 
-  private readonly tokenState: Record<BaseOrigin, TokenState> = {
-    MAIS_PRIME: { token: null, tokenExpires: null, tokenRenewalPromise: null },
-    MAIS_PRIME_RS: {
-      token: null,
-      tokenExpires: null,
-      tokenRenewalPromise: null,
-    },
-  };
+  private readonly tokenState: Record<BaseOrigin, TokenState> = mapTenantBases(
+    () => ({ token: null, tokenExpires: null, tokenRenewalPromise: null }),
+  );
 
   constructor(
     private readonly pdfService: HistoricoPdfM7Service,
     private readonly reverseGeocodeService: M7ReverseGeocodeService,
     private readonly viagensBuilderService: M7ViagensBuilderService,
   ) {
-    void this.renovarToken('MAIS_PRIME');
-    void this.renovarToken('MAIS_PRIME_RS');
+    for (const base of TENANT.baseNames) {
+      void this.renovarToken(base);
+    }
 
     setInterval(() => {
-      this.renovarToken('MAIS_PRIME').catch(() => {});
-      this.renovarToken('MAIS_PRIME_RS').catch(() => {});
+      for (const base of TENANT.baseNames) {
+        this.renovarToken(base).catch(() => {});
+      }
     }, 1_800_000).unref();
   }
 
@@ -93,7 +87,7 @@ export class HistoricoM7Service {
   // Token management
   // ---------------------------------------------------------------------------
 
-  async renovarToken(baseOrigin: BaseOrigin = 'MAIS_PRIME') {
+  async renovarToken(baseOrigin: BaseOrigin = TENANT.defaultBase) {
     const state = this.tokenState[baseOrigin];
 
     if (state.tokenRenewalPromise) {
@@ -112,9 +106,8 @@ export class HistoricoM7Service {
   }
 
   private async executeRenovarToken(baseOrigin: BaseOrigin): Promise<void> {
-    const { tokenEnvVar, codigoEnvVar } = M7_CREDENTIALS[baseOrigin];
-    const apiM7Token = process.env[tokenEnvVar];
-    const codigo = process.env[codigoEnvVar];
+    const apiM7Token = process.env[tenantEnvName(baseOrigin, 'm7Token')];
+    const codigo = process.env[tenantEnvName(baseOrigin, 'm7Codigo')];
 
     try {
       const response = await axios.post(

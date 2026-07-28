@@ -13,6 +13,7 @@ import { FileUploadService } from 'src/common/services/file-upload.service';
 import { PrismaService } from 'src/prisma.service';
 import { UpdateAssociadoDto } from './DTOs/update-associado.dto';
 import { BaseOrigin } from 'src/shared/token-resolver.service';
+import { TENANT } from 'src/config/tenant.config';
 import { SgaAuthService } from 'src/shared/sga-auth.service';
 import { baseTag } from 'src/shared/log.util';
 
@@ -202,7 +203,7 @@ export class AssociadoService {
     }
 
     // Tenta cada base sequencialmente com retry automático
-    const bases: BaseOrigin[] = ['MAIS_PRIME', 'MAIS_PRIME_RS'];
+    const bases: BaseOrigin[] = TENANT.baseNames;
     for (const base of bases) {
       try {
         const response = await this.callSgaWithRetry(

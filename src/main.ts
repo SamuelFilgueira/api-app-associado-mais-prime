@@ -9,6 +9,7 @@ import { join } from 'path';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { json, urlencoded } from 'express';
 import { validateEnvOrThrow } from './config/env.validator';
+import { TENANT } from './config/tenant.config';
 import { Logger } from '@nestjs/common';
 import { LoggingInterceptor } from './infra/interceptors/logging.interceptor';
 import { HttpExceptionFilter } from './infra/filters/http-exception.filter';
@@ -50,7 +51,7 @@ async function bootstrap() {
   });
 
   const config = new DocumentBuilder()
-    .setTitle('Benefícios API')
+    .setTitle(`Benefícios API — ${TENANT.name}`)
     .setVersion('1.0')
     .build();
   const doc = SwaggerModule.createDocument(app, config);

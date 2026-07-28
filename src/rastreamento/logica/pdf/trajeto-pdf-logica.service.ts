@@ -6,6 +6,7 @@ import {
 import * as fs from 'fs';
 import * as path from 'path';
 import puppeteer from 'puppeteer';
+import { TENANT } from 'src/config/tenant.config';
 import { TrajetoPosicao, TrajetoResumo } from '../dto/trajeto.dto';
 
 interface TrajetoPdfData {
@@ -19,7 +20,7 @@ interface TrajetoPdfData {
 
 function carregarLogoBase64(): string {
   try {
-    const logoPath = path.join(process.cwd(), 'assets', 'Logo.png');
+    const logoPath = path.resolve(process.cwd(), TENANT.logoPath);
     return fs.readFileSync(logoPath).toString('base64');
   } catch {
     return '';
@@ -292,7 +293,7 @@ function gerarHtmlRelatorio(data: TrajetoPdfData): string {
       </table>
 
       <div class="footer">
-        Relatório gerado pelo sistema Mais Prime — ${escapeHtml(dataGeracao)}
+        Relatório gerado pelo sistema ${TENANT.reportName} — ${escapeHtml(dataGeracao)}
       </div>
     </body>
     </html>

@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import axios from 'axios';
 import { BaseOrigin, TokenResolverService } from '../shared/token-resolver.service';
+import { mapTenantBases, TENANT } from '../config/tenant.config';
 import { M7ReverseGeocodeService } from './m7/services/m7-reverse-geocode.service';
 import {
   IRastreamentoProvider,
@@ -90,13 +91,12 @@ export class RastreamentoM7 implements IRastreamentoProvider, OnModuleInit, OnMo
   // Estado interno
   // -------------------------------------------------------------------------
 
-  private readonly bases: BaseOrigin[] = ['MAIS_PRIME', 'MAIS_PRIME_RS'];
+  private readonly bases: BaseOrigin[] = TENANT.baseNames;
 
   /** Estado de token por base de origem. */
-  private readonly tokenState: Record<BaseOrigin, TokenState> = {
-    MAIS_PRIME: { token: null, tokenExpires: null, tokenRenewalPromise: null },
-    MAIS_PRIME_RS: { token: null, tokenExpires: null, tokenRenewalPromise: null },
-  };
+  private readonly tokenState: Record<BaseOrigin, TokenState> = mapTenantBases(
+    () => ({ token: null, tokenExpires: null, tokenRenewalPromise: null }),
+  );
 
   private renewalInterval: NodeJS.Timeout;
 
@@ -200,7 +200,7 @@ export class RastreamentoM7 implements IRastreamentoProvider, OnModuleInit, OnMo
    * Renova o token M7 com mutex — chamadas concorrentes reutilizam
    * a mesma promise de renovação, evitando múltiplos logins simultâneos.
    */
-  async renovarToken(baseOrigin: BaseOrigin = 'MAIS_PRIME') {
+  async renovarToken(baseOrigin: BaseOrigin = TENANT.defaultBase) {
     const state = this.tokenState[baseOrigin];
 
     if (state.tokenRenewalPromise) {
@@ -328,6 +328,7 @@ export class RastreamentoM7 implements IRastreamentoProvider, OnModuleInit, OnMo
   cnpj: string,
   chassi: string,
   baseOrigin: BaseOrigin,
+  reverseGeocode: boolean = true,
 ): Promise<UltimaPosicaoM7Response> {
   try {
     this.logger.debug(`[${baseOrigin}] Consultando última posição M7 para chassi=${chassi}`);
@@ -343,24 +344,24 @@ export class RastreamentoM7 implements IRastreamentoProvider, OnModuleInit, OnMo
     );
     this.logger.debug(`[${baseOrigin}] Resposta recebida da M7 para chassi=${chassi}: ${JSON.stringify(data)}`);
 
-    // Primeiro, extrai as coordenadas (ainda não mapeamos)
     const raw = (data as Record<string, unknown>).ultima_posicao as Record<string, unknown> || {};
     const latitude = raw.latitude as string;
     const longitude = raw.longitude as string;
     const cidadeFallback = raw.cidade as string | undefined;
 
-    // Obtém o endereço (se possível)
-    const endereco = await this.obterEnderecoLocalPorCoordenadas(
-      latitude,
-      longitude,
-      baseOrigin,
-      cidadeFallback,
-    );
+    let endereco: string | null | undefined;
+    if (reverseGeocode) {
+      endereco = await this.obterEnderecoLocalPorCoordenadas(
+        latitude,
+        longitude,
+        baseOrigin,
+        cidadeFallback,
+      );
+    }
 
-    // Agora mapeia passando o endereço (se obtido)
     const ultimaPosicaoMapeada = this.mapearUltimaPosicaoM7(
       data as Record<string, unknown>,
-      endereco ?? undefined, // se null, passa undefined para usar fallback
+      endereco ?? undefined,
     );
 
     return ultimaPosicaoMapeada;

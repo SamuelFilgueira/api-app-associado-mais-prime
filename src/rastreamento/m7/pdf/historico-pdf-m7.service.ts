@@ -2,6 +2,7 @@ import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common
 import * as fs from 'fs';
 import * as path from 'path';
 import puppeteer from 'puppeteer';
+import { TENANT } from 'src/config/tenant.config';
 import {
   DiaM7ResumoDto,
   HistoricoM7ContestacaoPdfDataDto,
@@ -12,7 +13,7 @@ import {
 
 function carregarLogoBase64(): string {
   try {
-    const logoPath = path.join(process.cwd(), 'assets', 'Logo.png');
+    const logoPath = path.resolve(process.cwd(), TENANT.logoPath);
     return fs.readFileSync(logoPath).toString('base64');
   } catch {
     return '';
@@ -475,7 +476,7 @@ function gerarHtmlRelatorio(dados: HistoricoM7PdfDataDto): string {
       </table>
 
       <div class="footer">
-        Relatório gerado pelo sistema Mais Prime — ${escapeHtml(dataGeracao)}
+        Relatório gerado pelo sistema ${TENANT.reportName} — ${escapeHtml(dataGeracao)}
       </div>
     </body>
     </html>
@@ -675,7 +676,7 @@ function gerarHtmlRelatorioContestacaoV2(
       </table>
 
       <div class="footer">
-        Relatório gerado pelo sistema Mais Prime — ${escapeHtml(dataGeracao)}
+        Relatório gerado pelo sistema ${TENANT.reportName} — ${escapeHtml(dataGeracao)}
       </div>
     </body>
     </html>

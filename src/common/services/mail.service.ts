@@ -3,6 +3,7 @@ import * as nodemailer from 'nodemailer';
 import { join } from 'path';
 import { debugLog } from 'src/shared/debug-log.util';
 import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2';
+import { TENANT } from 'src/config/tenant.config';
 
 @Injectable()
 export class MailService {
@@ -90,8 +91,8 @@ export class MailService {
       : '<p style="color: #888;">Nenhuma imagem local foi encontrada para este registro.</p>';
 
     const mailOptions: nodemailer.SendMailOptions = {
-      from: `"Mais Prime App" <${process.env.GMAIL_USER}>`,
-      to: 'previa@maisprime.org.br',
+      from: `"${TENANT.appName}" <${process.env.GMAIL_USER}>`,
+      to: TENANT.mailPrevia,
       subject: 'Nova Vistoria Recebida',
       html: `
           <div style="font-family: Arial, sans-serif; max-width: 480px; margin: auto; padding: 24px; border: 1px solid #e0e0e0; border-radius: 8px;">
@@ -117,7 +118,7 @@ export class MailService {
           chassi,
           plate: safePlate,
           imagens: attachments.length,
-          destino: 'previa@maisprime.org.br',
+          destino: TENANT.mailPrevia,
         }),
       );
       await this.transporter.sendMail(mailOptions);
@@ -126,7 +127,7 @@ export class MailService {
           chassi,
           plate: safePlate,
           imagens: attachments.length,
-          destino: 'previa@maisprime.org.br',
+          destino: TENANT.mailPrevia,
         }),
       );
     } catch (error) {
@@ -134,7 +135,7 @@ export class MailService {
         debugLog(MailService.name, 'Falha ao enviar e-mail de revistoria', debugId, {
           chassi,
           plate: safePlate,
-          destino: 'previa@maisprime.org.br',
+          destino: TENANT.mailPrevia,
           error: error instanceof Error ? error.message : String(error),
         }),
       );
@@ -150,8 +151,8 @@ export class MailService {
     const safePlate = plate ?? 'N/A';
 
     const mailOptions: nodemailer.SendMailOptions = {
-      from: `"Mais Prime App" <${process.env.GMAIL_USER}>`,
-      to: 'cobranca@maisprime.org.br',
+      from: `"${TENANT.appName}" <${process.env.GMAIL_USER}>`,
+      to: TENANT.mailCobranca,
       subject: 'Revistoria Aprovada com Sucesso',
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 480px; margin: auto; padding: 24px; border: 1px solid #e0e0e0; border-radius: 8px;">
@@ -172,7 +173,7 @@ export class MailService {
         debugLog(MailService.name, 'Enviando e-mail de revistoria aprovada', debugId, {
           chassi,
           plate: safePlate,
-          destino: 'cobranca@maisprime.org.br',
+          destino: TENANT.mailCobranca,
         }),
       );
       await this.transporter.sendMail(mailOptions);
@@ -180,7 +181,7 @@ export class MailService {
         debugLog(MailService.name, 'E-mail de revistoria aprovada enviado', debugId, {
           chassi,
           plate: safePlate,
-          destino: 'cobranca@maisprime.org.br',
+          destino: TENANT.mailCobranca,
         }),
       );
     } catch (error) {
@@ -188,7 +189,7 @@ export class MailService {
         debugLog(MailService.name, 'Falha ao enviar e-mail de revistoria aprovada', debugId, {
           chassi,
           plate: safePlate,
-          destino: 'cobranca@maisprime.org.br',
+          destino: TENANT.mailCobranca,
           error: error instanceof Error ? error.message : String(error),
         }),
       );
@@ -204,10 +205,10 @@ export class MailService {
     const safePlate = plate ?? 'N/A';
 
     const mailOptions: nodemailer.SendMailOptions = {
-      from: `"Mais Prime App" <${process.env.GMAIL_USER}>`,
+      from: `"${TENANT.appName}" <${process.env.GMAIL_USER}>`,
       to: [
-        'cobranca@maisprime.org.br',
-        'previa@maisprime.org.br'
+        TENANT.mailCobranca,
+        TENANT.mailPrevia
       ],
       subject: `Boleto para placa ${safePlate} pago - Revistoria Aprovada`,
       html: `
@@ -228,7 +229,7 @@ export class MailService {
         debugLog(MailService.name, 'Enviando e-mail de boleto pago', debugId, {
           chassi,
           plate: safePlate,
-          destino: ['cobranca@maisprime.org.br', 'previa@maisprime.org.br'],
+          destino: [TENANT.mailCobranca, TENANT.mailPrevia],
         }),
       );
       await this.transporter.sendMail(mailOptions);
@@ -236,7 +237,7 @@ export class MailService {
         debugLog(MailService.name, 'E-mail de boleto pago enviado', debugId, {
           chassi,
           plate: safePlate,
-          destino: ['cobranca@maisprime.org.br', 'previa@maisprime.org.br'],
+          destino: [TENANT.mailCobranca, TENANT.mailPrevia],
         }),
       );
     } catch (error) {
@@ -244,7 +245,7 @@ export class MailService {
         debugLog(MailService.name, 'Falha ao enviar e-mail de boleto pago', debugId, {
           chassi,
           plate: safePlate,
-          destino: ['cobranca@maisprime.org.br', 'previa@maisprime.org.br'],
+          destino: [TENANT.mailCobranca, TENANT.mailPrevia],
           error: error instanceof Error ? error.message : String(error),
         }),
       );
@@ -289,8 +290,8 @@ export class MailService {
       : '<p style="color: #888;">Nenhuma imagem local foi encontrada para este registro.</p>';
 
     const mailOptions: nodemailer.SendMailOptions = {
-      from: `"Mais Prime App" <${process.env.GMAIL_USER}>`,
-      to: 'previa@maisprime.org.br',
+      from: `"${TENANT.appName}" <${process.env.GMAIL_USER}>`,
+      to: TENANT.mailPrevia,
       subject: 'Revistoria - Foto recusada reenviada',
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 480px; margin: auto; padding: 24px; border: 1px solid #e0e0e0; border-radius: 8px;">
@@ -317,7 +318,7 @@ export class MailService {
           chassi,
           plate: safePlate,
           imagens: attachments.length,
-          destino: 'previa@maisprime.org.br',
+          destino: TENANT.mailPrevia,
         }),
       );
       await this.transporter.sendMail(mailOptions);
@@ -326,7 +327,7 @@ export class MailService {
           chassi,
           plate: safePlate,
           imagens: attachments.length,
-          destino: 'previa@maisprime.org.br',
+          destino: TENANT.mailPrevia,
         }),
       );
     } catch (error) {

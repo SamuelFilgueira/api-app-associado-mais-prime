@@ -96,6 +96,26 @@ export class FileUploadService {
     return `uploads/workshop-photos/${filename}`;
   }
 
+  async uploadPopupPhoto(file: Express.Multer.File): Promise<string> {
+    const popupUploadPath = join(process.cwd(), 'uploads', 'popup-photos');
+    await this.ensureDirectory(popupUploadPath);
+
+    const timestamp = Date.now();
+    const randomString = Math.random().toString(36).substring(2, 15);
+    const filename = `popup-${timestamp}-${randomString}.jpg`;
+    const filepath = join(popupUploadPath, filename);
+
+    await sharp(file.buffer)
+      .resize(800, 400, {
+        fit: 'inside',
+        withoutEnlargement: true,
+      })
+      .jpeg({ quality: 85, progressive: true })
+      .toFile(filepath);
+
+    return `uploads/popup-photos/${filename}`;
+  }
+
   async uploadSliderPhoto(file: Express.Multer.File): Promise<string> {
     await this.ensureDirectory(this.sliderUploadPath);
 

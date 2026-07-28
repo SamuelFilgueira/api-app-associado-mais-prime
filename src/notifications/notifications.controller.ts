@@ -3,17 +3,21 @@ import {
   Controller,
   Post,
   Get,
+  Put,
   Patch,
   Param,
   Query,
   ParseIntPipe,
   UseGuards,
+  UseInterceptors,
+  UploadedFile,
   Request,
   HttpCode,
   HttpStatus,
   ForbiddenException,
   Logger,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { NotificationsService } from './notifications.service';
@@ -27,6 +31,7 @@ import { AdminPanelRoleGuard } from '../admin-panel/admin-panel-role.guard';
 import { AdminPanelRoles } from '../admin-panel/admin-panel-roles.decorator';
 import { AdminPanelRole } from '../admin-panel/admin-panel-role.enum';
 import { MarketingNotificationAuditService } from './marketing-notification-audit.service';
+import { UpsertPopupDto } from './DTOs/upsert-popup.dto';
 
 @Controller('notifications')
 export class NotificationsController {
@@ -296,5 +301,38 @@ export class NotificationsController {
       this.logger.error(`[MARKETING] ❌ Erro: ${error.message}`, error.stack);
       throw error;
     }
+  }
+
+  @Get('popup')
+  @UseGuards(JwtAuthGuard)
+  async getActivePopup() {
+    return this.notificationsService.getActivePopup();
+  }
+
+  @Put('popup')
+  @UseGuards(JwtAuthGuard, AdminRoleGuard, AdminPanelRoleGuard)
+  @AdminPanelRoles(AdminPanelRole.MARKETING, AdminPanelRole.ADMIN)
+  @UseInterceptors(FileInterceptor('image'))
+  @HttpCode(HttpStatus.OK)
+  async createPopup(
+    @Body() dto: UpsertPopupDto,
+    @UploadedFile() image: Express.Multer.File,
+    @Request() req: any,
+  ) {
+    return this.notificationsService.upsertPopup(undefined, dto, req.user.userId, image);
+  }
+
+  @Put('popup/:id')
+  @UseGuards(JwtAuthGuard, AdminRoleGuard, AdminPanelRoleGuard)
+  @AdminPanelRoles(AdminPanelRole.MARKETING, AdminPanelRole.ADMIN)
+  @UseInterceptors(FileInterceptor('image'))
+  @HttpCode(HttpStatus.OK)
+  async updatePopup(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpsertPopupDto,
+    @UploadedFile() image: Express.Multer.File,
+    @Request() req: any,
+  ) {
+    return this.notificationsService.upsertPopup(id, dto, req.user.userId, image);
   }
 }

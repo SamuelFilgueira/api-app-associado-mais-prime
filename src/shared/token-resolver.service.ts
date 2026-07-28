@@ -1,59 +1,19 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { baseTag } from './log.util';
+import {
+  BaseOrigin,
+  TenantTokenKind,
+  tenantEnvName,
+} from '../config/tenant.config';
 
-export type BaseOrigin = 'MAIS_PRIME' | 'MAIS_PRIME_RS';
+/**
+ * `BaseOrigin` passou a ser definido em `src/config/tenant.config.ts`.
+ * Reexportado aqui para não quebrar os imports existentes.
+ */
+export type { BaseOrigin } from '../config/tenant.config';
 
-type TokenNames = {
-  sgaUser: string;
-  sgaPassword: string;
-  sgaBaseToken: string;
-  logica: string;
-  softruck: string;
-  softruckUsername: string;
-  softruckPassword: string;
-  softruckPublicKey: string;
-  clubgas: string;
-  m7Token: string;
-  m7Codigo: string;
-  apiSecretAlloyal: string;
-  alloyalBusinessId: string;
-  alloyalBusinessCnpj: string;
-};
-
-const TOKEN_MAP: Record<BaseOrigin, TokenNames> = {
-  MAIS_PRIME: {
-    sgaUser: 'USER_SGA_MAIS_PRIME',
-    sgaPassword: 'PASSWORD_SGA_MAIS_PRIME',
-    sgaBaseToken: 'TOKEN_BASE_SGA_MAIS_PRIME',
-    logica: 'LOGICA_TOKEN',
-    softruck: 'SOFTRUCK_TOKEN',
-    softruckUsername: 'USERNAME_SOFTRUCK',
-    softruckPassword: 'PASSWORD_SOFTRUCK',
-    softruckPublicKey: 'PUBLIC_KEY_SOFTRUCK',
-    clubgas: 'TOKEN_API_CLUBGAS',
-    m7Token: 'MO7_TOKEN',
-    m7Codigo: 'M07_CODIGO',
-    apiSecretAlloyal: 'API_SECRET_ALLOYAL',
-    alloyalBusinessId: 'ALLOYAL_BUSINESS_ID',
-    alloyalBusinessCnpj: 'ALLOYAL_BUSINESS_CNPJ',
-  },
-  MAIS_PRIME_RS: {
-    sgaUser: 'USER_SGA_MAIS_PRIME_RS',
-    sgaPassword: 'PASSWORD_SGA_MAIS_PRIME_RS',
-    sgaBaseToken: 'TOKEN_BASE_SGA_MAIS_PRIME_RS',
-    logica: 'LOGICA_TOKEN_RS',
-    softruck: 'SOFTRUCK_TOKEN_RS',
-    softruckUsername: 'USERNAME_SOFTRUCK_RS',
-    softruckPassword: 'PASSWORD_SOFTRUCK_RS',
-    softruckPublicKey: 'PUBLIC_KEY_SOFTRUCK_RS',
-    clubgas: 'TOKEN_API_CLUBGAS_RS',
-    m7Token: 'MO7_TOKEN_RS',
-    m7Codigo: 'M07_CODIGO_RS',
-    apiSecretAlloyal: 'API_SECRET_ALLOYAL_RS',
-    alloyalBusinessId: 'ALLOYAL_BUSINESS_ID_RS',
-    alloyalBusinessCnpj: 'ALLOYAL_BUSINESS_CNPJ_RS',
-  },
-};
+/** Mantido para compatibilidade com o tipo usado por `getTokenKey`. */
+export type TokenKind = TenantTokenKind;
 
 export interface SgaAuthCredentials {
   user: string;
@@ -76,19 +36,20 @@ export class TokenResolverService {
     return val;
   }
 
+  private resolve(base: BaseOrigin, kind: TenantTokenKind): string {
+    return this.resolveEnv(tenantEnvName(base, kind), base);
+  }
+
   resolveSgaUser(baseOrigin: BaseOrigin): string {
-    const name = TOKEN_MAP[baseOrigin].sgaUser;
-    return this.resolveEnv(name, baseOrigin);
+    return this.resolve(baseOrigin, 'sgaUser');
   }
 
   resolveSgaPassword(baseOrigin: BaseOrigin): string {
-    const name = TOKEN_MAP[baseOrigin].sgaPassword;
-    return this.resolveEnv(name, baseOrigin);
+    return this.resolve(baseOrigin, 'sgaPassword');
   }
 
   resolveSgaBaseToken(baseOrigin: BaseOrigin): string {
-    const name = TOKEN_MAP[baseOrigin].sgaBaseToken;
-    return this.resolveEnv(name, baseOrigin);
+    return this.resolve(baseOrigin, 'sgaBaseToken');
   }
 
   resolveSgaAuthCredentials(baseOrigin: BaseOrigin): SgaAuthCredentials {
@@ -100,78 +61,51 @@ export class TokenResolverService {
   }
 
   resolveLogicaToken(baseOrigin: BaseOrigin): string {
-    const name = TOKEN_MAP[baseOrigin].logica;
-    return this.resolveEnv(name, baseOrigin);
+    return this.resolve(baseOrigin, 'logica');
   }
 
   resolveSoftruckToken(baseOrigin: BaseOrigin): string {
-    const name = TOKEN_MAP[baseOrigin].softruck;
-    return this.resolveEnv(name, baseOrigin);
+    return this.resolve(baseOrigin, 'softruck');
   }
 
   resolveSoftruckUsername(baseOrigin: BaseOrigin): string {
-    const name = TOKEN_MAP[baseOrigin].softruckUsername;
-    return this.resolveEnv(name, baseOrigin);
+    return this.resolve(baseOrigin, 'softruckUsername');
   }
 
   resolveSoftruckPassword(baseOrigin: BaseOrigin): string {
-    const name = TOKEN_MAP[baseOrigin].softruckPassword;
-    return this.resolveEnv(name, baseOrigin);
+    return this.resolve(baseOrigin, 'softruckPassword');
   }
 
   resolveSoftruckPublicKey(baseOrigin: BaseOrigin): string {
-    const name = TOKEN_MAP[baseOrigin].softruckPublicKey;
-    return this.resolveEnv(name, baseOrigin);
+    return this.resolve(baseOrigin, 'softruckPublicKey');
   }
 
   resolveClubgasToken(baseOrigin: BaseOrigin): string {
-    const name = TOKEN_MAP[baseOrigin].clubgas;
-    return this.resolveEnv(name, baseOrigin);
+    return this.resolve(baseOrigin, 'clubgas');
   }
 
   resolveM7Token(baseOrigin: BaseOrigin): string {
-    const name = TOKEN_MAP[baseOrigin].m7Token;
-    return this.resolveEnv(name, baseOrigin);
+    return this.resolve(baseOrigin, 'm7Token');
   }
 
   resolveM7Codigo(baseOrigin: BaseOrigin): string {
-    const name = TOKEN_MAP[baseOrigin].m7Codigo;
-    return this.resolveEnv(name, baseOrigin);
+    return this.resolve(baseOrigin, 'm7Codigo');
   }
 
   resolveApiSecretAlloyal(baseOrigin: BaseOrigin): string {
-    const name = TOKEN_MAP[baseOrigin].apiSecretAlloyal;
-    return this.resolveEnv(name, baseOrigin);
+    return this.resolve(baseOrigin, 'apiSecretAlloyal');
   }
 
   resolveAlloyalBusinessId(baseOrigin: BaseOrigin): string {
-    const name = TOKEN_MAP[baseOrigin].alloyalBusinessId;
-    return this.resolveEnv(name, baseOrigin);
+    return this.resolve(baseOrigin, 'alloyalBusinessId');
   }
 
   resolveAlloyalBusinessCnpj(baseOrigin: BaseOrigin): string {
-    const name = TOKEN_MAP[baseOrigin].alloyalBusinessCnpj;
-    return this.resolveEnv(name, baseOrigin);
+    return this.resolve(baseOrigin, 'alloyalBusinessCnpj');
   }
 
-  getTokenKey(
-    baseOrigin: BaseOrigin,
-    kind:
-      | 'sgaUser'
-      | 'sgaPassword'
-      | 'sgaBaseToken'
-      | 'logica'
-      | 'softruck'
-      | 'softruckUsername'
-      | 'softruckPassword'
-      | 'softruckPublicKey'
-      | 'clubgas'
-      | 'm7Token'
-      | 'm7Codigo'
-      | 'apiSecretAlloyal'
-      | 'alloyalBusinessId'
-      | 'alloyalBusinessCnpj',
-  ): string {
-    return TOKEN_MAP[baseOrigin][kind];
+  /** Nome da variável de ambiente correspondente à base + integração. */
+  getTokenKey(baseOrigin: BaseOrigin, kind: TenantTokenKind): string {
+    return tenantEnvName(baseOrigin, kind);
   }
 }

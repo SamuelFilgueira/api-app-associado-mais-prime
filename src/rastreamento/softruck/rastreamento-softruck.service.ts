@@ -517,6 +517,12 @@ export class RastreamentoSoftruck {
     publicKey: string,
     tokenOverride?: string,
   ): Promise<{ vehicleId: string; deviceId: string }> {
+    const cached = this.getCached(this.deviceCache, vehicleId);
+    if (cached) {
+      this.logger.debug(`[Cache HIT] Device data para vehicle: ${vehicleId}`);
+      return cached;
+    }
+
     try {
       const url = this.buildSoftruckUrl(
         `/vehicles/${vehicleId}/associations/devices`,
@@ -580,6 +586,7 @@ export class RastreamentoSoftruck {
         `IDs de tracking obtidos: trackingVehicleId=${trackingVehicleId} deviceId=${deviceId} para vehicle: ${vehicleId}`,
       );
       const result = { vehicleId: trackingVehicleId, deviceId };
+      this.setCache(this.deviceCache, vehicleId, result);
       return result;
     } catch (error) {
       if (error instanceof InternalServerErrorException) throw error;
@@ -759,6 +766,7 @@ export class RastreamentoSoftruck {
     baseOrigin: BaseOrigin,
     publicKey: string,
     tokenOverride?: string,
+    reverseGeocode: boolean = true,
   ): Promise<UltimaPosicaoSoftruckResponse> {
     try {
       const storedToken = this.softruckTokenByBase.get(baseOrigin);
@@ -801,12 +809,15 @@ export class RastreamentoSoftruck {
       );
 
       const mapped = mapearUltimaPosicaoSoftruck(trackingData, vehicleData);
-      //console.debug(`Mapped Softruck tracking data: ${JSON.stringify(mapped)}`);
-      const endereco = await this.obterEnderecoLocalPorCoordenadas(
-        mapped.latitude,
-        mapped.longitude,
-        baseOrigin,
-      );
+
+      let endereco: string | null | undefined;
+      if (reverseGeocode) {
+        endereco = await this.obterEnderecoLocalPorCoordenadas(
+          mapped.latitude,
+          mapped.longitude,
+          baseOrigin,
+        );
+      }
 
       return {
         ...mapped,

@@ -28,7 +28,10 @@ model user {
   role                          UserRole        @default(USER)
   ancoraAtiva                   Boolean         @default(false)
   expoPushToken                 String?         @db.VarChar(255)
-  baseOrigin                    UserBaseOrigin?
+  // Base de origem (tenant). Deixou de ser enum para que cada empresa do
+  // grupo defina suas bases via TENANT_BASES, sem migration de schema.
+  // Validação dos valores aceitos: src/config/tenant.config.ts
+  baseOrigin                    String?         @db.VarChar(50)
   totalEconomizado              Float           @default(0)
   notifications                 Notification[]
   userVehicles                  UserVehicle[]
@@ -429,14 +432,22 @@ model AppVersionValidationLog {
   @@index([createdAt(sort: Desc)], map: "AppVersionValidationLog_createdAt_idx")
 }
 
+model NotificationPopup {
+  id        Int      @id @default(autoincrement())
+  imageUrl  String
+  linkUrl   String?
+  linkLabel String?  @default("Saiba mais")
+  active    Boolean  @default(false)
+  userId    Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([active, createdAt(sort: Desc)], map: "NotificationPopup_active_createdAt_idx")
+}
+
 enum UserRole {
   USER
   ADMIN
-}
-
-enum UserBaseOrigin {
-  MAIS_PRIME
-  MAIS_PRIME_RS
 }
 
 enum State {

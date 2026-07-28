@@ -15,13 +15,13 @@ import {
   UltimaPosicaoSoftruckResponse,
 } from './softruck/rastreamento-softruck.service';
 import { BaseOrigin, TokenResolverService } from 'src/shared/token-resolver.service';
+import { TENANT } from 'src/config/tenant.config';
 import { baseTag } from 'src/shared/log.util';
 import { NotificationsService } from '../notifications/notifications.service';
 import { HistoricoSoftruckService } from './softruck/services/historico-softruck.service';
 import { HistoricoRotasResponseDto } from './softruck/dto/historico-response.dto';
+import { M7ReverseGeocodeService } from './m7/services/m7-reverse-geocode.service';
 import axios from 'axios';
-
-const DEFAULT_LOGICA_STALE_THRESHOLD_MINUTES = 20;
 
 type RastreamentoUnificadoResponse =
   | UltimaPosicaoLogicaResponse
@@ -65,6 +65,7 @@ export class RastreamentoService {
     private readonly m7: RastreamentoM7,
     private readonly logica: LogicaRastreamentoService,
     private readonly historicoSoftruck: HistoricoSoftruckService,
+    private readonly reverseGeocodeService: M7ReverseGeocodeService,
   ) {}
 
   /**
@@ -128,11 +129,13 @@ export class RastreamentoService {
         baseOrigin: baseContext.baseOrigin,
         tokenKey: baseContext.logicaTokenKey,
       }),
-      this.m7.ultimaPosicaoM7(cnpj, chassi, baseContext.baseOrigin),
+      this.m7.ultimaPosicaoM7(cnpj, chassi, baseContext.baseOrigin, false),
       this.softruck.ultimaPosicaoSoftruck(
         chassi,
         baseContext.baseOrigin,
         baseContext.softruckPublicKey,
+        undefined,
+        false,
       ),
     ]);
 
@@ -185,29 +188,47 @@ export class RastreamentoService {
       throw new Error('Nenhum provedor de rastreamento retornou dados válidos');
     }
 
-    const maisRecente = candidatos.reduce((atualMaisRecente, candidato) =>
+    const selecionado = candidatos.reduce((atualMaisRecente, candidato) =>
       candidato.timestamp > atualMaisRecente.timestamp ? candidato : atualMaisRecente,
     );
-
-    const candidatoLogica = candidatos.find((c) => c.origem === 'logica');
-
-    let selecionado = maisRecente;
-    if (candidatoLogica) {
-      selecionado = candidatoLogica;
-
-      if (
-        maisRecente.origem !== 'logica' &&
-        this.deveUsarFallbackPorDefasagemLogica(candidatoLogica, maisRecente)
-      ) {
-        selecionado = maisRecente;
-      }
-    }
 
     const payload = this.normalizarRespostaRastreamento(
       selecionado.data,
       selecionado.origem,
     );
-    //.debug("Resposta para rastreamento unificado:", payload, "Origem selecionada:", selecionado.origem);
+
+    if (selecionado.origem === 'm7' || selecionado.origem === 'softruck') {
+      const dados = selecionado.data as unknown as Record<string, unknown>;
+      const lat = this.reverseGeocodeService.normalizarCoordenada(
+        dados.latitude as number | string | undefined,
+      );
+      const lon = this.reverseGeocodeService.normalizarCoordenada(
+        dados.longitude as number | string | undefined,
+      );
+
+      if (lat && lon) {
+        try {
+          const endereco =
+            await this.reverseGeocodeService.reverseGeocodeCoordenada(
+              lat,
+              lon,
+              baseContext.baseOrigin,
+            );
+          if (endereco && endereco !== `${lat}, ${lon}`) {
+            if (selecionado.origem === 'm7') {
+              payload.cidade = endereco;
+            } else {
+              payload.endereco = endereco;
+            }
+          }
+        } catch {
+          this.logger.warn(
+            `[${baseContext.baseOrigin}] Reverse geocode falhou para o vencedor ${selecionado.origem}`,
+          );
+        }
+      }
+    }
+
     return { ...payload, origem: selecionado.origem };
   }
 
@@ -275,7 +296,7 @@ export class RastreamentoService {
   private async getVehicleState(
     cnpj: string,
     chassi: string,
-    baseOrigin: BaseOrigin = 'MAIS_PRIME',
+    baseOrigin: BaseOrigin = TENANT.defaultBase,
   ): Promise<{ ancoraAtiva: boolean; notificacaoIgnicao: boolean }> {
     const userVehicle = await this.prisma.userVehicle.findFirst({
       where: { chassi },
@@ -447,15 +468,28 @@ export class RastreamentoService {
     };
   }
 
+  /**
+   * Renova o token M7 de todas as bases configuradas.
+   *
+   * O retorno continua sendo um objeto com uma chave por base
+   * (ex.: `{ MAIS_PRIME: ..., MAIS_PRIME_RS: ... }`), agora derivado de
+   * `TENANT.baseNames` em vez de literais — o contrato com o frontend
+   * permanece idêntico para os deploys existentes.
+   */
   async renovarTokenM7() {
-    const [mp, mprs] = await Promise.allSettled([
-      this.m7.renovarToken('MAIS_PRIME'),
-      this.m7.renovarToken('MAIS_PRIME_RS'),
-    ]);
-    return {
-      MAIS_PRIME: mp.status === 'fulfilled' ? mp.value : { erro: (mp as PromiseRejectedResult).reason?.message },
-      MAIS_PRIME_RS: mprs.status === 'fulfilled' ? mprs.value : { erro: (mprs as PromiseRejectedResult).reason?.message },
-    };
+    const bases = TENANT.baseNames;
+    const resultados = await Promise.allSettled(
+      bases.map((base) => this.m7.renovarToken(base)),
+    );
+
+    return bases.reduce<Record<string, unknown>>((acc, base, index) => {
+      const resultado = resultados[index];
+      acc[base] =
+        resultado.status === 'fulfilled'
+          ? resultado.value
+          : { erro: (resultado as PromiseRejectedResult).reason?.message };
+      return acc;
+    }, {});
   }
 
   async ultimaPosicaoSoftruck(
@@ -561,7 +595,7 @@ export class RastreamentoService {
   }
 
   private async resolveBaseContextFromDb(chassi: string): Promise<RastreamentoBaseContext> {
-    let baseOrigin: BaseOrigin = 'MAIS_PRIME';
+    let baseOrigin: BaseOrigin = TENANT.defaultBase;
 
     try {
       const userVehicle = await this.prisma.userVehicle.findFirst({
@@ -670,43 +704,6 @@ export class RastreamentoService {
     }
 
     return data as unknown as Record<string, unknown>;
-  }
-
-  private deveUsarFallbackPorDefasagemLogica(
-    candidatoLogica: { timestamp: number; dataOriginal: string },
-    candidatoMaisRecente: {
-      timestamp: number;
-      dataOriginal: string;
-      origem: 'm7' | 'softruck' | 'logica';
-    },
-  ): boolean {
-    if (candidatoMaisRecente.origem === 'logica') return false;
-
-    const thresholdMs = this.getLogicaStaleThresholdMs();
-    const diferencaMs = candidatoMaisRecente.timestamp - candidatoLogica.timestamp;
-
-    if (diferencaMs < thresholdMs) {
-      this.logger.log(
-        `Lógica priorizada: diferença de recência (${Math.round(diferencaMs / 60000)} min) abaixo do limite (${Math.round(thresholdMs / 60000)} min)`,
-      );
-      return false;
-    }
-
-    this.logger.warn(
-      `Fallback por defasagem da Lógica: lógica=${candidatoLogica.dataOriginal} provedor=${candidatoMaisRecente.origem} data=${candidatoMaisRecente.dataOriginal} diferença=${Math.round(diferencaMs / 60000)} min limite=${Math.round(thresholdMs / 60000)} min`,
-    );
-    return true;
-  }
-
-  private getLogicaStaleThresholdMs(): number {
-    const rawValue = process.env.RASTREAMENTO_LOGICA_STALE_THRESHOLD_MINUTES;
-    const parsedMinutes = Number(rawValue);
-
-    if (Number.isFinite(parsedMinutes) && parsedMinutes > 0) {
-      return parsedMinutes * 60_000;
-    }
-
-    return DEFAULT_LOGICA_STALE_THRESHOLD_MINUTES * 60_000;
   }
 
   /**

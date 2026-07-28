@@ -7,6 +7,7 @@ import { PrismaService } from '../prisma.service';
 import { CreateDocumentDto } from './DTOs/create-document.dto';
 import { UpdateDocumentDto } from './DTOs/update-document.dto';
 import { FileUploadService } from 'src/common/services/file-upload.service';
+import { TENANT } from 'src/config/tenant.config';
 
 @Injectable()
 export class DocumentosService {
@@ -15,8 +16,12 @@ export class DocumentosService {
     private readonly fileUploadService: FileUploadService,
   ) {}
 
-  private readonly urlBase =
-    'https://app-dev.texvngroup.com.br';
+  /**
+   * URL base pública usada para montar os links de documentos.
+   * Vem de `TENANT_DOCUMENTS_BASE_URL` ou `APP_URL`; se nenhuma estiver
+   * configurada, mantém o valor histórico para não quebrar deploys atuais.
+   */
+  private readonly urlBase = TENANT.documentsBaseUrl;
 
   private buildDocumentUrl(url: string): string {
     if (/^https?:\/\//i.test(url)) {
