@@ -30,18 +30,21 @@
 
 ## 1. Situação atual
 
-A refatoração de multi-tenant **está concluída e validada localmente**. O código não tem mais nenhuma identidade de empresa embutida: as bases, as credenciais e a marca vêm do ambiente.
-
-O que sobrou é trabalho de **repositório, infraestrutura, credenciais e dados** — não de código.
+A refatoração de multi-tenant está concluída e **já roda em produção na Mais Prime** desde 2026-07-28. O código não tem mais nenhuma identidade de empresa embutida: as bases, as credenciais e a marca vêm do ambiente.
 
 ```
-[ CÓDIGO ]      concluído e validado ✅
-[ REPOSITÓRIO ] pendente — nada commitado ainda ⬜
-[ MAIS PRIME ]  pendente — migration não aplicada em produção ⬜
-[ INTEGRAÇÕES ] pendente — depende de contratos com terceiros ⬜
-[ INFRA VPS ]   pendente ⬜
+[ CÓDIGO ]      concluído e em produção ✅
+[ REPOSITÓRIO ] commitado; histórico de migrations rebaselinado ✅
+[ MAIS PRIME ]  atualizada em produção ✅
+[ INTEGRAÇÕES ] credenciais da Hertz obtidas ✅
+[ INFRA VPS ]   VPS da Hertz disponível ✅
+[ MARCA ]       logo e textos disponíveis ✅
+[ BASELINE PROD ] registrar 0_init em prod ⬜
+[ CLONE HERTZ ] pendente ⬜
 [ BANCO HERTZ ] pendente ⬜
 ```
+
+O que restou é execução: registrar o baseline em produção e criar o ambiente da Hertz.
 
 ---
 
@@ -93,97 +96,92 @@ Tratado como requisito, não como consequência. Sem nenhuma variável `TENANT_*
 - `.env.example`: reescrito — faltavam ~20 variáveis reais
 - `package.json`: `moduleNameMapper` no jest — o alias `src/...` não resolvia e derrubava 9 suítes antes de executar
 - `tsconfig.build.json`: exclui `prisma/seed.ts`, que senão mudava o output para `dist/src/main.js`
+- `prisma/migrations/`: rebaselinado em `0_init` — o histórico anterior criava só 14 das 25 tabelas (ver Frente A.1)
 
 ---
 
 ## 3. O que falta — visão geral
 
-Ordem sugerida. As frentes A e C podem correr em paralelo; **C é a que tem lead time externo e deve começar primeiro**.
+| Frente | O quê | Estado |
+|---|---|---|
+| **A** | Repositório: migrations rebaselinadas, payloads e docs ajustados | ✅ concluída |
+| **B** | Produção Mais Prime atualizada | ✅ concluída — falta só registrar o baseline (B.1) |
+| **C** | Credenciais das integrações | ✅ obtidas |
+| **D** | Criar repositório da Hertz sem histórico | ⬜ pendente |
+| **E** | VPS, MySQL no host, proxy, TLS | ✅ VPS disponível — falta configurar |
+| **F** | `migrate deploy` + seed no banco da Hertz | ⬜ pendente |
+| **G** | Logo e textos da marca | ✅ disponíveis |
 
-| Frente | O quê | Depende de | Bloqueia o go-live? |
-|---|---|---|---|
-| **A** | Commitar migrations, remover payloads do índice | — | Sim |
-| **B** | Aplicar migration na produção Mais Prime | A | Não (mas é obrigatório antes de subir o código novo lá) |
-| **C** | Contratar/obter credenciais das integrações | terceiros | Sim |
-| **D** | Criar repositório da Hertz sem histórico | A | Sim |
-| **E** | Provisionar VPS, MySQL no host, proxy, TLS | — | Sim |
-| **F** | `migrate deploy` + seed no banco da Hertz | D, E | Sim |
-| **G** | Logo e textos da marca | — | Não (cosmético) |
-
----
-
-## Frente A — Fechar o repositório
-
-**Estado verificado em 2026-07-28: nada commitado ainda.** Apenas 2 das 7 migrations estão versionadas e os 39 arquivos de `webhook/payloads` continuam no índice.
-
-### A.1 Versionar as migrations — crítico
-
-Sem isso, `prisma migrate deploy` no banco da Hertz não consegue criar o schema do zero.
-
-| Migration | Versionada? |
-|---|---|
-| `20250909152028_init` | ❌ |
-| `20260119123248_add_notification_model` | ❌ |
-| `202607140001_app_version_gate` | ✅ |
-| `20260715000000_add_admin_panel_user` | ❌ |
-| `20260720113000_add_marketing_notification_audit_log` | ✅ |
-| `20260721000000_add_notification_popup` | ❌ |
-| `20260727120000_base_origin_to_varchar` | ❌ (nova) |
-| `migration_lock.toml` | ❌ |
-
-```bash
-git add -f prisma/migrations/
-git status --short prisma/migrations/   # conferir as 7 + o lock
-```
-
-> O `-f` é necessário só porque parte dessas pastas já era ignorada historicamente. Confira o `git status` antes de commitar.
-
-### A.2 Tirar os payloads reais do versionamento
-
-`webhook/payloads/*.json` contém placas, chassis e coordenadas de associados reais da Mais Prime. O `.gitignore` já bloqueia novos arquivos, mas os 39 existentes seguem rastreados.
-
-```bash
-git rm -r --cached webhook/payloads
-```
-
-Remove do índice mantendo os arquivos em disco.
-
-### A.3 Versionar a documentação
-
-```bash
-git add docs/
-git commit -m "chore: parametriza tenant por ambiente, versiona migrations e docs"
-```
+**Próximos passos, em ordem:** B.1 (baseline em prod) → D (clone) → F (banco) → validação local → VPS da Hertz.
 
 ---
 
-## Frente B — Aplicar na Mais Prime (produção)
+## Frente A — Repositório ✅ concluída
 
-O código novo funciona com o `.env` atual **sem nenhuma variável nova**, mas a migration precisa ser aplicada antes de subir.
+### A.1 Migrations versionadas e rebaselinadas
 
-```bash
-git pull && npm ci
-npx prisma generate
-npx prisma migrate deploy     # aplica 20260727120000_base_origin_to_varchar
-npm run build
-# reiniciar o serviço
-```
+O histórico anterior **não reproduzia o schema**: as 7 migrations criavam 14 tabelas, sendo 5 delas (`Consent`, `Session`, `Offer`, `Partner`, `ServiceItem`) inexistentes no schema atual. Faltavam 16, entre elas `UserVehicle`, `FuelSession`, todas as `Reinspection*` e todas as `Analytics*`.
 
-Roda `ALTER TABLE user MODIFY baseOrigin VARCHAR(50) NULL`. Sem perda nem transformação de dados — já validado no ambiente de testes. Em tabela grande o MySQL faz cópia; **executar em janela de baixo tráfego**.
+Versionar aquele histórico teria sido inútil — ele quebraria em produção (`CREATE TABLE User` numa tabela existente) e geraria schema incompleto em banco novo.
 
-Opcional, mas recomendado, para não depender dos defaults:
+**Correção aplicada**: as 7 migrations foram movidas para `prisma/migrations-legacy/` e substituídas por um único `prisma/migrations/0_init/`, gerado do schema real.
 
-```dotenv
-TENANT_BASES=MAIS_PRIME:,MAIS_PRIME_RS:_RS
-TENANT_DEFAULT_BASE=MAIS_PRIME
-TENANT_NAME=Mais Prime
-```
+Validado em banco descartável com `prisma migrate deploy`: **25 tabelas, `baseOrigin varchar(50)`, 9 foreign keys**.
+
+### A.2 Payloads reais fora do versionamento
+
+`webhook/payloads/*.json` continha placas, chassis e coordenadas de associados reais. O `.gitignore` passou a bloqueá-los.
+
+### A.3 Documentação versionada
+
+A regra `*.md` do `.gitignore` ignorava `docs/` inteiro. Corrigida, mantendo as notas soltas da raiz ignoradas.
 
 ---
 
-## Frente C — Credenciais das integrações
+## Frente B — Produção Mais Prime ✅ concluída em 2026-07-28
 
-**Comece por aqui.** Cada item depende de contrato ou cadastro com terceiros e tem prazo que você não controla.
+O diagnóstico do banco de produção revelou duas diferenças em relação ao schema:
+
+| Item | Estado encontrado | Ação |
+|---|---|---|
+| `baseOrigin` | `enum('MAIS_PRIME','MAIS_PRIME_RS')` | `ALTER ... VARCHAR(50)` |
+| Tabelas | 25 (faltava `NotificationPopup`) | `CREATE TABLE` da migration correspondente |
+
+Ambas aplicadas via `prisma db execute`, com backup prévio. Dados preservados: **6.839 `MAIS_PRIME` + 373 `MAIS_PRIME_RS`**, idênticos antes e depois.
+
+Deploy feito com `docker compose up -d --build api`. Log de subida:
+
+```
+[EnvValidator] Tenant: Mais Prime | bases=[MAIS_PRIME, MAIS_PRIME_RS] | base padrão=MAIS_PRIME
+[EnvValidator] Environment variables validated
+```
+
+Nenhuma variável de ambiente nova foi necessária.
+
+### B.1 Pendente — registrar o baseline
+
+Único item aberto na Mais Prime. Faz o `migrate deploy` voltar a ser seguro:
+
+```bash
+git pull
+
+npx prisma db execute --schema prisma/schema.prisma --stdin <<'EOF'
+DELETE FROM _prisma_migrations;
+EOF
+
+npx prisma migrate resolve --applied 0_init
+npx prisma migrate status     # "Database schema is up to date!"
+```
+
+`_prisma_migrations` é tabela de controle do Prisma — apagá-la não toca em dado de negócio. Não precisa rebuildar o container.
+
+> Enquanto isso não for feito, **ninguém pode rodar `npx prisma migrate deploy` nessa VPS** — travaria o pipeline.
+
+---
+
+## Frente C — Credenciais das integrações ✅ obtidas
+
+Referência dos nomes de env que cada credencial ocupa no `.env` da Hertz.
 
 | Integração | O que obter | Envs (base única `HERTZ`) |
 |---|---|---|
@@ -259,8 +257,10 @@ A aplicação **não** carrega `.env` sozinha — não há `dotenv` nem `ConfigM
 
 ## Frente F — Banco e seed
 
+Com o rebaseline da Frente A, o `migrate deploy` num banco vazio cria as **25 tabelas** corretamente — validado em banco descartável.
+
 ```bash
-npx prisma migrate deploy
+npx prisma migrate deploy     # aplica 0_init
 npx prisma generate
 
 SEED_ADMIN_EMAIL=admin@hertz.com.br \
@@ -294,39 +294,68 @@ Nada de dados da Mais Prime deve ser migrado: nenhum `user`, `userVehicle`, `Not
 | 4 | **Guard no `renovar-token`** | `POST /api/rastreamento/renovar-token` está sem nenhum guard e dispara login nas APIs externas de todas as bases. Foi útil para validar, mas em produção convém o `AdminTokenGuard` |
 | 5 | **CORS** | Hoje `origin: true` aceita qualquer origem; vale restringir aos domínios do app/painel da Hertz |
 
+### 11.1 Regra que passa a valer (não é decisão, é disciplina)
+
+Foi a ausência disso que quebrou o histórico de migrations.
+
+**Nunca `prisma db push` em banco que importa.** Só em banco descartável.
+
+Toda mudança de schema nasce de uma migration, localmente:
+
+```bash
+# edita prisma/schema.prisma
+npx prisma migrate dev --name adiciona_campo_x
+git add prisma/migrations/ prisma/schema.prisma && git commit
+```
+
+> No MySQL o `migrate dev` precisa de um *shadow database* temporário. Se o usuário do banco não tiver permissão de `CREATE DATABASE`, configure `shadowDatabaseUrl` no datasource.
+
+E o deploy ganha uma etapa:
+
+```bash
+git pull
+npx prisma migrate status     # confere ANTES
+npx prisma migrate deploy
+docker compose up -d --build api
+```
+
+> Não coloque `migrate deploy` no Dockerfile nem em entrypoint: com mais de uma réplica, os containers competem para aplicar a mesma migration.
+
 ---
 
 ## 12. Riscos ainda abertos
 
 | # | Risco | Mitigação |
 |---|---|---|
-| 1 | Clonar sem as migrations → banco novo não sobe | Frente A.1 antes de qualquer clone |
-| 2 | Dados da Mais Prime no repo da Hertz | Frente A.2 + repositório sem histórico |
-| 3 | Segredo reaproveitado entre empresas | Frente C — gerar novos |
-| 4 | Credencial de integração faltando só falha quando o usuário aciona a feature | `TENANT_REQUIRED_INTEGRATIONS` cobrindo o que já foi contratado |
-| 5 | Redis exposto na internet na VPS nova | Frente E.2 |
-| 6 | Migration em produção travando tabela grande | Janela de baixo tráfego (Frente B) |
-| 7 | Rodar local sem Docker e o boot abortar por falta de env | Frente E.3 |
-| 8 | Usuário sem `baseOrigin` → login lança 500 | Garantir que o primeiro acesso preencha `baseOrigin` |
-| 9 | 7 suítes de teste falhando (scaffold sem providers) | Dívida pré-existente; não bloqueia, mas vale limpar |
+| 1 | **`migrate deploy` na VPS da Mais Prime antes do baseline** → migration marcada como *failed*, pipeline travado | Frente B.1 — enquanto não for feita, ninguém roda `migrate deploy` lá |
+| 2 | Voltar a usar `db push` e quebrar o histórico de novo | Toda mudança de schema via `migrate dev` + commit da migration |
+| 3 | Dados da Mais Prime no repo da Hertz | Repositório da Hertz sem histórico (Frente D) |
+| 4 | Segredo reaproveitado entre empresas | `JWT_SECRET`, `ANALYTICS_SECRET`, `ADMIN_PANEL_TOKEN`, `M7_WEBHOOK_TOKEN` novos |
+| 5 | Credencial de integração faltando só falha quando o usuário aciona a feature | `TENANT_REQUIRED_INTEGRATIONS` cobrindo o que já foi contratado |
+| 6 | Redis exposto na internet na VPS nova | Frente E.2 |
+| 7 | Redis compartilhado entre os dois projetos na validação local | Instância separada (`REDIS_PORT=6380`) — não há prefixo de chave nem índice de DB |
+| 8 | Rodar local sem Docker e o boot abortar por falta de env | Frente E.3 |
+| 9 | Usuário sem `baseOrigin` → login lança 500 | Garantir que o primeiro acesso preencha `baseOrigin` |
+| 10 | 7 suítes de teste falhando (scaffold sem providers) | Dívida pré-existente; não bloqueia, mas vale limpar |
 
 ---
 
 ## 13. Checklist consolidado
 
 ### Repositório
-- [ ] `git add -f prisma/migrations/` — 7 migrations + `migration_lock.toml`
-- [ ] `git rm -r --cached webhook/payloads`
-- [ ] `git add docs/` e commit
+- [x] Migrations rebaselinadas em `0_init`
+- [x] `webhook/payloads` fora do versionamento
+- [x] `docs/` versionado
 - [ ] Repositório da Hertz criado sem histórico da Mais Prime
 
 ### Mais Prime (produção)
-- [ ] `prisma migrate deploy` aplicado em janela de baixo tráfego
-- [ ] Serviço reiniciado com o código novo
+- [x] `NotificationPopup` criada e `baseOrigin` convertida para `VARCHAR(50)`
+- [x] Código novo em produção (`docker compose up -d --build api`)
+- [ ] **Baseline registrado** (`migrate resolve --applied 0_init`) — Frente B.1
 - [ ] Login, rastreamento e boleto validados nas duas bases
 
 ### Integrações
-- [ ] Credenciais obtidas para cada integração contratada (Frente C)
+- [x] Credenciais da Hertz obtidas
 - [ ] `JWT_SECRET`, `ANALYTICS_SECRET`, `ADMIN_PANEL_TOKEN`, `M7_WEBHOOK_TOKEN` gerados novos
 - [ ] `TENANT_REQUIRED_INTEGRATIONS` refletindo o que já existe
 

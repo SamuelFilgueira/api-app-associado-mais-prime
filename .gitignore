@@ -71,3 +71,5 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 !README.md
 !CLAUDE.md
 !CHANGELOG.md
+# Projeto separado, não faz parte da API
+/insight-hub
