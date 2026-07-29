@@ -119,6 +119,10 @@ model AnalyticsActionDaily {
   @@index([platform], map: "AnalyticsActionDaily_platform_idx")
 }
 
+/// Um aparelho por dia. `appVersion` é dimensão informativa (a primeira vista
+/// no dia) e NÃO participa da unicidade — senão o aparelho que atualiza o app
+/// no meio do dia contaria duas vezes, inflando a plataforma que atualiza
+/// mais rápido justamente nos dias de rollout.
 model AnalyticsDailyUniqueInstall {
   id          Int      @id @default(autoincrement())
   day         DateTime @db.Date
@@ -127,10 +131,11 @@ model AnalyticsDailyUniqueInstall {
   installHash String   @db.VarChar(64)
   createdAt   DateTime @default(now())
 
-  @@unique([day, platform, appVersion, installHash], map: "AnalyticsDailyUniqueInstall_unique_key")
+  @@unique([day, platform, installHash], map: "AnalyticsDailyUniqueInstall_unique_key")
   @@index([day], map: "AnalyticsDailyUniqueInstall_day_idx")
 }
 
+/// Uma sessão por dia. Mesma regra: `appVersion` fora da unicidade.
 model AnalyticsDailyUniqueSession {
   id          Int      @id @default(autoincrement())
   day         DateTime @db.Date
@@ -139,8 +144,23 @@ model AnalyticsDailyUniqueSession {
   sessionHash String   @db.VarChar(64)
   createdAt   DateTime @default(now())
 
-  @@unique([day, platform, appVersion, sessionHash], map: "AnalyticsDailyUniqueSession_unique_key")
+  @@unique([day, platform, sessionHash], map: "AnalyticsDailyUniqueSession_unique_key")
   @@index([day], map: "AnalyticsDailyUniqueSession_day_idx")
+}
+
+/// Primeira aparição de cada aparelho — fonte de "instalações novas" e coortes
+/// de retenção. Populada na ingestão; backfill feito na migration a partir de
+/// AnalyticsDailyUniqueInstall. Sem TTL: é a memória de aquisição da base.
+model AnalyticsInstallFirstSeen {
+  id           Int      @id @default(autoincrement())
+  installHash  String   @unique(map: "AnalyticsInstallFirstSeen_installHash_key") @db.VarChar(64)
+  platform     String   @db.VarChar(10)
+  appVersion   String   @db.VarChar(20)
+  firstSeenDay DateTime @db.Date
+  createdAt    DateTime @default(now())
+
+  @@index([firstSeenDay], map: "AnalyticsInstallFirstSeen_firstSeenDay_idx")
+  @@index([platform], map: "AnalyticsInstallFirstSeen_platform_idx")
 }
 
 model AnalyticsFormDaily {

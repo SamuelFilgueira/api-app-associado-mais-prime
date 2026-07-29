@@ -6,6 +6,8 @@
     "dist",
     "AdmApp",
     "AdmApp/**",
+    "insight-hub",
+    "insight-hub/**",
     "**/*spec.ts",
     "prisma/seed.ts"
   ]

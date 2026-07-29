@@ -1,9 +1,4 @@
-import {
-  Controller,
-  Get,
-  Query,
-  UseGuards,
-} from '@nestjs/common';
+import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AdminRoleGuard } from '../auth/admin-role.guard';
 import { AnalyticsService } from './analytics.service';
@@ -46,5 +41,15 @@ export class AnalyticsDashboardController {
   @Get('sessions')
   getSessions(@Query() query: AnalyticsDashboardQueryDto) {
     return this.analyticsService.getDashboardSessions(query);
+  }
+
+  /**
+   * Audiência real: aparelhos únicos, sessões únicas, novos aparelhos,
+   * DAU/WAU/MAU e stickiness. Endpoint aditivo consumido pelo Insight Hub —
+   * /sessions só expõe somas diárias, que superestimam a base (aparelho-dia).
+   */
+  @Get('audience')
+  getAudience(@Query() query: AnalyticsDashboardQueryDto) {
+    return this.analyticsService.getDashboardAudience(query);
   }
 }

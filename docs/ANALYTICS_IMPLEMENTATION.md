@@ -876,3 +876,43 @@ ANALYTICS_RATE_LIMIT_ENABLED=true
 | Raw payload | Não armazenado por padrão |
 | Retenção | Receipts: 45 dias; Agregados: 12–24 meses; Aux. dedup: 45–90 dias |
 | Dados de localização | Campos `lat`, `lng`, `latitude`, `longitude`, `coords`, `location` bloqueados |
+
+---
+
+## Glossário de métricas para gestão (atualização 2026-07-28)
+
+Definições formais do que cada número exposto pela API significa. O Insight Hub
+exibe estas definições nos hints dos cartões — mantenha os dois em sincronia.
+
+| Métrica | Definição | Fonte |
+|---|---|---|
+| Aparelhos únicos | `COUNT(DISTINCT installHash)` no período — cada aparelho conta UMA vez | `GET /analytics/dashboard/audience` |
+| Sessões únicas | `COUNT(DISTINCT sessionHash)` no período (dedup entre dias e versões) | idem |
+| Aparelho-dia | soma de `installsCount` — mede frequência de uso, nunca tamanho de base | `GET /analytics/dashboard/sessions` |
+| Novos aparelhos | primeira aparição histórica do `installHash` cai no período | `AnalyticsInstallFirstSeen` via `/audience` |
+| DAU médio | aparelho-dia ÷ dias corridos do período | `/audience` (`avgDailyDevices`) |
+| WAU / MAU | aparelhos únicos nos 7 / 30 dias que terminam em `to` | `/audience` |
+| Stickiness | DAU ÷ MAU × 100 — % da base mensal que volta num dia típico | `/audience` |
+| Sessão | definida pelo APP (`session_id` regenerado no foreground). Atenção: a doc pede regra de 30 min de inatividade, mas o exemplo de código regenera a cada `active` — iOS infla ~20-25% vs Android até o app aplicar a regra | cliente |
+
+### Mudanças de consistência (migration `20260728120000_analytics_audience_consistency`)
+
+1. **Unicidade sem `appVersion`** — `AnalyticsDailyUniqueInstall` e
+   `AnalyticsDailyUniqueSession` deduplicam por `(day, platform, hash)`.
+   Antes, um aparelho que atualizava o app no meio do dia contava duas vezes,
+   inflando a plataforma que atualiza mais rápido nos dias de rollout.
+   `appVersion` permanece como dimensão (primeira versão vista no dia).
+2. **`AnalyticsInstallFirstSeen`** — primeira aparição de cada aparelho, com
+   backfill do histórico na migration. Base de "instalações novas" e coortes.
+   **Sem TTL**: é a memória de aquisição; qualquer job de limpeza futuro deve
+   poupá-la.
+3. **Dia de negócio em America/Sao_Paulo** — o bucketing diário deixou de
+   cortar à meia-noite UTC (21h em Brasília, pico de uso). Série histórica
+   anterior à migration mantém o corte antigo — degrau esperado na virada.
+4. **`overview.topScreens` corrigido** — o `take: 10` era aplicado sobre
+   linhas-dia antes da soma do período e podia omitir telas populares.
+5. **TTL das tabelas de dedup**: se implementado, precisa preservar janelas de
+   WAU/MAU (mínimo 90 dias) e consolidar rollups mensais antes de expirar.
+
+Os contadores históricos de `AnalyticsSessionDaily` não foram recalculados —
+a regra nova vale das ingestões seguintes em diante.

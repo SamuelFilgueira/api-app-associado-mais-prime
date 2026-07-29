@@ -4,6 +4,7 @@ import { Job } from 'bullmq';
 import { PrismaService } from '../prisma.service';
 import { ANALYTICS_QUEUE } from '../queue/queue.module';
 import { sanitizeVersionString } from './utils/analytics-sanitizer.util';
+import { saoPauloDay } from './utils/analytics-day.util';
 
 export interface AnalyticsSummaryJobData {
   sanitizedPayload: {
@@ -14,7 +15,11 @@ export interface AnalyticsSummaryJobData {
     runtime_version?: string;
     install_hash: string;
     session_hash: string;
-    screens: Array<{ screen: string; view_count: number; total_time_ms: number }>;
+    screens: Array<{
+      screen: string;
+      view_count: number;
+      total_time_ms: number;
+    }>;
     actions: Array<{ action: string; count: number }>;
     forms: Array<{
       screen: string;
@@ -73,9 +78,9 @@ export class AnalyticsIngestProcessor extends WorkerHost {
     const periodStart = new Date(period_start);
     const periodEnd = new Date(period_end);
 
-    // Determinar o dia (baseado em period_start, UTC)
-    const dayStr = periodStart.toISOString().slice(0, 10); // 'YYYY-MM-DD'
-    const day = new Date(dayStr + 'T00:00:00.000Z');
+    // Dia de negócio no fuso de São Paulo. O corte antigo (meia-noite UTC =
+    // 21h em Brasília) dividia o pico noturno de uso entre dois dias.
+    const day = saoPauloDay(periodStart);
 
     try {
       await this.prisma.$transaction(async (tx) => {
@@ -111,6 +116,8 @@ export class AnalyticsIngestProcessor extends WorkerHost {
         }
 
         // ── 3. Contagem única de instalações ──
+        // A unicidade é (day, platform, installHash) — appVersion fica gravada
+        // como dimensão (a primeira vista no dia), mas não gera nova contagem.
         let installIsNew = false;
         try {
           await tx.analyticsDailyUniqueInstall.create({
@@ -119,6 +126,17 @@ export class AnalyticsIngestProcessor extends WorkerHost {
           installIsNew = true;
         } catch {
           // unique constraint violation = instalação já contabilizada hoje
+        }
+
+        // ── 3b. Primeira aparição do aparelho (base de "instalações novas") ──
+        if (installIsNew) {
+          try {
+            await tx.analyticsInstallFirstSeen.create({
+              data: { installHash, platform, appVersion, firstSeenDay: day },
+            });
+          } catch {
+            // unique constraint violation = aparelho já conhecido
+          }
         }
 
         // ── 4. Upsert sessões/instalações diárias ──

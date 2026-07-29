@@ -30,7 +30,9 @@ const mockRedis = {
   expire: jest.fn().mockResolvedValue(1),
 };
 
-const mockPrisma = {};
+const mockPrisma: { $queryRaw: jest.Mock } = {
+  $queryRaw: jest.fn(),
+};
 
 describe('AnalyticsService', () => {
   let service: AnalyticsService;
@@ -204,7 +206,10 @@ describe('AnalyticsService', () => {
     it('lança 422 se anonymous_install_id não é UUID v4', async () => {
       const payload = {
         ...VALID_PAYLOAD,
-        session: { ...VALID_PAYLOAD.session, anonymous_install_id: 'not-a-uuid' },
+        session: {
+          ...VALID_PAYLOAD.session,
+          anonymous_install_id: 'not-a-uuid',
+        },
       };
       await expect(
         service.ingest(payload, '127.0.0.1', false),
@@ -288,7 +293,9 @@ describe('AnalyticsService', () => {
     it('clamp view_count acima do máximo', async () => {
       const payload = {
         ...VALID_PAYLOAD,
-        screens: [{ screen: 'screen_home', view_count: 99999, total_time_ms: 1000 }],
+        screens: [
+          { screen: 'screen_home', view_count: 99999, total_time_ms: 1000 },
+        ],
       };
       await service.ingest(payload, '127.0.0.1', false);
       const jobData = mockQueue.add.mock.calls[0][1];
@@ -299,7 +306,9 @@ describe('AnalyticsService', () => {
     it('clamp total_time_ms acima do máximo', async () => {
       const payload = {
         ...VALID_PAYLOAD,
-        screens: [{ screen: 'screen_home', view_count: 1, total_time_ms: 99999999 }],
+        screens: [
+          { screen: 'screen_home', view_count: 1, total_time_ms: 99999999 },
+        ],
       };
       await service.ingest(payload, '127.0.0.1', false);
       const jobData = mockQueue.add.mock.calls[0][1];
@@ -312,6 +321,110 @@ describe('AnalyticsService', () => {
       await expect(
         service.ingest(VALID_PAYLOAD, '127.0.0.1', true),
       ).rejects.toMatchObject({ status: HttpStatus.TOO_MANY_REQUESTS });
+    });
+  });
+
+  // ─── DASHBOARD: AUDIÊNCIA ───────────────────────────────────────────────────
+
+  describe('getDashboardAudience()', () => {
+    // O Promise.all do serviço dispara as queries nesta ordem:
+    // aparelhos, sessões, novos aparelhos, série diária de novos.
+    const queueAudienceRows = (rows: {
+      devices?: unknown[];
+      sessions?: unknown[];
+      news?: unknown[];
+      newsDaily?: unknown[];
+    }) => {
+      mockPrisma.$queryRaw
+        .mockResolvedValueOnce(rows.devices ?? [])
+        .mockResolvedValueOnce(rows.sessions ?? [])
+        .mockResolvedValueOnce(rows.news ?? [])
+        .mockResolvedValueOnce(rows.newsDaily ?? []);
+    };
+
+    it('converte BigInt do MySQL e agrega totais por plataforma', async () => {
+      queueAudienceRows({
+        devices: [
+          {
+            platform: 'android',
+            uniqueDevices: 1716n,
+            deviceDays: 4423n,
+            wau: 900n,
+            mau: 1716n,
+          },
+          {
+            platform: 'ios',
+            uniqueDevices: 1411n,
+            deviceDays: 4290n,
+            wau: 820n,
+            mau: 1411n,
+          },
+        ],
+        sessions: [
+          { platform: 'android', uniqueSessions: 8568n },
+          { platform: 'ios', uniqueSessions: 10244n },
+        ],
+        news: [
+          { platform: 'android', newDevices: 210n },
+          { platform: 'ios', newDevices: 145n },
+        ],
+        newsDaily: [
+          {
+            day: new Date('2026-07-01T00:00:00.000Z'),
+            platform: 'android',
+            count: 7n,
+          },
+        ],
+      });
+
+      const result = await service.getDashboardAudience({
+        from: '2026-06-29',
+        to: '2026-07-28',
+      });
+
+      expect(result.days).toBe(30);
+      expect(result.totals.uniqueDevices).toBe(3127);
+      expect(result.totals.uniqueSessions).toBe(18812);
+      expect(result.totals.newDevices).toBe(355);
+      expect(result.totals.mau).toBe(3127);
+      // DAU médio = (4423+4290)/30; stickiness = DAU/MAU*100
+      expect(result.totals.avgDailyDevices).toBeCloseTo(290.43, 1);
+      expect(result.totals.stickiness).toBeCloseTo(9.29, 1);
+
+      // Ordenado por aparelhos únicos — android primeiro, mesmo com menos sessões
+      expect(result.platforms[0].platform).toBe('android');
+      expect(result.platforms[0].uniqueDevices).toBe(1716);
+      expect(result.platforms[0].sessionsPerDevice).toBeCloseTo(4.99, 1);
+      expect(result.platforms[1].sessionsPerDevice).toBeCloseTo(7.26, 1);
+
+      expect(result.newDevicesDaily).toEqual([
+        { day: '2026-07-01', platform: 'android', count: 7 },
+      ]);
+    });
+
+    it('retorna zeros para período sem dados', async () => {
+      queueAudienceRows({});
+      const result = await service.getDashboardAudience({
+        from: '2026-06-01',
+        to: '2026-06-30',
+      });
+      expect(result.totals).toEqual({
+        uniqueDevices: 0,
+        uniqueSessions: 0,
+        deviceDays: 0,
+        newDevices: 0,
+        avgDailyDevices: 0,
+        wau: 0,
+        mau: 0,
+        stickiness: 0,
+      });
+      expect(result.platforms).toEqual([]);
+    });
+
+    it('rejeita from > to como as demais consultas de dashboard', async () => {
+      await expect(
+        service.getDashboardAudience({ from: '2026-07-28', to: '2026-06-01' }),
+      ).rejects.toBeInstanceOf(UnprocessableEntityException);
     });
   });
 });

@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
+import { Prisma } from '@prisma/client';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { Redis } from 'ioredis';
@@ -24,7 +25,11 @@ import {
   MAX_PAYLOAD_BYTES,
   MAX_PERIOD_MS,
 } from './constants/analytics-allowlists';
-import { clampInt, sanitizeVersionString, CLAMP } from './utils/analytics-sanitizer.util';
+import {
+  clampInt,
+  sanitizeVersionString,
+  CLAMP,
+} from './utils/analytics-sanitizer.util';
 import { ANALYTICS_QUEUE } from '../queue/queue.module';
 import { ANALYTICS_REDIS } from './analytics-redis.provider';
 
@@ -130,14 +135,15 @@ export class AnalyticsService {
       );
     }
     if (periodEnd.getTime() - periodStart.getTime() > MAX_PERIOD_MS) {
-      throw new UnprocessableEntityException(
-        'Janela de período excede 1 hora',
-      );
+      throw new UnprocessableEntityException('Janela de período excede 1 hora');
     }
 
     // 6. Gerar hashes server-side (nunca persistir UUIDs brutos)
     const analyticsSecret = process.env.ANALYTICS_SECRET!;
-    const installHash = hmacSha256(dto.session.anonymous_install_id, analyticsSecret);
+    const installHash = hmacSha256(
+      dto.session.anonymous_install_id,
+      analyticsSecret,
+    );
     const sessionHash = hmacSha256(dto.session.session_id, analyticsSecret);
 
     // 7. Rate limit por install_hash (após validação do body)
@@ -150,15 +156,27 @@ export class AnalyticsService {
       .filter((s) => ALLOWED_SCREENS.has(s.screen))
       .map((s) => ({
         screen: s.screen,
-        view_count: clampInt(s.view_count, CLAMP.VIEW_COUNT.min, CLAMP.VIEW_COUNT.max),
-        total_time_ms: clampInt(s.total_time_ms, CLAMP.TOTAL_TIME_MS.min, CLAMP.TOTAL_TIME_MS.max),
+        view_count: clampInt(
+          s.view_count,
+          CLAMP.VIEW_COUNT.min,
+          CLAMP.VIEW_COUNT.max,
+        ),
+        total_time_ms: clampInt(
+          s.total_time_ms,
+          CLAMP.TOTAL_TIME_MS.min,
+          CLAMP.TOTAL_TIME_MS.max,
+        ),
       }));
 
     const acceptedActions = dto.actions
       .filter((a) => ALLOWED_ACTIONS.has(a.action))
       .map((a) => ({
         action: a.action,
-        count: clampInt(a.count, CLAMP.ACTION_COUNT.min, CLAMP.ACTION_COUNT.max),
+        count: clampInt(
+          a.count,
+          CLAMP.ACTION_COUNT.min,
+          CLAMP.ACTION_COUNT.max,
+        ),
       }));
 
     const acceptedForms = (dto.forms ?? [])
@@ -166,16 +184,35 @@ export class AnalyticsService {
       .map((f) => ({
         screen: f.screen,
         form: f.form,
-        started_count: clampInt(f.started_count, CLAMP.FORM_COUNT.min, CLAMP.FORM_COUNT.max),
-        submitted_count: clampInt(f.submitted_count, CLAMP.FORM_COUNT.min, CLAMP.FORM_COUNT.max),
-        success_count: clampInt(f.success_count, CLAMP.FORM_COUNT.min, CLAMP.FORM_COUNT.max),
-        error_count: clampInt(f.error_count, CLAMP.FORM_COUNT.min, CLAMP.FORM_COUNT.max),
+        started_count: clampInt(
+          f.started_count,
+          CLAMP.FORM_COUNT.min,
+          CLAMP.FORM_COUNT.max,
+        ),
+        submitted_count: clampInt(
+          f.submitted_count,
+          CLAMP.FORM_COUNT.min,
+          CLAMP.FORM_COUNT.max,
+        ),
+        success_count: clampInt(
+          f.success_count,
+          CLAMP.FORM_COUNT.min,
+          CLAMP.FORM_COUNT.max,
+        ),
+        error_count: clampInt(
+          f.error_count,
+          CLAMP.FORM_COUNT.min,
+          CLAMP.FORM_COUNT.max,
+        ),
       }));
 
     const discardedItemsCount =
-      dto.screens.length - acceptedScreens.length +
-      dto.actions.length - acceptedActions.length +
-      (dto.forms?.length ?? 0) - acceptedForms.length;
+      dto.screens.length -
+      acceptedScreens.length +
+      dto.actions.length -
+      acceptedActions.length +
+      (dto.forms?.length ?? 0) -
+      acceptedForms.length;
 
     // 9. Gerar payloadHash do payload sanitizado (para idempotência)
     const sanitizedPayload = {
@@ -193,7 +230,9 @@ export class AnalyticsService {
     const payloadHash = sha256(JSON.stringify(sanitizedPayload));
 
     // Capturar userId apenas quando flag de ambiente controlado estiver ativa
-    const linkUserEnabled = isTruthyEnv(process.env.ANALYTICS_LINK_USER_ENABLED);
+    const linkUserEnabled = isTruthyEnv(
+      process.env.ANALYTICS_LINK_USER_ENABLED,
+    );
     const normalizedUserId = normalizeJwtUserId(jwtUserId);
     const analyticsUserId = linkUserEnabled ? normalizedUserId : null;
 
@@ -238,7 +277,10 @@ export class AnalyticsService {
       await this.redis.expire(key, RATE_LIMIT_IP_WINDOW_SEC);
     }
     if (count > RATE_LIMIT_IP_MAX) {
-      throw new HttpException('Rate limit excedido', HttpStatus.TOO_MANY_REQUESTS);
+      throw new HttpException(
+        'Rate limit excedido',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
     }
   }
 
@@ -249,7 +291,10 @@ export class AnalyticsService {
       await this.redis.expire(key, RATE_LIMIT_INSTALL_WINDOW_SEC);
     }
     if (count > RATE_LIMIT_INSTALL_MAX) {
-      throw new HttpException('Rate limit excedido', HttpStatus.TOO_MANY_REQUESTS);
+      throw new HttpException(
+        'Rate limit excedido',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
     }
   }
 
@@ -294,11 +339,7 @@ export class AnalyticsService {
 
     const actionWhere = { day: { gte: from, lte: to }, ...platformWhere };
 
-    const [
-      sessionsRows,
-      actionsRows,
-      topScreenRows,
-    ] = await Promise.all([
+    const [sessionsRows, actionsRows, topScreenRows] = await Promise.all([
       this.prisma.analyticsSessionDaily.aggregate({
         where: { day: { gte: from, lte: to }, ...platformWhere },
         _sum: { sessionsCount: true, installsCount: true },
@@ -307,11 +348,12 @@ export class AnalyticsService {
         where: actionWhere,
         select: { action: true, count: true },
       }),
+      // Sem `take` aqui: as linhas são diárias e o corte precisa acontecer
+      // DEPOIS da soma do período — um take antecipado pegava 10 linhas-dia
+      // e podia omitir telas consistentemente populares do ranking.
       this.prisma.analyticsScreenDaily.findMany({
         where: { day: { gte: from, lte: to }, ...platformWhere },
         select: { screen: true, viewCount: true, totalTimeMs: true },
-        orderBy: { viewCount: 'desc' },
-        take: 10,
       }),
     ]);
 
@@ -321,9 +363,15 @@ export class AnalyticsService {
       actionMap.set(row.action, (actionMap.get(row.action) ?? 0) + row.count);
     }
 
-    const screenMap = new Map<string, { viewCount: number; totalTimeMs: number }>();
+    const screenMap = new Map<
+      string,
+      { viewCount: number; totalTimeMs: number }
+    >();
     for (const row of topScreenRows) {
-      const existing = screenMap.get(row.screen) ?? { viewCount: 0, totalTimeMs: 0 };
+      const existing = screenMap.get(row.screen) ?? {
+        viewCount: 0,
+        totalTimeMs: 0,
+      };
       screenMap.set(row.screen, {
         viewCount: existing.viewCount + row.viewCount,
         totalTimeMs: existing.totalTimeMs + row.totalTimeMs,
@@ -372,9 +420,15 @@ export class AnalyticsService {
       select: { screen: true, viewCount: true, totalTimeMs: true },
     });
 
-    const screenMap = new Map<string, { viewCount: number; totalTimeMs: number }>();
+    const screenMap = new Map<
+      string,
+      { viewCount: number; totalTimeMs: number }
+    >();
     for (const row of rows) {
-      const existing = screenMap.get(row.screen) ?? { viewCount: 0, totalTimeMs: 0 };
+      const existing = screenMap.get(row.screen) ?? {
+        viewCount: 0,
+        totalTimeMs: 0,
+      };
       screenMap.set(row.screen, {
         viewCount: existing.viewCount + row.viewCount,
         totalTimeMs: existing.totalTimeMs + row.totalTimeMs,
@@ -461,6 +515,169 @@ export class AnalyticsService {
             : 0,
       };
     });
+  }
+
+  /**
+   * Métricas de audiência para o painel administrativo (Insight Hub).
+   *
+   * Endpoint ADITIVO: nada aqui altera os contratos existentes. Ele existe
+   * porque /sessions só devolve contagens já agregadas por dia — a soma de
+   * `installsCount` é "aparelho-dia", não aparelhos únicos, e a diferença
+   * chega a 3× num período de 30 dias.
+   *
+   * Semântica de cada número:
+   *  - uniqueDevices:  COUNT(DISTINCT installHash) no período — cada aparelho
+   *    conta UMA vez, não importa em quantos dias apareceu.
+   *  - uniqueSessions: idem para sessionHash (dedup entre dias e versões).
+   *  - deviceDays:     linhas de aparelho-dia — mede frequência, não base.
+   *  - newDevices:     aparelhos cuja PRIMEIRA aparição histórica cai no
+   *    período (AnalyticsInstallFirstSeen) — aquisição real.
+   *  - avgDailyDevices (DAU): deviceDays ÷ dias corridos do período.
+   *  - wau / mau:      aparelhos únicos nos 7 / 30 dias que terminam em `to`
+   *    (janelas fixas, independentes do tamanho do período consultado).
+   *  - stickiness:     DAU ÷ MAU × 100 — % da base mensal que volta num dia.
+   *
+   * Filtro por app_version: aplicado sobre a versão registrada na PRIMEIRA
+   * aparição do aparelho no dia. Aparelho que atualizou no meio do dia fica
+   * na versão antiga até o dia seguinte.
+   */
+  async getDashboardAudience(query: AnalyticsDashboardQueryDto) {
+    const { from, to } = this.resolveDateRange(query);
+
+    // Normaliza para a granularidade de dia (a coluna é DATE ancorada em UTC).
+    const dayFrom = new Date(
+      from.toISOString().slice(0, 10) + 'T00:00:00.000Z',
+    );
+    const dayTo = new Date(to.toISOString().slice(0, 10) + 'T00:00:00.000Z');
+    const days =
+      Math.floor((dayTo.getTime() - dayFrom.getTime()) / 86_400_000) + 1;
+
+    const wauFrom = new Date(dayTo.getTime() - 6 * 86_400_000);
+    const mauFrom = new Date(dayTo.getTime() - 29 * 86_400_000);
+
+    const platformSql = query.platform
+      ? Prisma.sql`AND platform = ${query.platform}`
+      : Prisma.empty;
+    const versionSql = query.app_version
+      ? Prisma.sql`AND appVersion = ${query.app_version}`
+      : Prisma.empty;
+
+    type DeviceRow = {
+      platform: string;
+      uniqueDevices: bigint;
+      deviceDays: bigint;
+      wau: bigint;
+      mau: bigint;
+    };
+    type SessionRow = { platform: string; uniqueSessions: bigint };
+    type NewRow = { platform: string; newDevices: bigint };
+    type NewDailyRow = { day: Date; platform: string; count: bigint };
+
+    const [deviceRows, sessionRows, newRows, newDailyRows] = await Promise.all([
+      this.prisma.$queryRaw<DeviceRow[]>(Prisma.sql`
+        SELECT
+          platform,
+          COUNT(DISTINCT installHash) AS uniqueDevices,
+          COUNT(*) AS deviceDays,
+          COUNT(DISTINCT CASE WHEN day >= ${wauFrom} THEN installHash END) AS wau,
+          COUNT(DISTINCT CASE WHEN day >= ${mauFrom} THEN installHash END) AS mau
+        FROM \`AnalyticsDailyUniqueInstall\`
+        WHERE day BETWEEN ${dayFrom} AND ${dayTo}
+          ${platformSql} ${versionSql}
+        GROUP BY platform
+      `),
+      this.prisma.$queryRaw<SessionRow[]>(Prisma.sql`
+        SELECT platform, COUNT(DISTINCT sessionHash) AS uniqueSessions
+        FROM \`AnalyticsDailyUniqueSession\`
+        WHERE day BETWEEN ${dayFrom} AND ${dayTo}
+          ${platformSql} ${versionSql}
+        GROUP BY platform
+      `),
+      this.prisma.$queryRaw<NewRow[]>(Prisma.sql`
+        SELECT platform, COUNT(*) AS newDevices
+        FROM \`AnalyticsInstallFirstSeen\`
+        WHERE firstSeenDay BETWEEN ${dayFrom} AND ${dayTo}
+          ${platformSql} ${versionSql}
+        GROUP BY platform
+      `),
+      this.prisma.$queryRaw<NewDailyRow[]>(Prisma.sql`
+        SELECT firstSeenDay AS day, platform, COUNT(*) AS count
+        FROM \`AnalyticsInstallFirstSeen\`
+        WHERE firstSeenDay BETWEEN ${dayFrom} AND ${dayTo}
+          ${platformSql} ${versionSql}
+        GROUP BY firstSeenDay, platform
+        ORDER BY firstSeenDay ASC
+      `),
+    ]);
+
+    const sessionsByPlatform = new Map(
+      sessionRows.map((r) => [r.platform, Number(r.uniqueSessions)]),
+    );
+    const newByPlatform = new Map(
+      newRows.map((r) => [r.platform, Number(r.newDevices)]),
+    );
+
+    const platforms = deviceRows
+      .map((row) => {
+        const uniqueDevices = Number(row.uniqueDevices);
+        const deviceDays = Number(row.deviceDays);
+        const uniqueSessions = sessionsByPlatform.get(row.platform) ?? 0;
+        return {
+          platform: row.platform,
+          uniqueDevices,
+          uniqueSessions,
+          deviceDays,
+          newDevices: newByPlatform.get(row.platform) ?? 0,
+          avgDailyDevices:
+            days > 0 ? Number((deviceDays / days).toFixed(2)) : 0,
+          sessionsPerDevice:
+            uniqueDevices > 0
+              ? Number((uniqueSessions / uniqueDevices).toFixed(2))
+              : 0,
+          avgActiveDaysPerDevice:
+            uniqueDevices > 0
+              ? Number((deviceDays / uniqueDevices).toFixed(2))
+              : 0,
+        };
+      })
+      .sort((a, b) => b.uniqueDevices - a.uniqueDevices);
+
+    // Um installHash pertence a uma única plataforma, então a soma dos
+    // distintos por plataforma É o distinto global — não há dupla contagem.
+    const totals = platforms.reduce(
+      (acc, p) => ({
+        uniqueDevices: acc.uniqueDevices + p.uniqueDevices,
+        uniqueSessions: acc.uniqueSessions + p.uniqueSessions,
+        deviceDays: acc.deviceDays + p.deviceDays,
+        newDevices: acc.newDevices + p.newDevices,
+      }),
+      { uniqueDevices: 0, uniqueSessions: 0, deviceDays: 0, newDevices: 0 },
+    );
+
+    const wau = deviceRows.reduce((acc, r) => acc + Number(r.wau), 0);
+    const mau = deviceRows.reduce((acc, r) => acc + Number(r.mau), 0);
+    const avgDailyDevices =
+      days > 0 ? Number((totals.deviceDays / days).toFixed(2)) : 0;
+
+    return {
+      from: dayFrom.toISOString().slice(0, 10),
+      to: dayTo.toISOString().slice(0, 10),
+      days,
+      totals: {
+        ...totals,
+        avgDailyDevices,
+        wau,
+        mau,
+        stickiness:
+          mau > 0 ? Number(((avgDailyDevices / mau) * 100).toFixed(2)) : 0,
+      },
+      platforms,
+      newDevicesDaily: newDailyRows.map((r) => ({
+        day: r.day.toISOString().slice(0, 10),
+        platform: r.platform,
+        count: Number(r.count),
+      })),
+    };
   }
 
   async getDashboardSessions(query: AnalyticsDashboardQueryDto) {
