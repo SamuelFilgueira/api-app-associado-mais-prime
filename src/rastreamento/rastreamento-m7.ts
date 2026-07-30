@@ -7,9 +7,11 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import axios from 'axios';
-import { BaseOrigin, TokenResolverService } from '../shared/token-resolver.service';
+import {
+  BaseOrigin,
+  TokenResolverService,
+} from '../shared/token-resolver.service';
 import { mapTenantBases, TENANT } from '../config/tenant.config';
-import { M7ReverseGeocodeService } from './m7/services/m7-reverse-geocode.service';
 import {
   IRastreamentoProvider,
   RastreamentoBaseContext,
@@ -22,9 +24,6 @@ import {
 
 /** Timeout padrão para chamadas HTTP à API M7 (em ms) */
 const M7_REQUEST_TIMEOUT = 15_000;
-const M7_REV_GEOCODE_TIMEOUT_MS = Number(
-  process.env.M7_REV_GEOCODE_TIMEOUT_MS ?? 900,
-);
 
 // ---------------------------------------------------------------------------
 // Tipos e interfaces
@@ -83,7 +82,9 @@ export interface EventoPadraoM7Response {
 // ---------------------------------------------------------------------------
 
 @Injectable()
-export class RastreamentoM7 implements IRastreamentoProvider, OnModuleInit, OnModuleDestroy {
+export class RastreamentoM7
+  implements IRastreamentoProvider, OnModuleInit, OnModuleDestroy
+{
   private readonly logger = new Logger(RastreamentoM7.name);
   readonly providerName = 'm7' as const;
 
@@ -104,59 +105,7 @@ export class RastreamentoM7 implements IRastreamentoProvider, OnModuleInit, OnMo
   // Inicialização
   // -------------------------------------------------------------------------
 
-  constructor(
-    private readonly tokenResolver: TokenResolverService,
-    private readonly reverseGeocodeService: M7ReverseGeocodeService,
-  ) {}
-
-  private async obterEnderecoLocalPorCoordenadas(
-    latitude: string,
-    longitude: string,
-    baseOrigin: BaseOrigin,
-    cidadeFallback?: string,
-  ): Promise<string | null> {
-    const lat = this.reverseGeocodeService.normalizarCoordenada(latitude);
-    const lon = this.reverseGeocodeService.normalizarCoordenada(longitude);
-
-    if (!lat || !lon) {
-      return null;
-    }
-
-    const timeoutMs = Number.isFinite(M7_REV_GEOCODE_TIMEOUT_MS)
-      ? Math.max(100, M7_REV_GEOCODE_TIMEOUT_MS)
-      : 900;
-
-    const cidadeNormalizada = this.reverseGeocodeService.normalizarCidadeM7(
-      cidadeFallback,
-    );
-
-    try {
-      const endereco = await Promise.race<string | null>([
-        this.reverseGeocodeService.reverseGeocodeCoordenada(
-          lat,
-          lon,
-          baseOrigin,
-          cidadeNormalizada ?? undefined,
-        ),
-        new Promise<null>((resolve) => {
-          setTimeout(() => resolve(null), timeoutMs);
-        }),
-      ]);
-
-      if (!endereco || endereco === `${lat}, ${lon}`) {
-        return null;
-      }
-
-      return endereco;
-    } catch (error) {
-      this.logger.warn(
-        `[${baseOrigin}] Falha no reverse geocode M7 (${lat},${lon}): ${
-          error instanceof Error ? error.message : 'erro desconhecido'
-        }`,
-      );
-      return null;
-    }
-  }
+  constructor(private readonly tokenResolver: TokenResolverService) {}
 
   async onModuleInit(): Promise<void> {
     await Promise.allSettled(this.bases.map((b) => this.renovarToken(b)));
@@ -183,7 +132,11 @@ export class RastreamentoM7 implements IRastreamentoProvider, OnModuleInit, OnMo
     baseContext: RastreamentoBaseContext;
   }): Promise<RastreamentoCandidatoResult> {
     const { cnpj, chassi, baseContext } = params;
-    const data = await this.ultimaPosicaoM7(cnpj, chassi, baseContext.baseOrigin);
+    const data = await this.ultimaPosicaoM7(
+      cnpj,
+      chassi,
+      baseContext.baseOrigin,
+    );
     return {
       dataOriginal: data.data_gps,
       timestamp: new Date(data.data_gps.replace(' ', 'T')).getTime(),
@@ -223,8 +176,10 @@ export class RastreamentoM7 implements IRastreamentoProvider, OnModuleInit, OnMo
    * interno do token para a base informada.
    */
   private async executeRenovarToken(baseOrigin: BaseOrigin): Promise<void> {
-    const apiM7Token = process.env[this.tokenResolver.getTokenKey(baseOrigin, 'm7Token')];
-    const codigo = process.env[this.tokenResolver.getTokenKey(baseOrigin, 'm7Codigo')];
+    const apiM7Token =
+      process.env[this.tokenResolver.getTokenKey(baseOrigin, 'm7Token')];
+    const codigo =
+      process.env[this.tokenResolver.getTokenKey(baseOrigin, 'm7Codigo')];
 
     try {
       const response = await axios.post(
@@ -239,7 +194,9 @@ export class RastreamentoM7 implements IRastreamentoProvider, OnModuleInit, OnMo
         return;
       }
 
-      this.logger.error(`[${baseOrigin}] Falha ao renovar token - sucesso=false`);
+      this.logger.error(
+        `[${baseOrigin}] Falha ao renovar token - sucesso=false`,
+      );
       throw new InternalServerErrorException('Falha ao renovar token');
     } catch (error) {
       if (error instanceof InternalServerErrorException) throw error;
@@ -278,7 +235,9 @@ export class RastreamentoM7 implements IRastreamentoProvider, OnModuleInit, OnMo
     const state = this.tokenState[baseOrigin];
 
     if (!state.token) {
-      this.logger.error(`[${baseOrigin}] executarComReautenticacao - Token não disponível`);
+      this.logger.error(
+        `[${baseOrigin}] executarComReautenticacao - Token não disponível`,
+      );
       throw new InternalServerErrorException('Token não disponível');
     }
 
@@ -298,8 +257,12 @@ export class RastreamentoM7 implements IRastreamentoProvider, OnModuleInit, OnMo
         await this.renovarToken(baseOrigin);
 
         if (!state.token) {
-          this.logger.error(`[${baseOrigin}] Token ainda indisponível após renovação`);
-          throw new InternalServerErrorException('Token não disponível após renovação');
+          this.logger.error(
+            `[${baseOrigin}] Token ainda indisponível após renovação`,
+          );
+          throw new InternalServerErrorException(
+            'Token não disponível após renovação',
+          );
         }
 
         const retry = await request(state.token);
@@ -323,56 +286,46 @@ export class RastreamentoM7 implements IRastreamentoProvider, OnModuleInit, OnMo
 
   /**
    * Consulta a última posição conhecida do veículo na API M7.
+   * O parâmetro `reverseGeocode` é mantido apenas por compatibilidade de
+   * assinatura com chamadores existentes — a cidade retornada é sempre a
+   * original da M7.
    */
   async ultimaPosicaoM7(
-  cnpj: string,
-  chassi: string,
-  baseOrigin: BaseOrigin,
-  reverseGeocode: boolean = true,
-): Promise<UltimaPosicaoM7Response> {
-  try {
-    this.logger.debug(`[${baseOrigin}] Consultando última posição M7 para chassi=${chassi}`);
-    const data = await this.executarComReautenticacao(baseOrigin, (token) =>
-      axios.post(
-        `${process.env.M7_API_BASE_URL}api/veiculos/ultima-posicao`,
-        { cnpj, chassi },
-        {
-          headers: { Authorization: `Bearer ${token}` },
-          timeout: M7_REQUEST_TIMEOUT,
-        },
-      ),
-    );
-    this.logger.debug(`[${baseOrigin}] Resposta recebida da M7 para chassi=${chassi}: ${JSON.stringify(data)}`);
+    cnpj: string,
+    chassi: string,
+    baseOrigin: BaseOrigin,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    reverseGeocode: boolean = true,
+  ): Promise<UltimaPosicaoM7Response> {
+    try {
+      this.logger.debug(
+        `[${baseOrigin}] Consultando última posição M7 para chassi=${chassi}`,
+      );
+      const data = await this.executarComReautenticacao(baseOrigin, (token) =>
+        axios.post(
+          `${process.env.M7_API_BASE_URL}api/veiculos/ultima-posicao`,
+          { cnpj, chassi },
+          {
+            headers: { Authorization: `Bearer ${token}` },
+            timeout: M7_REQUEST_TIMEOUT,
+          },
+        ),
+      );
+      this.logger.debug(
+        `[${baseOrigin}] Resposta recebida da M7 para chassi=${chassi}: ${JSON.stringify(data)}`,
+      );
 
-    const raw = (data as Record<string, unknown>).ultima_posicao as Record<string, unknown> || {};
-    const latitude = raw.latitude as string;
-    const longitude = raw.longitude as string;
-    const cidadeFallback = raw.cidade as string | undefined;
-
-    let endereco: string | null | undefined;
-    if (reverseGeocode) {
-      endereco = await this.obterEnderecoLocalPorCoordenadas(
-        latitude,
-        longitude,
-        baseOrigin,
-        cidadeFallback,
+      return this.mapearUltimaPosicaoM7(data as Record<string, unknown>);
+    } catch (error) {
+      if (error instanceof InternalServerErrorException) throw error;
+      this.logger.error(
+        `[${baseOrigin}] ultimaPosicaoM7 ERRO: ${error instanceof Error ? error.message : JSON.stringify(error)}`,
+      );
+      throw new InternalServerErrorException(
+        'Erro ao consultar última posição do veículo',
       );
     }
-
-    const ultimaPosicaoMapeada = this.mapearUltimaPosicaoM7(
-      data as Record<string, unknown>,
-      endereco ?? undefined,
-    );
-
-    return ultimaPosicaoMapeada;
-  } catch (error) {
-    if (error instanceof InternalServerErrorException) throw error;
-    this.logger.error(
-      `[${baseOrigin}] ultimaPosicaoM7 ERRO: ${error instanceof Error ? error.message : JSON.stringify(error)}`,
-    );
-    throw new InternalServerErrorException('Erro ao consultar última posição do veículo');
   }
-}
 
   /**
    * Busca o estado atual do veículo na API M7 (âncora + ignição).
@@ -391,7 +344,10 @@ export class RastreamentoM7 implements IRastreamentoProvider, OnModuleInit, OnMo
           timeout: M7_REQUEST_TIMEOUT,
         }),
       );
-      const evento = ((data as Record<string, unknown>).evento ?? {}) as Record<string, unknown>;
+      const evento = ((data as Record<string, unknown>).evento ?? {}) as Record<
+        string,
+        unknown
+      >;
       return {
         ancoraAtiva: Boolean(evento.ancora),
         evtIgn: Boolean(evento.ignicao_ligada),
@@ -401,7 +357,9 @@ export class RastreamentoM7 implements IRastreamentoProvider, OnModuleInit, OnMo
       this.logger.error(
         `[${baseOrigin}] getEventoPadraoM7 ERRO: ${error instanceof Error ? error.message : JSON.stringify(error)}`,
       );
-      throw new InternalServerErrorException('Erro ao buscar estado atual do veículo na API M7');
+      throw new InternalServerErrorException(
+        'Erro ao buscar estado atual do veículo na API M7',
+      );
     }
   }
 
@@ -448,13 +406,25 @@ export class RastreamentoM7 implements IRastreamentoProvider, OnModuleInit, OnMo
     baseOrigin: BaseOrigin,
   ): Promise<AncoraM7Response> {
     try {
-      return await this._enviarComandoVeiculo(cnpj, chassi, ancoraAtiva, evtIgn, baseOrigin);
+      return await this._enviarComandoVeiculo(
+        cnpj,
+        chassi,
+        ancoraAtiva,
+        evtIgn,
+        baseOrigin,
+      );
     } catch (error) {
       if (error instanceof InternalServerErrorException) throw error;
       const upstreamMessage = this.extractM7ErrorMessage(error);
 
-      if (axios.isAxiosError(error) && error.response?.status === 404 && upstreamMessage) {
-        throw new BadRequestException(`M7 rejeitou atualização da âncora: ${upstreamMessage}`);
+      if (
+        axios.isAxiosError(error) &&
+        error.response?.status === 404 &&
+        upstreamMessage
+      ) {
+        throw new BadRequestException(
+          `M7 rejeitou atualização da âncora: ${upstreamMessage}`,
+        );
       }
 
       this.logger.error(
@@ -476,13 +446,25 @@ export class RastreamentoM7 implements IRastreamentoProvider, OnModuleInit, OnMo
     baseOrigin: BaseOrigin,
   ): Promise<AncoraM7Response> {
     try {
-      return await this._enviarComandoVeiculo(cnpj, chassi, ancoraAtiva, evtIgn, baseOrigin);
+      return await this._enviarComandoVeiculo(
+        cnpj,
+        chassi,
+        ancoraAtiva,
+        evtIgn,
+        baseOrigin,
+      );
     } catch (error) {
       if (error instanceof InternalServerErrorException) throw error;
       const upstreamMessage = this.extractM7ErrorMessage(error);
 
-      if (axios.isAxiosError(error) && error.response?.status === 404 && upstreamMessage) {
-        throw new BadRequestException(`M7 rejeitou atualização da ignição: ${upstreamMessage}`);
+      if (
+        axios.isAxiosError(error) &&
+        error.response?.status === 404 &&
+        upstreamMessage
+      ) {
+        throw new BadRequestException(
+          `M7 rejeitou atualização da ignição: ${upstreamMessage}`,
+        );
       }
 
       this.logger.error(
@@ -523,37 +505,38 @@ export class RastreamentoM7 implements IRastreamentoProvider, OnModuleInit, OnMo
    * Converte o payload bruto da API M7 para o formato tipado de última posição.
    */
   private mapearUltimaPosicaoM7(
-  data: Record<string, unknown>,
-  endereco?: string, // novo parâmetro opcional
-): UltimaPosicaoM7Response {
-  const ultimaPosicao = (data.ultima_posicao || {}) as Record<string, unknown>;
-  const tensaoRaw = ultimaPosicao.tensao;
-  const voltagemFromTensao =
-    typeof tensaoRaw === 'number'
-      ? tensaoRaw
-      : typeof tensaoRaw === 'string'
-        ? Number.parseFloat(tensaoRaw.replace(',', '.'))
-        : Number.NaN;
+    data: Record<string, unknown>,
+  ): UltimaPosicaoM7Response {
+    const ultimaPosicao = (data.ultima_posicao || {}) as Record<
+      string,
+      unknown
+    >;
+    const tensaoRaw = ultimaPosicao.tensao;
+    const voltagemFromTensao =
+      typeof tensaoRaw === 'number'
+        ? tensaoRaw
+        : typeof tensaoRaw === 'string'
+          ? Number.parseFloat(tensaoRaw.replace(',', '.'))
+          : Number.NaN;
 
-  return {
-    monitorado: ultimaPosicao.monitorado as number,
-    data_gps: ultimaPosicao.data_gps as string,
-    latitude: ultimaPosicao.latitude as string,
-    longitude: ultimaPosicao.longitude as string,
-    velocidade: ultimaPosicao.velocidade as number,
-    tensao:
-      typeof tensaoRaw === 'string' || typeof tensaoRaw === 'number'
-        ? String(tensaoRaw)
-        : null,
-    voltagem: Number.isFinite(voltagemFromTensao) ? voltagemFromTensao : null,
-    ignicao: ultimaPosicao.ignicao as boolean,
-    // Usa o endereço se fornecido, senão usa o valor original
-    cidade: endereco ?? (ultimaPosicao.cidade as string),
-    marca: ultimaPosicao.marca as string,
-    modelo: ultimaPosicao.modelo as string,
-    identificador: ultimaPosicao.identificador as string,
-  };
-}
+    return {
+      monitorado: ultimaPosicao.monitorado as number,
+      data_gps: ultimaPosicao.data_gps as string,
+      latitude: ultimaPosicao.latitude as string,
+      longitude: ultimaPosicao.longitude as string,
+      velocidade: ultimaPosicao.velocidade as number,
+      tensao:
+        typeof tensaoRaw === 'string' || typeof tensaoRaw === 'number'
+          ? String(tensaoRaw)
+          : null,
+      voltagem: Number.isFinite(voltagemFromTensao) ? voltagemFromTensao : null,
+      ignicao: ultimaPosicao.ignicao as boolean,
+      cidade: ultimaPosicao.cidade as string,
+      marca: ultimaPosicao.marca as string,
+      modelo: ultimaPosicao.modelo as string,
+      identificador: ultimaPosicao.identificador as string,
+    };
+  }
 
   /**
    * Converte o payload bruto da API M7 para o formato tipado de âncora.
@@ -596,7 +579,10 @@ export class RastreamentoM7 implements IRastreamentoProvider, OnModuleInit, OnMo
       }
 
       if (typeof payload !== 'object') {
-        return { sucesso: false, mensagem: 'Payload deve ser um objeto JSON válido' };
+        return {
+          sucesso: false,
+          mensagem: 'Payload deve ser um objeto JSON válido',
+        };
       }
 
       const payloadData = payload as Record<string, unknown>;

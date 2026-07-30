@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
   UnauthorizedException,
@@ -54,6 +55,60 @@ export class AdminPanelUsersService {
         role: adminPanelUser.role,
       },
     };
+  }
+
+  /**
+   * Autoalteração de senha do usuário logado no painel.
+   *
+   * Diferente do PATCH /admin-panel/users/:id (CRUD administrativo), aqui:
+   *  - o alvo é SEMPRE o dono do token (id vem do JWT, nunca do body/rota);
+   *  - a senha atual é exigida — um token vazado não basta para trocar;
+   *  - qualquer perfil do painel pode usar (REVISTORIA, MARKETING, ...), pois
+   *    a claim `adminRole` só existe em tokens emitidos pelo login do painel.
+   *    Tokens do app móvel (mesmo com role ADMIN) não a possuem — e sem esta
+   *    barreira um usuário do app com id coincidente alcançaria a conta do
+   *    painel de mesmo id.
+   */
+  async changeOwnPassword(
+    userId: number,
+    adminRole: unknown,
+    currentPassword: string,
+    newPassword: string,
+  ) {
+    if (!adminRole) {
+      throw new ForbiddenException(
+        'Recurso exclusivo de usuários do painel administrativo',
+      );
+    }
+
+    const user = await this.prisma.adminPanelUser.findUnique({
+      where: { id: userId },
+      select: { id: true, password: true },
+    });
+
+    if (!user) {
+      throw new NotFoundException('Usuário administrativo não encontrado');
+    }
+
+    const currentMatches = await bcrypt.compare(currentPassword, user.password);
+    if (!currentMatches) {
+      throw new UnauthorizedException('Senha atual incorreta');
+    }
+
+    if (currentPassword === newPassword) {
+      throw new BadRequestException(
+        'A nova senha deve ser diferente da senha atual',
+      );
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+
+    await this.prisma.adminPanelUser.update({
+      where: { id: userId },
+      data: { password: passwordHash },
+    });
+
+    return { success: true, message: 'Senha alterada com sucesso' };
   }
 
   async create(data: CreateAdminPanelUserDto) {
