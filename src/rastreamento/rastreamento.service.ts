@@ -1,4 +1,9 @@
-import { BadRequestException, ForbiddenException, Injectable, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  Logger,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 import {
@@ -14,7 +19,10 @@ import {
   RastreamentoSoftruck,
   UltimaPosicaoSoftruckResponse,
 } from './softruck/rastreamento-softruck.service';
-import { BaseOrigin, TokenResolverService } from 'src/shared/token-resolver.service';
+import {
+  BaseOrigin,
+  TokenResolverService,
+} from 'src/shared/token-resolver.service';
 import { TENANT } from 'src/config/tenant.config';
 import { baseTag } from 'src/shared/log.util';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -74,7 +82,8 @@ export class RastreamentoService {
    */
   async saveM7WebhookEvent(payload: unknown): Promise<void> {
     try {
-      const { chassi, evento, tipoevento, scope } = this.extrairDadosWebhook(payload);
+      const { chassi, evento, tipoevento, scope } =
+        this.extrairDadosWebhook(payload);
 
       if (scope !== 'cliente') {
         this.logger.log(
@@ -93,7 +102,10 @@ export class RastreamentoService {
         },
       });
     } catch (err) {
-      this.logger.error('Erro ao salvar evento de webhook M7', err?.stack || err);
+      this.logger.error(
+        'Erro ao salvar evento de webhook M7',
+        err?.stack || err,
+      );
     }
   }
 
@@ -114,7 +126,6 @@ export class RastreamentoService {
     await this.checkCortarRastreamento(chassi);
     const baseContext =
       requestContext ?? (await this.resolveBaseContextFromDb(chassi));
-
 
     const softruckPublicKeyKey = this.tokenResolver.getTokenKey(
       baseContext.baseOrigin,
@@ -177,7 +188,12 @@ export class RastreamentoService {
 
     if (softruckResult.status === 'fulfilled') {
       const softruck = softruckResult.value;
-      this.adicionarCandidatoSeValido(candidatos, 'softruck', softruck, softruck.date);
+      this.adicionarCandidatoSeValido(
+        candidatos,
+        'softruck',
+        softruck,
+        softruck.date,
+      );
     } else {
       this.logger.warn(
         `Falha no rastreamento Softruck para chassi ${chassi}: ${this.descreverErroProvider(softruckResult.reason)}`,
@@ -189,7 +205,9 @@ export class RastreamentoService {
     }
 
     const selecionado = candidatos.reduce((atualMaisRecente, candidato) =>
-      candidato.timestamp > atualMaisRecente.timestamp ? candidato : atualMaisRecente,
+      candidato.timestamp > atualMaisRecente.timestamp
+        ? candidato
+        : atualMaisRecente,
     );
 
     const payload = this.normalizarRespostaRastreamento(
@@ -197,7 +215,9 @@ export class RastreamentoService {
       selecionado.origem,
     );
 
-    if (selecionado.origem === 'm7' || selecionado.origem === 'softruck') {
+    // M7 não é mais enriquecido com reverse geocode: o campo `cidade`
+    // retorna sempre o valor original da API M7 (ex.: "Duque de Caxias,RJ").
+    if (selecionado.origem === 'softruck') {
       const dados = selecionado.data as unknown as Record<string, unknown>;
       const lat = this.reverseGeocodeService.normalizarCoordenada(
         dados.latitude as number | string | undefined,
@@ -215,11 +235,7 @@ export class RastreamentoService {
               baseContext.baseOrigin,
             );
           if (endereco && endereco !== `${lat}, ${lon}`) {
-            if (selecionado.origem === 'm7') {
-              payload.cidade = endereco;
-            } else {
-              payload.endereco = endereco;
-            }
+            payload.endereco = endereco;
           }
         } catch {
           this.logger.warn(
@@ -252,7 +268,11 @@ export class RastreamentoService {
     const dataInicialNormalizada = dataInicial?.trim();
     const dataFinalNormalizada = dataFinal?.trim();
 
-    this.validarParametrosHistorico(chassiNormalizado, dataInicialNormalizada, dataFinalNormalizada);
+    this.validarParametrosHistorico(
+      chassiNormalizado,
+      dataInicialNormalizada,
+      dataFinalNormalizada,
+    );
 
     return this.historicoSoftruck.gerarRelatorioPdf(
       chassiNormalizado,
@@ -278,7 +298,11 @@ export class RastreamentoService {
     const dataInicialNormalizada = dataInicial?.trim();
     const dataFinalNormalizada = dataFinal?.trim();
 
-    this.validarParametrosHistorico(chassiNormalizado, dataInicialNormalizada, dataFinalNormalizada);
+    this.validarParametrosHistorico(
+      chassiNormalizado,
+      dataInicialNormalizada,
+      dataFinalNormalizada,
+    );
 
     return this.historicoSoftruck.obterRotas(
       chassiNormalizado,
@@ -487,7 +511,7 @@ export class RastreamentoService {
       acc[base] =
         resultado.status === 'fulfilled'
           ? resultado.value
-          : { erro: (resultado as PromiseRejectedResult).reason?.message };
+          : { erro: resultado.reason?.message };
       return acc;
     }, {});
   }
@@ -502,7 +526,12 @@ export class RastreamentoService {
     this.logger.log(
       `${baseTag(baseOrigin)} Consultando última posição Softruck para chassi: ${chassi} (tokenOverride=${!!tokenOverride})`,
     );
-    return this.softruck.ultimaPosicaoSoftruck(chassi, baseOrigin, publicKey, tokenOverride);
+    return this.softruck.ultimaPosicaoSoftruck(
+      chassi,
+      baseOrigin,
+      publicKey,
+      tokenOverride,
+    );
   }
 
   async processarWebhookM7(payload: unknown) {
@@ -539,7 +568,8 @@ export class RastreamentoService {
     const chassi = typeof p['chassi'] === 'string' ? p['chassi'] : '';
     const evento = typeof p['evento'] === 'string' ? p['evento'] : null;
     const raw = Number(p['tipoevento']);
-    const scope = typeof p['scope'] === 'string' ? p['scope'].trim().toLowerCase() : null;
+    const scope =
+      typeof p['scope'] === 'string' ? p['scope'].trim().toLowerCase() : null;
     return { chassi, evento, tipoevento: isNaN(raw) ? null : raw, scope };
   }
 
@@ -556,17 +586,26 @@ export class RastreamentoService {
       throw new BadRequestException('Parâmetro chassi é obrigatório');
     }
     if (!this.isDataIsoValida(dataInicial)) {
-      throw new BadRequestException('Parâmetro dataInicial inválido. Use o formato yyyy-mm-dd');
+      throw new BadRequestException(
+        'Parâmetro dataInicial inválido. Use o formato yyyy-mm-dd',
+      );
     }
     if (!this.isDataIsoValida(dataFinal)) {
-      throw new BadRequestException('Parâmetro dataFinal inválido. Use o formato yyyy-mm-dd');
+      throw new BadRequestException(
+        'Parâmetro dataFinal inválido. Use o formato yyyy-mm-dd',
+      );
     }
     if (dataInicial > dataFinal) {
-      throw new BadRequestException('Parâmetro dataInicial não pode ser maior que dataFinal');
+      throw new BadRequestException(
+        'Parâmetro dataInicial não pode ser maior que dataFinal',
+      );
     }
   }
 
-  private normalizarBooleanoEntrada(value: unknown, fieldName: string): boolean {
+  private normalizarBooleanoEntrada(
+    value: unknown,
+    fieldName: string,
+  ): boolean {
     if (typeof value === 'boolean') return value;
     if (typeof value === 'number') {
       if (value === 1) return true;
@@ -577,7 +616,9 @@ export class RastreamentoService {
       if (normalized === 'true' || normalized === '1') return true;
       if (normalized === 'false' || normalized === '0') return false;
     }
-    throw new BadRequestException(`Campo ${fieldName} inválido. Use true/false ou 1/0.`);
+    throw new BadRequestException(
+      `Campo ${fieldName} inválido. Use true/false ou 1/0.`,
+    );
   }
 
   private isDataIsoValida(value?: string): boolean {
@@ -594,7 +635,9 @@ export class RastreamentoService {
     );
   }
 
-  private async resolveBaseContextFromDb(chassi: string): Promise<RastreamentoBaseContext> {
+  private async resolveBaseContextFromDb(
+    chassi: string,
+  ): Promise<RastreamentoBaseContext> {
     let baseOrigin: BaseOrigin = TENANT.defaultBase;
 
     try {
@@ -603,7 +646,7 @@ export class RastreamentoService {
         select: { user: { select: { baseOrigin: true } } },
       });
       if (userVehicle?.user?.baseOrigin) {
-        baseOrigin = userVehicle.user.baseOrigin as BaseOrigin;
+        baseOrigin = userVehicle.user.baseOrigin;
       }
     } catch (err) {
       this.logger.warn(
@@ -615,7 +658,8 @@ export class RastreamentoService {
       baseOrigin,
       logicaToken: this.tokenResolver.resolveLogicaToken(baseOrigin),
       logicaTokenKey: this.tokenResolver.getTokenKey(baseOrigin, 'logica'),
-      softruckPublicKey: this.tokenResolver.resolveSoftruckPublicKey(baseOrigin),
+      softruckPublicKey:
+        this.tokenResolver.resolveSoftruckPublicKey(baseOrigin),
     };
   }
 
@@ -665,8 +709,12 @@ export class RastreamentoService {
     if (brDateMatch) {
       const [, day, month, year, hour, minute, second] = brDateMatch;
       const parsed = new Date(
-        Number(year), Number(month) - 1, Number(day),
-        Number(hour), Number(minute), Number(second ?? '0'),
+        Number(year),
+        Number(month) - 1,
+        Number(day),
+        Number(hour),
+        Number(minute),
+        Number(second ?? '0'),
       ).getTime();
       if (!Number.isNaN(parsed)) return parsed;
     }
@@ -715,7 +763,9 @@ export class RastreamentoService {
       const { chassi, evento, tipoevento } = this.extrairDadosWebhook(payload);
 
       if (!chassi) {
-        this.logger.warn('[Webhook] Payload sem chassi — notificação não disparada');
+        this.logger.warn(
+          '[Webhook] Payload sem chassi — notificação não disparada',
+        );
         return;
       }
 
@@ -725,8 +775,10 @@ export class RastreamentoService {
         evento,
       );
     } catch (err) {
-      this.logger.error('[Webhook] Erro ao disparar notificação por evento', err?.stack || err);
+      this.logger.error(
+        '[Webhook] Erro ao disparar notificação por evento',
+        err?.stack || err,
+      );
     }
   }
-
 }
