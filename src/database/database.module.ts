@@ -1,5 +1,5 @@
 import { Global, Module } from '@nestjs/common';
-import { PrismaService } from '../prisma.service';
+import { PrismaService } from 'src/database/prisma.service';
 
 /**
  * DatabaseModule — módulo global que provê PrismaService para toda a aplicação.

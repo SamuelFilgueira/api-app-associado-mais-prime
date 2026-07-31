@@ -1,16 +1,10 @@
 import { Module } from '@nestjs/common';
-import { DocumentosService } from './documentos.service';
-import { DocumentosController } from './documentos.controller';
-import { FileUploadService } from 'src/common/services/file-upload.service';
-import { AdminPanelRoleGuard } from '../admin-panel/admin-panel-role.guard';
+import { DocumentosService } from 'src/documentos/services/documentos.service';
+import { DocumentosController } from 'src/documentos/controllers/documentos.controller';
 
 @Module({
   exports: [DocumentosService],
-  providers: [
-    DocumentosService,
-    FileUploadService,
-    AdminPanelRoleGuard,
-  ],
+  providers: [DocumentosService],
   controllers: [DocumentosController],
 })
 export class DocumentosModule {}

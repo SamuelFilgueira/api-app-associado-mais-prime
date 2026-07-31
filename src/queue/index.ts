@@ -1,7 +1,0 @@
-export {
-	QueueModule,
-	WEBHOOK_QUEUE,
-	NOTIFICATION_QUEUE,
-	FUEL_ECONOMY_QUEUE,
-	BOLETO_VERIFICACAO_QUEUE,
-} from './queue.module';

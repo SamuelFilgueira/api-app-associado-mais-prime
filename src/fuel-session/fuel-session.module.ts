@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
-import { FuelSessionService } from './fuel-session.service';
-import { FuelEconomyProcessor } from './fuel-economy.processor';
+import { FuelSessionService } from 'src/fuel-session/services/fuel-session.service';
+import { FuelEconomyProcessor } from 'src/fuel-session/processors/fuel-economy.processor';
 import { EconomiaModule } from '../economia/economia.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 

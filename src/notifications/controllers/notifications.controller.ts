@@ -1,0 +1,338 @@
+import {
+  Body,
+  Controller,
+  Post,
+  Get,
+  Put,
+  Patch,
+  Param,
+  Query,
+  ParseIntPipe,
+  UseGuards,
+  UseInterceptors,
+  UploadedFile,
+  Request,
+  HttpCode,
+  HttpStatus,
+  ForbiddenException,
+  Logger,
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
+import { NotificationsService } from 'src/notifications/services/notifications.service';
+import { TestNotificationDto } from 'src/notifications/dto/test-notification.dto';
+import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
+import { SendMarketingNotificationDto } from 'src/notifications/dto/send-marketing-notification.dto';
+import { NOTIFICATION_QUEUE } from 'src/queue/queue.module';
+import { AdminRoleGuard } from 'src/auth/guards/admin-role.guard';
+import { RegisterExpoTokenDto } from 'src/notifications/dto/register-expo-token.dto';
+import { AdminPanelRoleGuard } from 'src/admin-panel/guards/admin-panel-role.guard';
+import { AdminPanelRoles } from 'src/admin-panel/decorators/admin-panel-roles.decorator';
+import { AdminPanelRole } from 'src/admin-panel/enums/admin-panel-role.enum';
+import { MarketingNotificationAuditService } from 'src/notifications/services/marketing-notification-audit.service';
+import { UpsertPopupDto } from 'src/notifications/dto/upsert-popup.dto';
+
+@Controller('notifications')
+export class NotificationsController {
+  private readonly logger = new Logger(NotificationsController.name);
+
+  private maskExpoPushToken(token?: string | null): string {
+    if (!token) return 'ausente';
+    if (token.length <= 16) return token;
+    return `${token.slice(0, 12)}...${token.slice(-4)}`;
+  }
+
+  constructor(
+    private readonly notificationsService: NotificationsService,
+    @InjectQueue(NOTIFICATION_QUEUE) private readonly notificationQueue: Queue,
+    private readonly marketingNotificationAuditService: MarketingNotificationAuditService,
+  ) {}
+
+  /**
+   * POST /notifications/queue-test
+   * Enfileira a notificação no BullMQ em vez de enviar diretamente.
+   * Use este endpoint para verificar se a fila está operacional.
+   */
+  @Post('queue-test')
+  async queueTestNotification(@Body() dto: TestNotificationDto) {
+    const data = { plate: dto.plate, ignition: dto.ignition };
+    this.logger.log(
+      `[QUEUE] expoPushToken recebido para enfileiramento: ${this.maskExpoPushToken(dto.expoPushToken)}`,
+    );
+    const job = await this.notificationQueue.add(
+      'push-test',
+      {
+        userId: dto.userId ?? 1,
+        expoPushToken: dto.expoPushToken,
+        title: dto.title,
+        body: dto.body,
+        data,
+      },
+      { attempts: 3, backoff: { type: 'exponential', delay: 2000 } },
+    );
+    this.logger.log(
+      `[QUEUE] Job #${job.id} enfileirado para user ${dto.userId}`,
+    );
+    return {
+      queued: true,
+      jobId: job.id,
+      queue: NOTIFICATION_QUEUE,
+      enqueuedAt: new Date().toISOString(),
+    };
+  }
+
+  @Post('test')
+  async testNotification(@Body() dto: TestNotificationDto) {
+    const data = {
+      plate: dto.plate,
+      ignition: dto.ignition,
+    };
+    this.logger.log(
+      `[TEST] expoPushToken recebido para envio direto: ${this.maskExpoPushToken(dto.expoPushToken)}`,
+    );
+    this.logger.log(
+      `Enviando notificação de teste com dados: ${JSON.stringify(data)}`,
+    );
+    // Nota: Para teste, usando um userId padrão (1)
+    // Em produção, isso viria do token JWT
+    return this.notificationsService.sendPushNotification(
+      dto.userId ?? 1,
+      dto.expoPushToken,
+      dto.title,
+      dto.body,
+      data,
+    );
+  }
+
+  /**
+   * POST /notifications/register-token
+   * Registra/atualiza o Expo Push Token do usuário autenticado.
+   */
+  @UseGuards(JwtAuthGuard)
+  @Post('register-token')
+  @HttpCode(HttpStatus.OK)
+  async registerExpoPushToken(
+    @Body() dto: RegisterExpoTokenDto,
+    @Request() req: any,
+  ) {
+    return this.notificationsService.registerExpoPushToken(
+      req.user.userId,
+      dto.expoPushToken,
+    );
+  }
+
+  /**
+   * GET /notifications/user/:userId/unread
+   * Obtém notificações não lidas do usuário
+   */
+  @UseGuards(JwtAuthGuard)
+  @Get('user/:userId/unread')
+  async getUnreadNotifications(
+    @Param('userId', ParseIntPipe) userId: number,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+    @Request() req?: any,
+  ) {
+    // Validar que o userId do token corresponde ao userId do params
+    if (req.user && req.user.userId !== userId) {
+      throw new ForbiddenException(
+        'Acesso negado: voce so pode ver suas proprias notificacoes',
+      );
+    }
+
+    const limitNum = limit ? parseInt(limit, 10) : 50;
+    const offsetNum = offset ? parseInt(offset, 10) : 0;
+
+    return this.notificationsService.getUnreadNotifications(
+      userId,
+      limitNum,
+      offsetNum,
+    );
+  }
+
+  /**
+   * GET /notifications/user/:userId
+   * Obtém todas as notificações do usuário
+   */
+  @UseGuards(JwtAuthGuard)
+  @Get('user/:userId')
+  async getAllNotifications(
+    @Param('userId', ParseIntPipe) userId: number,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+    @Request() req?: any,
+  ) {
+    // Validar que o userId do token corresponde ao userId do params
+    if (req.user && req.user.userId !== userId) {
+      throw new ForbiddenException(
+        'Acesso negado: voce so pode ver suas proprias notificacoes',
+      );
+    }
+
+    const limitNum = limit ? parseInt(limit, 10) : 50;
+    const offsetNum = offset ? parseInt(offset, 10) : 0;
+
+    return this.notificationsService.getAllNotifications(
+      userId,
+      limitNum,
+      offsetNum,
+    );
+  }
+
+  /**
+   * PATCH /notifications/:notificationId/read
+   * Marca uma notificação como lida
+   */
+  @UseGuards(JwtAuthGuard)
+  @Patch(':notificationId/read')
+  async markAsRead(
+    @Param('notificationId', ParseIntPipe) notificationId: number,
+    @Request() req: any,
+  ) {
+    const userId = req.user.userId;
+    return this.notificationsService.markAsRead(userId, notificationId);
+  }
+
+  /**
+   * PATCH /notifications/user/:userId/read-all
+   * Marca todas as notificações como lidas
+   */
+  @UseGuards(JwtAuthGuard)
+  @Patch('user/:userId/read-all')
+  async markAllAsRead(
+    @Param('userId', ParseIntPipe) userId: number,
+    @Request() req: any,
+  ) {
+    // Validar que o userId do token corresponde ao userId do params
+    if (req.user.userId !== userId) {
+      throw new ForbiddenException(
+        'Acesso negado: voce so pode marcar suas proprias notificacoes',
+      );
+    }
+
+    return this.notificationsService.markAllAsRead(userId);
+  }
+
+  /**
+   * PATCH /notifications/user/:userId/delete-all
+   * Marca todas as notificações de um usuário como deletadas (soft delete)
+   */
+  @UseGuards(JwtAuthGuard)
+  @Patch('user/:userId/delete-all')
+  @HttpCode(HttpStatus.OK)
+  async deleteAllUserNotifications(
+    @Param('userId', ParseIntPipe) userId: number,
+    @Request() req: any,
+  ) {
+    // Validar que o userId do token corresponde ao userId do params
+    if (req.user.userId !== userId) {
+      throw new ForbiddenException(
+        'Acesso negado: voce so pode deletar suas proprias notificacoes',
+      );
+    }
+
+    const result =
+      await this.notificationsService.deleteAllUserNotifications(userId);
+    return {
+      success: true,
+      message: `${result.deletedCount} notificações marcadas como deletadas com sucesso`,
+      deletedCount: result.deletedCount,
+    };
+  }
+
+  /**
+   * PATCH /notifications/:notificationId
+   * Deleta uma notificação
+   */
+  @UseGuards(JwtAuthGuard)
+  @Patch(':notificationId')
+  @HttpCode(HttpStatus.OK)
+  async deleteNotification(
+    @Param('notificationId', ParseIntPipe) notificationId: number,
+    @Request() req: any,
+  ) {
+    const userId = req.user.userId;
+    await this.notificationsService.deleteNotification(userId, notificationId);
+    return { success: true, message: 'Notificação deletada com sucesso' };
+  }
+
+  /**
+   * POST /notifications/admin/marketing
+   * Envia notificacoes de marketing em massa (painel administrativo)
+   */
+  @UseGuards(JwtAuthGuard, AdminRoleGuard, AdminPanelRoleGuard)
+  @AdminPanelRoles(AdminPanelRole.MARKETING, AdminPanelRole.ADMIN)
+  @Post('admin/marketing')
+  @HttpCode(HttpStatus.OK)
+  async sendMarketingNotification(
+    @Body() dto: SendMarketingNotificationDto,
+    @Request() req: any,
+  ) {
+    const auditId =
+      await this.marketingNotificationAuditService.createRequestAudit(
+        req.user?.userId,
+        dto,
+      );
+
+    this.logger.log('[MARKETING] Iniciando envio de notificações de marketing');
+    try {
+      const result = await this.notificationsService.sendMarketingNotification(
+        dto,
+        req.user?.userId,
+      );
+
+      await this.marketingNotificationAuditService.markSuccess(
+        auditId,
+        result.sentCount,
+        result.skippedCount,
+      );
+
+      this.logger.log(
+        `[MARKETING] ✅ Envio concluído: ${result.sentCount} enviadas, ${result.skippedCount} puladas`,
+      );
+      return result;
+    } catch (error) {
+      await this.marketingNotificationAuditService.markFailure(
+        auditId,
+        error?.message || 'Erro desconhecido',
+      );
+
+      this.logger.error(`[MARKETING] ❌ Erro: ${error.message}`, error.stack);
+      throw error;
+    }
+  }
+
+  @Get('popup')
+  @UseGuards(JwtAuthGuard)
+  async getActivePopup() {
+    return this.notificationsService.getActivePopup();
+  }
+
+  @Put('popup')
+  @UseGuards(JwtAuthGuard, AdminRoleGuard, AdminPanelRoleGuard)
+  @AdminPanelRoles(AdminPanelRole.MARKETING, AdminPanelRole.ADMIN)
+  @UseInterceptors(FileInterceptor('image'))
+  @HttpCode(HttpStatus.OK)
+  async createPopup(
+    @Body() dto: UpsertPopupDto,
+    @UploadedFile() image: Express.Multer.File,
+    @Request() req: any,
+  ) {
+    return this.notificationsService.upsertPopup(undefined, dto, req.user.userId, image);
+  }
+
+  @Put('popup/:id')
+  @UseGuards(JwtAuthGuard, AdminRoleGuard, AdminPanelRoleGuard)
+  @AdminPanelRoles(AdminPanelRole.MARKETING, AdminPanelRole.ADMIN)
+  @UseInterceptors(FileInterceptor('image'))
+  @HttpCode(HttpStatus.OK)
+  async updatePopup(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpsertPopupDto,
+    @UploadedFile() image: Express.Multer.File,
+    @Request() req: any,
+  ) {
+    return this.notificationsService.upsertPopup(id, dto, req.user.userId, image);
+  }
+}

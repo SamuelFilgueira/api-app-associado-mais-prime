@@ -8,8 +8,8 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
-import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
-import { JwtUser } from 'src/auth/jwt-user.interface';
+import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
+import { JwtUser } from 'src/auth/interfaces/jwt-user.interface';
 import { BaseContextService } from 'src/shared/base-context.service';
 import {
   HistoricoM7ContestacaoQueryDto,

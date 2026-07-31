@@ -1,5 +1,5 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
-import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
+import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
 import { BaseContextService } from 'src/shared/base-context.service';
 import { TokenResolverService } from 'src/shared/token-resolver.service';
 import { HistoricoQueryDto } from '../dto/historico-query.dto';

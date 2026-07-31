@@ -22,8 +22,17 @@ export class LoggingInterceptor implements NestInterceptor {
       tap(() => {
         const res = context.switchToHttp().getResponse();
         const duration = Date.now() - start;
+        // Identificação do chamador: userId do JWT (populado pelos guards),
+        // IP e user-agent — permite distinguir app, painel e outros clientes
+        const userId = req.user?.userId ?? '-';
+        const ip =
+          req.headers?.['x-forwarded-for']?.split(',')[0]?.trim() ??
+          req.ip ??
+          req.socket?.remoteAddress ??
+          '-';
+        const userAgent = req.headers?.['user-agent'] ?? '-';
         this.logger.log(
-          `[${requestId}] ${method} ${url} ${res.statusCode} ${duration}ms`,
+          `[${requestId}] ${method} ${url} ${res.statusCode} ${duration}ms | userId=${userId} | ip=${ip} | ua=${userAgent}`,
         );
       }),
     );

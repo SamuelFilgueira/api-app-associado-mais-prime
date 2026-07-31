@@ -1,6 +1,6 @@
 import { Controller, Get, Query, Res, UseGuards } from '@nestjs/common';
 import type { Response } from 'express';
-import { JwtAuthGuard } from 'src/auth/jwt-auth.guard';
+import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
 import { BaseContextService } from 'src/shared/base-context.service';
 import { TokenResolverService } from 'src/shared/token-resolver.service';
 import { TrajetoQueryDto } from '../dto/trajeto-query.dto';

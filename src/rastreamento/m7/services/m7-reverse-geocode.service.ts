@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { PrismaService } from 'src/prisma.service';
+import { PrismaService } from 'src/database/prisma.service';
 import { BaseOrigin } from 'src/shared/token-resolver.service';
 import { HistoricoM7ContestacaoPontoDto } from '../dto/historico-m7-response.dto';
 import { M7PontoHistoricoRaw } from '../interfaces/m7-historico.interface';

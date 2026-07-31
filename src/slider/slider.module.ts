@@ -1,15 +1,9 @@
 import { Module } from '@nestjs/common';
-import { SliderController } from './slider.controller';
-import { SliderService } from './slider.service';
-import { FileUploadService } from 'src/common/services/file-upload.service';
-import { AdminPanelRoleGuard } from '../admin-panel/admin-panel-role.guard';
+import { SliderController } from 'src/slider/controllers/slider.controller';
+import { SliderService } from 'src/slider/services/slider.service';
 
 @Module({
   controllers: [SliderController],
-  providers: [
-    SliderService,
-    FileUploadService,
-    AdminPanelRoleGuard,
-  ],
+  providers: [SliderService],
 })
 export class SliderModule {}

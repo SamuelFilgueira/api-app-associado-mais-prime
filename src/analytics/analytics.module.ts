@@ -2,12 +2,11 @@ import { Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
-import { PrismaService } from '../prisma.service';
-import { AnalyticsService } from './analytics.service';
-import { AnalyticsController } from './analytics.controller';
-import { AnalyticsDashboardController } from './analytics-dashboard.controller';
-import { AnalyticsIngestProcessor } from './analytics-ingest.processor';
-import { analyticsRedisProvider } from './analytics-redis.provider';
+import { AnalyticsService } from 'src/analytics/services/analytics.service';
+import { AnalyticsController } from 'src/analytics/controllers/analytics.controller';
+import { AnalyticsDashboardController } from 'src/analytics/controllers/analytics-dashboard.controller';
+import { AnalyticsIngestProcessor } from 'src/analytics/processors/analytics-ingest.processor';
+import { analyticsRedisProvider } from 'src/analytics/providers/analytics-redis.provider';
 import { ANALYTICS_QUEUE } from '../queue/queue.module';
 
 @Module({
@@ -25,7 +24,6 @@ import { ANALYTICS_QUEUE } from '../queue/queue.module';
   providers: [
     AnalyticsService,
     AnalyticsIngestProcessor,
-    PrismaService,
     analyticsRedisProvider,
   ],
 })

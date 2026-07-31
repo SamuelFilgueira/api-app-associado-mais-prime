@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { REQUEST } from '@nestjs/core';
 import type { Request } from 'express';
-import { JwtUser } from 'src/auth/jwt-user.interface';
+import { JwtUser } from 'src/auth/interfaces/jwt-user.interface';
 import {
   TokenResolverService,
   BaseOrigin,

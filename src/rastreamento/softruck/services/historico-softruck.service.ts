@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { BaseOrigin } from 'src/shared/token-resolver.service';
-import { RastreamentoSoftruck } from '../rastreamento-softruck.service';
+import { RastreamentoSoftruck } from 'src/rastreamento/softruck/services/rastreamento-softruck.service';
 import {
   HistoricoPdfDataDto,
   HistoricoRotasResponseDto,
