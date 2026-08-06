@@ -62,6 +62,9 @@ interface WebhookDados {
 
 @Injectable()
 export class RastreamentoService {
+  /** Janela de tolerância em que a M7 tem prioridade sobre a Softruck. */
+  private static readonly TOLERANCIA_PRIORIDADE_M7_MS = 60 * 60 * 1000;
+
   private readonly logger = new Logger(RastreamentoService.name);
 
   constructor(
@@ -203,11 +206,27 @@ export class RastreamentoService {
       throw new Error('Nenhum provedor de rastreamento retornou dados válidos');
     }
 
-    const selecionado = candidatos.reduce((atualMaisRecente, candidato) =>
+    let selecionado = candidatos.reduce((atualMaisRecente, candidato) =>
       candidato.timestamp > atualMaisRecente.timestamp
         ? candidato
         : atualMaisRecente,
     );
+
+    // Se Softruck e M7 retornaram posição e a diferença entre elas é de até
+    // 1h, a M7 tem prioridade mesmo com posição menos recente.
+    if (selecionado.origem === 'softruck') {
+      const candidatoM7 = candidatos.find((c) => c.origem === 'm7');
+      if (
+        candidatoM7 &&
+        Math.abs(selecionado.timestamp - candidatoM7.timestamp) <=
+          RastreamentoService.TOLERANCIA_PRIORIDADE_M7_MS
+      ) {
+        this.logger.log(
+          `${baseTag(baseContext.baseOrigin)} Softruck e M7 com diferença de até 1h para chassi ${chassi} — priorizando M7`,
+        );
+        selecionado = candidatoM7;
+      }
+    }
 
     const payload = this.normalizarRespostaRastreamento(
       selecionado.data,
