@@ -110,18 +110,8 @@ export class AuthService {
         error instanceof Prisma.PrismaClientKnownRequestError &&
         error.code === 'P2002'
       ) {
-        // Verifica qual constraint falhou
-        const field = error.meta?.target;
-
-        if (field === 'User_email_key') {
-          throw new BadRequestException('Email já cadastrado');
-        }
-
-        if (field === 'User_cpf_key') {
-          throw new BadRequestException('CPF já cadastrado');
-        }
-
-        throw new BadRequestException('CPF ou email já cadastrado');
+        // Única constraint de unicidade restante no cadastro é o CPF
+        throw new BadRequestException('CPF já cadastrado');
       }
 
       throw error; // outros erros continuam sendo tratados pelo Nest
