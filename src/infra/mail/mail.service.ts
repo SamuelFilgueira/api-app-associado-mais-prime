@@ -56,7 +56,6 @@ export class MailService {
 
     try {
       await this.sesClient.send(command);
-      this.logger.log(`E-mail de redefinição de senha enviado via SES para: ${to}`);
     } catch (error) {
       this.logger.error(`Falha ao enviar e-mail via SES para ${to}`, error);
       throw error;
@@ -113,23 +112,7 @@ export class MailService {
       attachments,
     };
     try {
-      this.logger.log(
-        debugLog(MailService.name, 'Enviando e-mail de revistoria', debugId, {
-          chassi,
-          plate: safePlate,
-          imagens: attachments.length,
-          destino: TENANT.mailPrevia,
-        }),
-      );
       await this.transporter.sendMail(mailOptions);
-      this.logger.log(
-        debugLog(MailService.name, 'E-mail de revistoria enviado', debugId, {
-          chassi,
-          plate: safePlate,
-          imagens: attachments.length,
-          destino: TENANT.mailPrevia,
-        }),
-      );
     } catch (error) {
       this.logger.error(
         debugLog(MailService.name, 'Falha ao enviar e-mail de revistoria', debugId, {
@@ -169,21 +152,7 @@ export class MailService {
     };
 
     try {
-      this.logger.log(
-        debugLog(MailService.name, 'Enviando e-mail de revistoria aprovada', debugId, {
-          chassi,
-          plate: safePlate,
-          destino: TENANT.mailCobranca,
-        }),
-      );
       await this.transporter.sendMail(mailOptions);
-      this.logger.log(
-        debugLog(MailService.name, 'E-mail de revistoria aprovada enviado', debugId, {
-          chassi,
-          plate: safePlate,
-          destino: TENANT.mailCobranca,
-        }),
-      );
     } catch (error) {
       this.logger.error(
         debugLog(MailService.name, 'Falha ao enviar e-mail de revistoria aprovada', debugId, {
@@ -225,21 +194,7 @@ export class MailService {
     };
 
     try {
-      this.logger.log(
-        debugLog(MailService.name, 'Enviando e-mail de boleto pago', debugId, {
-          chassi,
-          plate: safePlate,
-          destino: [TENANT.mailCobranca, TENANT.mailPrevia],
-        }),
-      );
       await this.transporter.sendMail(mailOptions);
-      this.logger.log(
-        debugLog(MailService.name, 'E-mail de boleto pago enviado', debugId, {
-          chassi,
-          plate: safePlate,
-          destino: [TENANT.mailCobranca, TENANT.mailPrevia],
-        }),
-      );
     } catch (error) {
       this.logger.error(
         debugLog(MailService.name, 'Falha ao enviar e-mail de boleto pago', debugId, {
@@ -313,23 +268,7 @@ export class MailService {
     };
 
     try {
-      this.logger.log(
-        debugLog(MailService.name, 'Enviando e-mail de foto recusada reenviada', debugId, {
-          chassi,
-          plate: safePlate,
-          imagens: attachments.length,
-          destino: TENANT.mailPrevia,
-        }),
-      );
       await this.transporter.sendMail(mailOptions);
-      this.logger.log(
-        debugLog(MailService.name, 'E-mail de foto recusada reenviada enviado', debugId, {
-          chassi,
-          plate: safePlate,
-          imagens: attachments.length,
-          destino: TENANT.mailPrevia,
-        }),
-      );
     } catch (error) {
       this.logger.error(
         debugLog(MailService.name, 'Falha ao enviar e-mail de foto recusada reenviada', debugId, {

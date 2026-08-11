@@ -72,9 +72,6 @@ export class BeneficiosVeiculoService {
         );
       }
 
-      this.logger.log(
-        `Beneficios do veiculo ${normalizedCodigoVeiculo} obtidos com sucesso`,
-      );
       return response.data;
     } catch (error) {
       if (axios.isAxiosError(error) && error.response?.data) {

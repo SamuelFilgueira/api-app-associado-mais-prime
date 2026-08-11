@@ -87,12 +87,6 @@ export class GeomPipelineProcessor {
       filteredAlarms: filteredAlarms.length,
     };
 
-    this.logger.log(
-      `GeomPipeline — rota: ${stats.rawRoutePoints}→${stats.simplifiedRoutePoints} pts` +
-        ` | alarmes: ${stats.rawAlarms}→${stats.filteredAlarms}` +
-        ` | viagens: ${segments.length}`,
-    );
-
     // Etapa 5: FeatureCollection consolidada com dados processados
     const geojson: SoftruckGeomFeatureCollection = {
       type: 'FeatureCollection',

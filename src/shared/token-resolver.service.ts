@@ -1,5 +1,4 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { baseTag } from './log.util';
 import {
   BaseOrigin,
   TenantTokenKind,
@@ -31,8 +30,6 @@ export class TokenResolverService {
       this.logger.error(`Missing env var ${name} for base ${base}`);
       throw new Error(`Environment variable ${name} is not configured`);
     }
-    // Don't log token values; only indicate which token was resolved
-    this.logger.log(`${baseTag(base)} resolved token key ${name}`);
     return val;
   }
 

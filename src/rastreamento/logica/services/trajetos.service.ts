@@ -137,9 +137,6 @@ export class TrajetosService {
 			timeout: LOGICA_REQUEST_TIMEOUT,
 		});
 
-		this.logger.debug(
-			`Resposta da Lógica para chassi=${chassi}: status=${response.status} body=${JSON.stringify(response.data)}`,
-		);
 		return response.data;
 	}
 
@@ -159,10 +156,6 @@ export class TrajetosService {
 			headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
 			timeout: LOGICA_REQUEST_TIMEOUT,
 		});
-
-		this.logger.debug(
-			`Resposta /mobile/trajeto veiculoId=${veiculoId}: status=${response.status} body=${JSON.stringify(response.data)}`,
-		);
 
 		return response.data;
 	}

@@ -39,7 +39,6 @@ import {
 } from 'src/beneficios/dto/alloyal-login.dto';
 import { AlloyalSessionHeaders } from 'src/beneficios/services/alloyal-api.service';
 import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
-import { maskSecret } from 'src/shared/log.util';
 
 /**
  * Controller responsável por expor endpoints da API Alloyal de benefícios
@@ -74,14 +73,8 @@ export class AlloyalApiController {
   async login(
     @Body() dto: AlloyalLoginRequestDto,
   ): Promise<AlloyalLoginResponseDto> {
-    this.logger.log(
-      `[login] Requisição recebida | cpf: ${dto.cpf} | password: ${maskSecret(dto.password)}`,
-    );
     try {
       const session = await this.alloyalApiService.login(dto.cpf, dto.password);
-      this.logger.log(
-        `[login] Sessão obtida com sucesso | uid: ${session.uid} | client: ${maskSecret(session.client)} | accessToken: ${maskSecret(session.accessToken)}`,
-      );
       return {
         uid: session.uid,
         client: session.client,
@@ -448,9 +441,6 @@ export class AlloyalApiController {
   async createUser(
     @Body() dto: AlloyalCreateUserRequestDto,
   ): Promise<AlloyalUserDto> {
-    this.logger.log(
-      `[createUser] body: ${JSON.stringify({ ...dto, password: maskSecret(dto.password) })}`,
-    );
     try {
       return await this.alloyalApiService.createUser(dto);
     } catch (error) {
@@ -473,9 +463,6 @@ export class AlloyalApiController {
     @Param('cpf') cpf: string,
     @Body() dto: AlloyalUpdateUserRequestDto,
   ): Promise<AlloyalUserDto> {
-    this.logger.log(
-      `[updateUser] cpf: ${cpf} | body: ${JSON.stringify({ ...dto, ...(dto.password ? { password: maskSecret(dto.password) } : {}) })}`,
-    );
     try {
       return await this.alloyalApiService.updateUser(cpf, dto);
     } catch (error) {

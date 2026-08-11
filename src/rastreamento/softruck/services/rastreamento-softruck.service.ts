@@ -40,7 +40,6 @@ export class RastreamentoSoftruck {
   private readonly logger = new Logger(RastreamentoSoftruck.name);
   private readonly tokenResolver: TokenResolverService;
   private softruckTokenByBase = new Map<BaseOrigin, TokenEntry>();
-  private static readonly MAX_LOG_PAYLOAD_LENGTH = 1500;
 
   /** Axios instance com HTTP/HTTPS agents configurados */
   private axiosInstance: AxiosInstance;
@@ -168,45 +167,6 @@ export class RastreamentoSoftruck {
     return String(error);
   }
 
-  private stringifyForLog(data: unknown): string {
-    const serialized = JSON.stringify(data);
-
-    if (!serialized) {
-      return '(vazio)';
-    }
-
-    if (serialized.length <= RastreamentoSoftruck.MAX_LOG_PAYLOAD_LENGTH) {
-      return serialized;
-    }
-
-    return `${serialized.slice(0, RastreamentoSoftruck.MAX_LOG_PAYLOAD_LENGTH)}... [truncated ${serialized.length - RastreamentoSoftruck.MAX_LOG_PAYLOAD_LENGTH} chars]`;
-  }
-
-  private logExternalRequest(
-    baseOrigin: BaseOrigin,
-    method: 'GET' | 'POST',
-    url: string,
-    payload?: unknown,
-  ): void {
-    const payloadLabel = method === 'GET' ? 'params' : 'body';
-    const details = payload
-      ? ` | ${payloadLabel}: ${this.stringifyForLog(payload)}`
-      : '';
-    this.logger.debug(`[${baseOrigin}] Softruck → ${method} ${url}${details}`);
-  }
-
-  private logExternalResponse(
-    baseOrigin: BaseOrigin,
-    method: 'GET' | 'POST',
-    url: string,
-    status: number,
-    data: unknown,
-  ): void {
-    this.logger.debug(
-      `[${baseOrigin}] Softruck ← ${method} ${url} | status=${status} | response: ${this.stringifyForLog(data)}`,
-    );
-  }
-
   private buildSoftruckUrl(path: string): string {
     const baseUrl = process.env.SOFTRUCK_API_BASE_URL;
 
@@ -288,9 +248,6 @@ export class RastreamentoSoftruck {
       return tokenEntry.token;
     }
 
-    this.logger.debug(
-      `[${baseOrigin}] Token expirado, será renovado no próximo login`,
-    );
     this.softruckTokenByBase.delete(baseOrigin);
     return null;
   }
@@ -349,11 +306,6 @@ export class RastreamentoSoftruck {
     }
 
     const loginUrl = this.buildSoftruckUrl('/auth/login');
-    const loginPayload = { username, password: '***' };
-    this.logger.log(
-      `[${baseOrigin}] Iniciando autenticação Softruck com public-key=${maskSecret(publicKey)}`,
-    );
-    this.logExternalRequest(baseOrigin, 'POST', loginUrl, loginPayload);
 
     try {
       const response = await this.axiosInstance.post<{
@@ -370,14 +322,6 @@ export class RastreamentoSoftruck {
           },
           timeout: SOFTRUCK_REQUEST_TIMEOUT,
         },
-      );
-
-      this.logExternalResponse(
-        baseOrigin,
-        'POST',
-        loginUrl,
-        response.status,
-        response.data,
       );
 
       const token = response.data?.data?.token;
@@ -449,15 +393,12 @@ export class RastreamentoSoftruck {
   ): Promise<{ id: string; plate: string; brandName: string; modelName: string }> {
     const cached = this.getCached(this.vehicleCache, chassi);
     if (cached) {
-      this.logger.debug(`[Cache HIT] Vehicle data para chassi: ${chassi}`);
       return cached;
     }
 
     try {
       const url = this.buildSoftruckUrl('/vehicles');
       const params = { search: chassi };
-      this.logExternalRequest(baseOrigin, 'GET', url, params);
-
       const response = await this.executarComReautenticacao(
         () =>
           this.axiosInstance.get<SoftruckVehicleResponse>(url, {
@@ -469,23 +410,11 @@ export class RastreamentoSoftruck {
         publicKey,
       );
 
-      this.logExternalResponse(
-        baseOrigin,
-        'GET',
-        url,
-        response.status,
-        response.data,
-      );
-
       if (!response.data?.data?.length) {
         throw new InternalServerErrorException(
           'Veículo não encontrado na base Softruck',
         );
       }
-
-      this.logger.log(
-        `Vehicle encontrado para chassi ${chassi}: ${JSON.stringify(response.data.data[0])}`,
-      );
 
       const vehicleData = response.data.data[0];
       const result = {
@@ -495,7 +424,6 @@ export class RastreamentoSoftruck {
         modelName: vehicleData.attributes.model_name,
       };
 
-      this.logger.log(`Vehicle ID obtido: ${result.id} para chassi: ${chassi}`);
       this.setCache(this.vehicleCache, chassi, result);
       return result;
     } catch (error) {
@@ -514,7 +442,6 @@ export class RastreamentoSoftruck {
   ): Promise<{ vehicleId: string; deviceId: string }> {
     const cached = this.getCached(this.deviceCache, vehicleId);
     if (cached) {
-      this.logger.debug(`[Cache HIT] Device data para vehicle: ${vehicleId}`);
       return cached;
     }
 
@@ -522,8 +449,6 @@ export class RastreamentoSoftruck {
       const url = this.buildSoftruckUrl(
         `/vehicles/${vehicleId}/associations/devices`,
       );
-      this.logExternalRequest(baseOrigin, 'GET', url);
-
       const response = await this.executarComReautenticacao(
         () =>
           this.axiosInstance.get<SoftruckDeviceAssociationResponse>(url, {
@@ -532,14 +457,6 @@ export class RastreamentoSoftruck {
           }),
         baseOrigin,
         publicKey,
-      );
-
-      this.logExternalResponse(
-        baseOrigin,
-        'GET',
-        url,
-        response.status,
-        response.data,
       );
 
       if (!response.data?.data?.length) {
@@ -564,10 +481,6 @@ export class RastreamentoSoftruck {
           : maisRecente,
       );
 
-      this.logger.log(
-        `Associação principal selecionada para vehicle: ${vehicleId}: ${selectedAssociation.id} (created_at=${selectedAssociation.attributes.created_at})`,
-      );
-
       const trackingVehicleId = selectedAssociation.id;
       const deviceId = selectedAssociation.relationships.device.id;
 
@@ -577,9 +490,6 @@ export class RastreamentoSoftruck {
         );
       }
 
-      this.logger.log(
-        `IDs de tracking obtidos: trackingVehicleId=${trackingVehicleId} deviceId=${deviceId} para vehicle: ${vehicleId}`,
-      );
       const result = { vehicleId: trackingVehicleId, deviceId };
       this.setCache(this.deviceCache, vehicleId, result);
       return result;
@@ -614,19 +524,12 @@ export class RastreamentoSoftruck {
         publicKey,
       );
 
-      this.logger.debug(
-        `[${baseOrigin}] Softruck /vehicles/${vehicleId}/tracking/${deviceId} response status=${response.status} body=${this.stringifyForLog(response.data)}`,
-      );
-
       if (!response.data?.data) {
         throw new InternalServerErrorException(
           'Dados de rastreamento não disponíveis',
         );
       }
 
-      this.logger.log(
-        `Dados de rastreamento obtidos para vehicle: ${vehicleId}`,
-      );
       return response.data;
     } catch (error) {
       if (error instanceof InternalServerErrorException) throw error;
@@ -677,8 +580,6 @@ export class RastreamentoSoftruck {
         'filters[acc][eq]': acc,
         'filters[did][eq]': deviceId,
       };
-      this.logExternalRequest(baseOrigin, 'GET', url, params);
-
       const response = await this.executarComReautenticacao(
         () =>
           this.axiosInstance.get<SoftruckByKeysApiResponse>(url, {
@@ -688,14 +589,6 @@ export class RastreamentoSoftruck {
           }),
         baseOrigin,
         publicKey,
-      );
-
-      this.logExternalResponse(
-        baseOrigin,
-        'GET',
-        url,
-        response.status,
-        response.data,
       );
 
       return response.data ?? null;
@@ -724,8 +617,6 @@ export class RastreamentoSoftruck {
         'filters[did][eq]': deviceId,
         'filters[eid][eq]': enterpriseId,
       };
-      this.logExternalRequest(baseOrigin, 'GET', url, params);
-
       const response = await this.executarComReautenticacao(
         () =>
           this.axiosInstance.get<{ data: SoftruckGeomFeatureCollection }>(url, {
@@ -735,14 +626,6 @@ export class RastreamentoSoftruck {
           }),
         baseOrigin,
         publicKey,
-      );
-
-      this.logExternalResponse(
-        baseOrigin,
-        'GET',
-        url,
-        response.status,
-        response.data,
       );
 
       return response.data?.data ?? null;
@@ -765,16 +648,10 @@ export class RastreamentoSoftruck {
   ): Promise<UltimaPosicaoSoftruckResponse> {
     try {
       const storedToken = this.softruckTokenByBase.get(baseOrigin);
-      this.logger.debug(
-        `[${baseOrigin}] ultimaPosicaoSoftruck chassi=${chassi} token=${maskSecret(tokenOverride ?? storedToken?.token)} publicKey=${maskSecret(publicKey)}`,
-      );
 
       if (!tokenOverride && storedToken) {
         const validToken = this.getValidToken(baseOrigin);
         if (!validToken) {
-          this.logger.debug(
-            `[${baseOrigin}] Token expirado ou próximo de expirar. Fazendo novo login.`,
-          );
           await this.autenticarSoftruck(baseOrigin, publicKey);
         }
       } else if (!tokenOverride && !storedToken) {

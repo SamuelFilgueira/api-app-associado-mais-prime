@@ -23,7 +23,6 @@ import {
   TokenResolverService,
 } from 'src/shared/token-resolver.service';
 import { TENANT } from 'src/config/tenant.config';
-import { baseTag } from 'src/shared/log.util';
 import { NotificationsService } from 'src/notifications/services/notifications.service';
 import { HistoricoSoftruckService } from 'src/rastreamento/softruck/services/historico-softruck.service';
 import { HistoricoRotasResponseDto } from 'src/rastreamento/softruck/dto/historico-response.dto';
@@ -129,14 +128,6 @@ export class RastreamentoService {
     const baseContext =
       requestContext ?? (await this.resolveBaseContextFromDb(chassi));
 
-    const softruckPublicKeyKey = this.tokenResolver.getTokenKey(
-      baseContext.baseOrigin,
-      'softruckPublicKey',
-    );
-    this.logger.log(
-      `${baseTag(baseContext.baseOrigin)} usando publicKey ${softruckPublicKeyKey} para consulta Softruck (token via autenticação dinâmica)`,
-    );
-
     const [logicaResult, m7Result, softruckResult] = await Promise.allSettled([
       this.logica.ultimaPosicao(chassi, baseContext.logicaToken, {
         baseOrigin: baseContext.baseOrigin,
@@ -221,9 +212,6 @@ export class RastreamentoService {
         Math.abs(selecionado.timestamp - candidatoM7.timestamp) <=
           RastreamentoService.TOLERANCIA_PRIORIDADE_M7_MS
       ) {
-        this.logger.log(
-          `${baseTag(baseContext.baseOrigin)} Softruck e M7 com diferença de até 1h para chassi ${chassi} — priorizando M7`,
-        );
         selecionado = candidatoM7;
       }
     }
@@ -541,9 +529,6 @@ export class RastreamentoService {
     tokenOverride?: string,
   ): Promise<UltimaPosicaoSoftruckResponse> {
     await this.checkCortarRastreamento(chassi);
-    this.logger.log(
-      `${baseTag(baseOrigin)} Consultando última posição Softruck para chassi: ${chassi} (tokenOverride=${!!tokenOverride})`,
-    );
     return this.softruck.ultimaPosicaoSoftruck(
       chassi,
       baseOrigin,

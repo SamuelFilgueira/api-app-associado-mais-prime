@@ -2,7 +2,6 @@ import { Injectable, Logger } from '@nestjs/common';
 import axios from 'axios';
 import { TokenResolverService } from '../../shared/token-resolver.service';
 import { BaseOrigin } from '../../config/tenant.config';
-import { baseTag, maskSecret } from '../../shared/log.util';
 
 export interface ClubgasPostosResponse {
   result: unknown[];
@@ -22,11 +21,7 @@ export class ClubgasClient {
   constructor(private readonly tokenResolver: TokenResolverService) {}
 
   private resolverToken(baseOrigin: BaseOrigin, contexto: string): string {
-    const tokenKey = this.tokenResolver.getTokenKey(baseOrigin, 'clubgas');
     const token = this.tokenResolver.resolveClubgasToken(baseOrigin);
-    this.logger.log(
-      `${baseTag(baseOrigin)} ClubGas ${contexto} usando tokenKey=${tokenKey} token=${maskSecret(token)}`,
-    );
     return token;
   }
 
@@ -43,7 +38,6 @@ export class ClubgasClient {
   ): Promise<ClubgasPostosResponse> {
     const token = this.resolverToken(baseOrigin, 'postos');
     const url = `${this.baseUrl}/Posto/obter-map-app?Latitude=${params.latitude}&Longitude=${params.longitude}&Placa=${params.placa}`;
-    this.logger.log(`URL chamada para API de postos: ${url}`);
     return this.get<ClubgasPostosResponse>(url, token);
   }
 

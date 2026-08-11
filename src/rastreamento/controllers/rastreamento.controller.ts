@@ -19,7 +19,6 @@ import {
   BaseOrigin,
   TokenResolverService,
 } from 'src/shared/token-resolver.service';
-import { maskSecret } from 'src/shared/log.util';
 import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
 import { HistoricoQueryDto } from 'src/rastreamento/softruck/dto/historico-query.dto';
 
@@ -59,14 +58,6 @@ export class RastreamentoController {
   @Post()
   rastreamento(@Body() body: { cnpj: string; chassi: string }) {
     const ctx = this.buildRastreamentoContext();
-    const softruckPublicKeyKey = this.tokenResolver.getTokenKey(
-      ctx.baseOrigin,
-      'softruckPublicKey',
-    );
-
-    this.logger.log(
-      `[${ctx.baseOrigin}] rastreamento chassi=${body.chassi} tokenKey=${ctx.logicaTokenKey} token=${maskSecret(ctx.logicaToken)} apiKey=${softruckPublicKeyKey} apiKeyValue=${maskSecret(ctx.softruckPublicKey)}`,
-    );
 
     return this.rastreamentoService.rastreamento(body.cnpj, body.chassi, {
       baseOrigin: ctx.baseOrigin,
@@ -85,9 +76,6 @@ export class RastreamentoController {
   @Post('ultima-posicao')
   async ultimaPosicaoM7(@Body() body: { cnpj: string; chassi: string }) {
     const ctx = this.buildRastreamentoContext();
-    this.logger.log(
-      `Body recebido para ultimaPosicao: ${JSON.stringify(body)}`,
-    );
     return this.rastreamentoService.ultimaPosicaoM7(
       body.cnpj,
       body.chassi,
@@ -102,10 +90,6 @@ export class RastreamentoController {
     @Res() res: Response,
   ) {
     const ctx = this.buildRastreamentoContext();
-
-    this.logger.log(
-      `[${ctx.baseOrigin}] gerarRelatorioHistoricoSoftruckPDF solicitado | chassi=${query.chassi} dataInicial=${query.dataInicial} dataFinal=${query.dataFinal}`,
-    );
 
     const pdfBuffer = await this.rastreamentoService.gerarRelatorioHistoricoSoftruckPDF(
       query.chassi,
@@ -156,7 +140,6 @@ export class RastreamentoController {
   @Post('ignicao-m7')
   ignicaoM7(@Body() body: { cnpj: string; chassi: string; evt_ign: boolean }) {
     const ctx = this.buildRastreamentoContext();
-    this.logger.debug(`Body recebido para ignicaoM7: ${JSON.stringify(body)}`);
     return this.rastreamentoService.ignicaoM7(
       body.cnpj,
       body.chassi,
@@ -182,10 +165,6 @@ export class RastreamentoController {
   async ultimaPosicaoLogica(@Body() body: { chassi: string }) {
     const ctx = this.buildRastreamentoContext();
 
-    this.logger.log(
-      `[${ctx.baseOrigin}] ultima-posicao-logica chassi=${body.chassi} tokenKey=${ctx.logicaTokenKey} token=${maskSecret(ctx.logicaToken)}`,
-    );
-
     return this.rastreamentoService.ultimaPosicaoLogica(
       body.chassi,
       ctx.logicaToken,
@@ -202,14 +181,6 @@ export class RastreamentoController {
   @Post('ultima-posicao-softruck')
   async ultimaPosicaoSoftruck(@Body() body: { chassi: string }) {
     const ctx = this.buildRastreamentoContext();
-    const softruckPublicKeyKey = this.tokenResolver.getTokenKey(
-      ctx.baseOrigin,
-      'softruckPublicKey',
-    );
-
-    this.logger.log(
-      `[${ctx.baseOrigin}] ultima-posicao-softruck chassi=${body.chassi} apiKey=${softruckPublicKeyKey} apiKeyValue=${maskSecret(ctx.softruckPublicKey)} token=dinamico-via-auth`,
-    );
 
     return this.rastreamentoService.ultimaPosicaoSoftruck(
       body.chassi,
@@ -224,7 +195,6 @@ export class RastreamentoController {
   @UseGuards(M7WebhookGuard)
   @Post('webhook-m7')
   async webhookM7(@Body() payload: unknown) {
-    this.logger.log('Webhook M7 recebido — enfileirando para processamento');
     const job = await this.webhookQueue.add(
       'm7-event',
       { payload },

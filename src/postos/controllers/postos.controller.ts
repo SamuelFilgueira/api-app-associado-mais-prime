@@ -27,8 +27,6 @@ export class PostosController {
     @Query('page') page: string,
     @BaseOrigin() baseOrigin: BaseOriginType,
   ) {
-    this.logger.log(`Body recebido para buscarPostos: ${JSON.stringify(body)}`);
-    this.logger.log(`Query page recebido para buscarPostos: ${page}`);
     const userId = req.user.userId;
     const pageNumber = page ? parseInt(page, 10) : 1;
     return this.postosService.buscarPostos(

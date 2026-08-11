@@ -35,9 +35,6 @@ export class FuelSessionService {
         status: 'PENDING',
       },
     });
-    this.logger.log(
-      `[FuelSession] Sessão ${session.id} criada para user ${userId} (valorAntes=${valorAntes})`,
-    );
     return session;
   }
 
@@ -65,9 +62,6 @@ export class FuelSessionService {
         data: { totalEconomizado: valorDepois },
       }),
     ]);
-    this.logger.log(
-      `[FuelSession] Sessão ${sessionId} concluída para user ${userId}: +R$ ${diferenca.toFixed(2)} (novoTotal=${valorDepois})`,
-    );
   }
 
   /**

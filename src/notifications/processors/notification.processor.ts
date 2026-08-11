@@ -30,11 +30,6 @@ export class NotificationProcessor extends WorkerHost {
 
   async process(job: Job<NotificationJobData>): Promise<any> {
     const { userId, expoPushToken, title, body, data } = job.data;
-    const start = Date.now();
-
-    this.logger.log(
-      `[QUEUE] ▶ job #${job.id} | user=${userId} | tentativa=${job.attemptsMade + 1} | nome="${job.name}"`,
-    );
 
     try {
       const result = await this.notificationsService.sendPushNotification(
@@ -43,10 +38,6 @@ export class NotificationProcessor extends WorkerHost {
         title,
         body,
         data,
-      );
-      const elapsed = Date.now() - start;
-      this.logger.log(
-        `[QUEUE] ✔ job #${job.id} concluído em ${elapsed}ms — ${result.message}`,
       );
       return result;
     } catch (error) {

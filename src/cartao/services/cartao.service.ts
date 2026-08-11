@@ -39,7 +39,6 @@ export class CartaoService {
       placa: vehicle.plate,
       cpf: user.cpf,
     });
-    this.logger.log(`Dados do cartão virtual obtidos para usuário: ${userId}`);
 
     // Disparar verificação de economia em background (não bloqueia o fluxo)
     void this.triggerFuelEconomyCheck(userId);
@@ -69,10 +68,6 @@ export class CartaoService {
       { delay: 0, attempts: 1 },
     );
 
-    this.logger.log(
-      `[FUEL TEST] SessionId=${session.id} jobId=${job.id} para user ${userId}`,
-    );
-
     return { sessionId: session.id, jobId: job.id };
   }
 
@@ -81,9 +76,6 @@ export class CartaoService {
       // Evitar múltiplas sessions PENDING simultâneas para o mesmo usuário
       const existing = await this.fuelSessionService.findPendingForUser(userId);
       if (existing) {
-        this.logger.log(
-          `[FUEL] user ${userId} já possui FuelSession PENDING (${existing.id}) — ignorando nova criação`,
-        );
         return;
       }
 
@@ -99,7 +91,7 @@ export class CartaoService {
         valorAntes,
       );
 
-      const job = await this.fuelEconomyQueue.add(
+      await this.fuelEconomyQueue.add(
         'check-fuel-economy',
         { fuelSessionId: session.id },
         {
@@ -107,10 +99,6 @@ export class CartaoService {
           attempts: 3,
           backoff: { type: 'exponential', delay: 60_000 },
         },
-      );
-
-      this.logger.log(
-        `[FUEL] FuelSession ${session.id} criada para user ${userId} (valorAntes=${valorAntes}) — job #${job.id} enfileirado com delay de 5min`,
       );
     } catch (error) {
       this.logger.error(

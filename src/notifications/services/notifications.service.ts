@@ -64,10 +64,6 @@ export class NotificationsService {
     userId: number,
     expoPushToken: string,
   ): Promise<{ success: boolean; message: string }> {
-    this.logger.log(
-      `📝 [Token] Registrando expoPushToken para user ${userId}: ${this.maskExpoPushToken(expoPushToken)}`,
-    );
-
     if (!Expo.isExpoPushToken(expoPushToken)) {
       this.logger.warn(
         `⚠️ [Token] expoPushToken inválido para user ${userId}: ${this.maskExpoPushToken(expoPushToken)}`,
@@ -105,10 +101,6 @@ export class NotificationsService {
     body: string,
     data: NotificationData,
   ): Promise<Notification> {
-    this.logger.log(
-      `🧾 [DB] Definindo expoPushToken para persistência: ${this.maskExpoPushToken(expoPushToken)} (user ${userId})`,
-    );
-
     const notification = await this.prisma.notification.create({
       data: {
         userId,
@@ -120,9 +112,6 @@ export class NotificationsService {
       },
     });
 
-    this.logger.log(
-      `🔔 [DB] Notificação #${notification.id} salva para user ${userId}`,
-    );
     return notification;
   }
 
@@ -136,10 +125,6 @@ export class NotificationsService {
     body: string,
     data: NotificationData,
   ): Promise<{ success: boolean; message: string; notificationId?: number }> {
-    this.logger.log(
-      `📲 [Push] expoPushToken recebido para envio: ${this.maskExpoPushToken(expoPushToken)} (user ${userId})`,
-    );
-
     if (!Expo.isExpoPushToken(expoPushToken)) {
       this.logger.warn(
         `⚠️ [Push] expoPushToken inválido: ${this.maskExpoPushToken(expoPushToken)} (user ${userId})`,
@@ -214,9 +199,6 @@ export class NotificationsService {
         };
       }
 
-      this.logger.log(
-        `📤 [Expo] Notificação #${savedNotification.id} enviada com sucesso`,
-      );
       return {
         success: true,
         message: 'Notificação enviada com sucesso.',
@@ -255,8 +237,6 @@ export class NotificationsService {
       }),
     ]);
 
-    this.logger.log(`📬 [Query] ${unreadCount} não lidas para user ${userId}`);
-
     const notificationDtos = notifications.map(
       (n) => new GetNotificationsResponseDto(n),
     );
@@ -287,10 +267,6 @@ export class NotificationsService {
         where: { userId, deleted: false },
       }),
     ]);
-
-    this.logger.log(
-      `📋 [Query] ${notifications.length} notificações para user ${userId}`,
-    );
 
     const notificationDtos = notifications.map(
       (n) => new GetNotificationsResponseDto(n),
@@ -328,9 +304,6 @@ export class NotificationsService {
       },
     });
 
-    this.logger.log(
-      `✅ [Update] Notificação #${notificationId} marcada como lida`,
-    );
     return updated;
   }
 
@@ -349,9 +322,6 @@ export class NotificationsService {
       },
     });
 
-    this.logger.log(
-      `✅ [Update] ${result.count} notificações marcadas como lidas para user ${userId}`,
-    );
     return { count: result.count };
   }
 
@@ -388,8 +358,6 @@ export class NotificationsService {
         deleted: true,
       },
     });
-
-    this.logger.log(`🗑️ [Delete] Notificação #${notificationId} deletada`);
   }
 
   /**
@@ -403,9 +371,6 @@ export class NotificationsService {
       data: { deleted: true },
     });
 
-    this.logger.log(
-      `🗑️ [DeleteAll] ${result.count} notificações marcadas como deletadas para user ${userId}`,
-    );
     return { deletedCount: result.count };
   }
 
@@ -479,10 +444,6 @@ export class NotificationsService {
     for (const { userId } of userVehicles) {
       const expoPushToken = tokenMap.get(userId);
 
-      this.logger.log(
-        `[Webhook] expoPushToken resolvido para user ${userId}: ${this.maskExpoPushToken(expoPushToken)}`,
-      );
-
       if (!expoPushToken || !Expo.isExpoPushToken(expoPushToken)) {
         this.logger.warn(
           `[Webhook] Token inválido ou ausente para user ${userId} — ignorando`,
@@ -527,9 +488,6 @@ export class NotificationsService {
 
       if (result.success) {
         sent++;
-        this.logger.log(
-          `[Webhook] Notificação "${title}" enviada para user ${userId} (${vehicleLabel})`,
-        );
       } else {
         skipped++;
         this.logger.warn(
@@ -538,9 +496,6 @@ export class NotificationsService {
       }
     }
 
-    this.logger.log(
-      `[Webhook] Resultado para chassi "${chassi}": enviadas=${sent}, ignoradas=${skipped}`,
-    );
     return { sent, skipped };
   }
 
@@ -593,10 +548,6 @@ export class NotificationsService {
       },
     });
 
-    this.logger.log(
-      `[MARKETING] ${recipients.length} usuários candidatos encontrados`,
-    );
-
     // Remover duplicatas por ID (em caso de inconsistência)
     const uniqueRecipients = new Map(recipients.map((r) => [r.id, r]));
 
@@ -632,9 +583,6 @@ export class NotificationsService {
 
     for (let i = 0; i < chunks.length; i++) {
       try {
-        this.logger.log(
-          `[MARKETING] Enviando chunk ${i + 1}/${chunks.length} (${chunks[i].length} mensagens)`,
-        );
         const response = await this.expo.sendPushNotificationsAsync(chunks[i]);
 
         // Registrar apenas as que foram enviadas com sucesso

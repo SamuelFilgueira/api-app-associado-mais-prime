@@ -191,7 +191,6 @@ export class LogicaRastreamentoService implements IRastreamentoProvider {
       timeout: LOGICA_REQUEST_TIMEOUT,
     });
 
-    this.logger.debug(`Resposta da Lógica para chassi=${chassi}: status=${response.status} body=${JSON.stringify(response.data)}`);
     return response.data;
   }
 

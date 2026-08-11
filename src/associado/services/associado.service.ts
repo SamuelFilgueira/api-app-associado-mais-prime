@@ -15,7 +15,6 @@ import { UpdateAssociadoDto } from 'src/associado/dto/update-associado.dto';
 import { BaseOrigin } from 'src/shared/token-resolver.service';
 import { TENANT } from 'src/config/tenant.config';
 import { SgaAuthService } from 'src/shared/sga-auth.service';
-import { baseTag } from 'src/shared/log.util';
 
 @Injectable()
 export class AssociadoService {
@@ -100,7 +99,6 @@ export class AssociadoService {
     }
 
     const baseOrigin = await this.detectBaseOrigin(cpf);
-    this.logger.log(`${baseTag(baseOrigin)} Base origin detected for CPF ${cpf}`);
 
     const url = `https://api.hinova.com.br/api/sga/v2/associado/buscar/${cpf}`;
 
@@ -191,7 +189,6 @@ export class AssociadoService {
     try {
       const existing = await this.prisma.user.findFirst({ where: { cpf } });
       if (existing?.baseOrigin) {
-        this.logger.log(`Base origin found in DB for cpf ${cpf}: ${existing.baseOrigin}`);
         return existing.baseOrigin as BaseOrigin;
       }
     } catch (err: unknown) {
@@ -212,12 +209,8 @@ export class AssociadoService {
           `detectBaseOrigin CPF=${cpf} base=${base}`,
         );
         if (response.status === 200) {
-          this.logger.log(`[DetectBase] CPF ${cpf} encontrado na base ${base}`);
           return base;
         }
-        this.logger.log(
-          `[DetectBase] CPF ${cpf} não encontrado na base ${base} (status=${response.status})`,
-        );
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         this.logger.error(
@@ -247,7 +240,6 @@ export class AssociadoService {
         url,
         validateStatus: () => true,
       });
-      this.logger.log(`Resposta da API SGA para verificar situação: status=${response.status}`);
     } catch (err: any) {
       this.logger.error(`Erro ao consultar SGA para verificar situação: ${err?.message}`);
       throw new InternalServerErrorException('Erro ao consultar SGA');
@@ -345,10 +337,6 @@ export class AssociadoService {
     data: UpdateAssociadoDto,
     profilePhoto?: Express.Multer.File,
   ) {
-    this.logger.log(`Id recebido para atualização: ${id}`);
-    this.logger.log(
-      `Dados recebidos para atualização: ${JSON.stringify(data)}`,
-    );
     if (!id) throw new NotFoundException('ID do associado é obrigatório');
 
     const associado = await this.prisma.user.findUnique({

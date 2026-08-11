@@ -37,11 +37,6 @@ export class FuelEconomyProcessor extends WorkerHost {
 
   async process(job: Job<FuelEconomyJobData>): Promise<any> {
     const { fuelSessionId } = job.data;
-    const attempt = job.attemptsMade + 1;
-
-    this.logger.log(
-      `[FUEL] ▶ job #${job.id} | sessionId=${fuelSessionId} | tentativa=${attempt}/${job.opts.attempts ?? 1}`,
-    );
 
     // 1. Buscar sessão
     const session = await this.fuelSessionService.findById(fuelSessionId);
@@ -88,10 +83,6 @@ export class FuelEconomyProcessor extends WorkerHost {
     if (novoValor > valorAntes) {
       const diferenca = novoValor - valorAntes;
 
-      this.logger.log(
-        `[FUEL] ✔ job #${job.id} | Abastecimento detectado para user ${userId}: valorAntes=${valorAntes} novoValor=${novoValor} diferenca=${diferenca.toFixed(2)}`,
-      );
-
       // Completar sessão + atualizar user em transação
       await this.fuelSessionService.completeSession(
         fuelSessionId,
@@ -113,9 +104,6 @@ export class FuelEconomyProcessor extends WorkerHost {
           'Abastecimento detectado! 🎉',
           `Parabéns! Você economizou R$ ${diferenca.toFixed(2).replace('.', ',')} neste abastecimento.`,
           { type: 'fuel_economy', diferenca, novoTotal: novoValor },
-        );
-        this.logger.log(
-          `[FUEL] 🔔 Push enviado para user ${userId} — economizou R$ ${diferenca.toFixed(2)}`,
         );
       } else {
         this.logger.warn(

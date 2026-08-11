@@ -533,10 +533,6 @@ export class HistoricoPdfSoftruckService {
         margin: { top: '16px', right: '16px', bottom: '16px', left: '16px' },
       });
 
-      this.logger.log(
-        `PDF gerado: ${dados.segmentos.length} segmentos, placa=${dados.vehicle.plate}, período=${dados.period.dataInicial}→${dados.period.dataFinal}`,
-      );
-
       return Buffer.from(pdf);
     } catch (error) {
       this.logger.error(

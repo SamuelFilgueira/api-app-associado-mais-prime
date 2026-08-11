@@ -54,10 +54,6 @@ export class HistoricoSoftruckService {
     baseOrigin: BaseOrigin,
     publicKey: string,
   ): Promise<Buffer> {
-    this.logger.log(
-      `[${baseOrigin}] gerarRelatorioPdf chassi=${chassi} período=${dataInicial}→${dataFinal}`,
-    );
-
     const { vehicleData, deviceData } = await this.softruck.resolveVehicleAndDevice(
       chassi,
       baseOrigin,
@@ -65,9 +61,6 @@ export class HistoricoSoftruckService {
     );
 
     const accs = gerarListaAcc(dataInicial, dataFinal);
-    this.logger.log(
-      `[${baseOrigin}] Consultando by-keys para ${accs.length} dia(s) — vehicleId=${vehicleData.id} deviceId=${deviceData.deviceId}`,
-    );
 
     const resultados = await processarComConcorrencia(
       accs,
@@ -94,10 +87,6 @@ export class HistoricoSoftruckService {
         segmentos.push(...segsDodia);
       }
     }
-
-    this.logger.log(
-      `[${baseOrigin}] by-keys consolidado: ${segmentos.length} segmentos em ${diasComDados} dia(s) com dados`,
-    );
 
     const totalDias = contarDias(dataInicial, dataFinal);
     const summary = calcularSumario(segmentos, diasComDados);
@@ -140,10 +129,6 @@ export class HistoricoSoftruckService {
     baseOrigin: BaseOrigin,
     publicKey: string,
   ): Promise<HistoricoRotasResponseDto> {
-    this.logger.log(
-      `[${baseOrigin}] obterRotas chassi=${chassi} período=${dataInicial}→${dataFinal}`,
-    );
-
     const { vehicleData, deviceData } = await this.softruck.resolveVehicleAndDevice(
       chassi,
       baseOrigin,
@@ -151,9 +136,6 @@ export class HistoricoSoftruckService {
     );
 
     const accs = gerarListaAcc(dataInicial, dataFinal);
-    this.logger.log(
-      `[${baseOrigin}] Consultando by-keys (para enterpriseId) para ${accs.length} dia(s)`,
-    );
 
     // FASE 1: by-keys para obter enterpriseId + dados de segmentos para sumário
     const resultadosByKeys = await processarComConcorrencia(
@@ -204,10 +186,6 @@ export class HistoricoSoftruckService {
     const todasFeatures: SoftruckGeomFeature[] = [];
 
     if (enterpriseId) {
-      this.logger.log(
-        `[${baseOrigin}] Consultando geom para ${accs.length} dia(s) com enterpriseId=${enterpriseId}`,
-      );
-
       const resultadosGeom = await processarComConcorrencia(
         accs,
         MAX_CONCORRENCIA,
@@ -228,21 +206,10 @@ export class HistoricoSoftruckService {
           todasFeatures.push(...featureCollection.features);
         }
       }
-
-      this.logger.log(
-        `[${baseOrigin}] geom consolidado: ${todasFeatures.length} features brutas`,
-      );
     }
 
     // Pipeline de processamento: simplificação de rota + filtragem de alarmes
     const pipeline = this.geomPipeline.process(todasFeatures, segmentos);
-
-    this.logger.log(
-      `[${baseOrigin}] pipeline concluído — ` +
-        `rota: ${pipeline.stats.rawRoutePoints}→${pipeline.stats.simplifiedRoutePoints} pts | ` +
-        `alarmes: ${pipeline.stats.rawAlarms}→${pipeline.stats.filteredAlarms} | ` +
-        `viagens: ${pipeline.segments.length}`,
-    );
 
     const totalDias = contarDias(dataInicial, dataFinal);
     const summaryBase = calcularSumario(segmentos, diasComDados);

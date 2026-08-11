@@ -50,12 +50,6 @@ export class ReinspectionService {
   }
 
   async create(dto: CreateReinspectionDto, _userId: unknown, debugId?: string) {
-    this.log(debugId, 'Iniciando create de revistoria', {
-      userVehicleId: dto.userVehicleId,
-      vehicleType: dto.vehicleType,
-      codigoVeiculo: dto.codigoVeiculo ?? 'N/A',
-    });
-
     const vehicle = await this.prisma.userVehicle.findUnique({
       where: { id: dto.userVehicleId },
     });
@@ -73,11 +67,6 @@ export class ReinspectionService {
         vehicleType: dto.vehicleType,
         codigoVeiculo: dto.codigoVeiculo ?? null,
       },
-    });
-
-    this.log(debugId, 'Revistoria criada', {
-      reinspectionId: reinspection.id,
-      userVehicleId: dto.userVehicleId,
     });
 
     return {
@@ -115,11 +104,6 @@ export class ReinspectionService {
    * Pode ser chamado múltiplas vezes para envio incremental.
    */
   async addPhotos(reinspectionId: number, dto: AddPhotosDto, debugId?: string) {
-    this.log(debugId, 'Adicionando fotos à revistoria', {
-      reinspectionId,
-      photos: dto.photos.length,
-    });
-
     const reinspection = await this.prisma.reinspection.findUnique({
       where: { id: reinspectionId },
       select: { id: true, status: true },
@@ -191,12 +175,6 @@ export class ReinspectionService {
       where: { reinspectionId },
     });
 
-    this.log(debugId, 'Fotos adicionadas', {
-      reinspectionId,
-      added: dto.photos.length,
-      total: totalPhotos,
-    });
-
     return {
       reinspectionId,
       photosAdded: dto.photos.length,
@@ -209,8 +187,6 @@ export class ReinspectionService {
    * Requer ao menos uma foto e status PENDENTE.
    */
   async submitReinspection(reinspectionId: number, debugId?: string) {
-    this.log(debugId, 'Submetendo revistoria', { reinspectionId });
-
     const reinspection = await this.prisma.reinspection.findUnique({
       where: { id: reinspectionId },
       select: {
@@ -239,12 +215,6 @@ export class ReinspectionService {
     }
 
     try {
-      this.log(debugId, 'Enviando e-mail de revistoria', {
-        reinspectionId,
-        chassi: reinspection.userVehicle.chassi,
-        plate: reinspection.userVehicle.plate ?? 'N/A',
-        fotos: reinspection.photos.length,
-      });
       await this.mailService.sendRevistoriaEmail(
         reinspection.userVehicle.chassi,
         reinspection.userVehicle.plate,
@@ -253,22 +223,12 @@ export class ReinspectionService {
           .map((p) => p.url)
           .filter((url): url is string => url !== null),
       );
-      this.log(debugId, 'E-mail de revistoria enviado', {
-        reinspectionId,
-        chassi: reinspection.userVehicle.chassi,
-        plate: reinspection.userVehicle.plate ?? 'N/A',
-      });
     } catch (emailError) {
       this.error(debugId, 'Falha ao enviar e-mail de revistoria', {
         reinspectionId,
         error: emailError instanceof Error ? emailError.message : String(emailError),
       });
     }
-
-    this.log(debugId, 'Revistoria submetida com sucesso', {
-      reinspectionId,
-      photos: reinspection.photos.length,
-    });
 
     return {
       reinspectionId: reinspection.id,
@@ -582,11 +542,6 @@ export class ReinspectionService {
       },
     });
 
-    this.log(debugId, 'Revistoria finalizada com sucesso', {
-      reinspectionId: updated.id,
-      userVehicleId: updated.userVehicleId,
-    });
-
     return {
       reinspectionId: updated.id,
       userVehicleId: updated.userVehicleId,
@@ -654,21 +609,11 @@ export class ReinspectionService {
     }
 
     try {
-      this.log(debugId, 'Enviando e-mail de revistoria aprovada', {
-        reinspectionId: updated.id,
-        chassi: vehicle.chassi,
-        plate: vehicle.plate ?? 'N/A',
-      });
       await this.mailService.sendRevistoriaAprovadaEmail(
         vehicle.chassi,
         vehicle.plate,
         debugId,
       );
-      this.log(debugId, 'E-mail de revistoria aprovada enviado', {
-        reinspectionId: updated.id,
-        chassi: vehicle.chassi,
-        plate: vehicle.plate ?? 'N/A',
-      });
     } catch (emailError) {
       this.error(debugId, 'Falha ao enviar e-mail de aprovação', {
         reinspectionId: updated.id,
@@ -685,11 +630,6 @@ export class ReinspectionService {
       'approve',
       debugId,
     );
-
-    this.log(debugId, 'Revistoria aprovada com sucesso', {
-      reinspectionId: updated.id,
-      userVehicleId: updated.userVehicleId,
-    });
 
     return {
       reinspectionId: updated.id,
@@ -746,11 +686,6 @@ export class ReinspectionService {
 
     try {
       await this.sgaService.criarBoletoReativacao(userVehicleId, plate, debugId);
-      this.log(debugId, 'Criação de boleto de reativação disparada com sucesso', {
-        trigger,
-        reinspectionId,
-        userVehicleId,
-      });
     } catch (boletoError) {
       this.error(debugId, 'Falha ao criar boleto de reativação', {
         trigger,
@@ -820,10 +755,6 @@ export class ReinspectionService {
       (reinspection.userVehicle?.user?.baseOrigin as BaseOrigin | null) ??
       TENANT.defaultBase;
 
-    this.logger.debug(
-      `Enviando revistoria aprovada para Hinova | reinspectionId=${reinspection.id} | fotos=${payloadPhotos.length} | codigoVeiculo=${reinspection.codigoVeiculo ?? 'N/A'}`,
-    );
-
     const response = await this.sgaAuthService.executeRequestWithAuth(
       baseOrigin,
       {
@@ -835,10 +766,6 @@ export class ReinspectionService {
         },
         validateStatus: () => true,
       },
-    );
-
-    this.logger.log(
-      `Resposta da Hinova recebida | reinspectionId=${reinspection.id} | status=${response.status}`,
     );
 
     if (Array.isArray(response.data)) {
@@ -1096,12 +1023,6 @@ export class ReinspectionService {
       }),
     ]);
 
-    this.log(debugId, 'Foto reenviada', {
-      photoId: updatedPhoto.id,
-      reinspectionId: updatedReinspection.id,
-      newUrl,
-    });
-
     // Envia e-mail com assunto específico
     try {
       await this.mailService.sendFotoRecusadaReenviadaEmail(
@@ -1245,10 +1166,6 @@ export class ReinspectionService {
         updatedAt: true,
       },
     });
-
-    this.logger.log(
-      `Foto aprovada e revistoria atualizada | photoId=${updatedPhoto.id} | reinspectionId=${updatedReinspection.id} | reinspectionStatus=${updatedReinspection.status}`,
-    );
 
     return {
       photo: updatedPhoto,

@@ -57,9 +57,6 @@ export class NotificationsController {
   @Post('queue-test')
   async queueTestNotification(@Body() dto: TestNotificationDto) {
     const data = { plate: dto.plate, ignition: dto.ignition };
-    this.logger.log(
-      `[QUEUE] expoPushToken recebido para enfileiramento: ${this.maskExpoPushToken(dto.expoPushToken)}`,
-    );
     const job = await this.notificationQueue.add(
       'push-test',
       {
@@ -70,9 +67,6 @@ export class NotificationsController {
         data,
       },
       { attempts: 3, backoff: { type: 'exponential', delay: 2000 } },
-    );
-    this.logger.log(
-      `[QUEUE] Job #${job.id} enfileirado para user ${dto.userId}`,
     );
     return {
       queued: true,
@@ -88,12 +82,6 @@ export class NotificationsController {
       plate: dto.plate,
       ignition: dto.ignition,
     };
-    this.logger.log(
-      `[TEST] expoPushToken recebido para envio direto: ${this.maskExpoPushToken(dto.expoPushToken)}`,
-    );
-    this.logger.log(
-      `Enviando notificação de teste com dados: ${JSON.stringify(data)}`,
-    );
     // Nota: Para teste, usando um userId padrão (1)
     // Em produção, isso viria do token JWT
     return this.notificationsService.sendPushNotification(
@@ -275,7 +263,6 @@ export class NotificationsController {
         dto,
       );
 
-    this.logger.log('[MARKETING] Iniciando envio de notificações de marketing');
     try {
       const result = await this.notificationsService.sendMarketingNotification(
         dto,
@@ -288,9 +275,6 @@ export class NotificationsController {
         result.skippedCount,
       );
 
-      this.logger.log(
-        `[MARKETING] ✅ Envio concluído: ${result.sentCount} enviadas, ${result.skippedCount} puladas`,
-      );
       return result;
     } catch (error) {
       await this.marketingNotificationAuditService.markFailure(

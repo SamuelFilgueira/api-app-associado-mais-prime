@@ -298,9 +298,6 @@ export class RastreamentoM7
     reverseGeocode: boolean = true,
   ): Promise<UltimaPosicaoM7Response> {
     try {
-      this.logger.debug(
-        `[${baseOrigin}] Consultando última posição M7 para chassi=${chassi}`,
-      );
       const data = await this.executarComReautenticacao(baseOrigin, (token) =>
         axios.post(
           `${process.env.M7_API_BASE_URL}api/veiculos/ultima-posicao`,
@@ -310,9 +307,6 @@ export class RastreamentoM7
             timeout: M7_REQUEST_TIMEOUT,
           },
         ),
-      );
-      this.logger.debug(
-        `[${baseOrigin}] Resposta recebida da M7 para chassi=${chassi}: ${JSON.stringify(data)}`,
       );
 
       return this.mapearUltimaPosicaoM7(data as Record<string, unknown>);

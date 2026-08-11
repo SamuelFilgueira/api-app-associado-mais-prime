@@ -16,9 +16,6 @@ export class BoletoController {
     @Req() req: Request & { user: JwtUser },
     @Body() body: { codigo_veiculo: number },
   ) {
-    this.logger.log(
-      `Dados recebidos em listarBoletos: ${JSON.stringify(body)}`,
-    );
     return this.boletoService.consultarBoletosPorVeiculo(
       Number(req.user.userId),
       body.codigo_veiculo,

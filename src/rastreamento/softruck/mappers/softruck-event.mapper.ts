@@ -260,19 +260,12 @@ export function mapGeomFeatureToEvento(
 
   // Filtra SHAKE_ALERT e UNKNOWN
   if (!shouldIncludeEvent(tipo)) {
-    logger.debug(
-      `[SoftruckEventMapper] Evento filtrado: tipo=${tipo} tag="${props.tag}" msg="${props.msg}"`,
-    );
     return null;
   }
 
   // Extrai coordenadas do GeoJSON (formato: [longitude, latitude])
   const [lng, lat] = feature.geometry.coordinates;
   const timestamp = extrairTimestamp(props.point);
-
-  logger.debug(
-    `[SoftruckEventMapper] Evento normalizado: tipo=${tipo} tag="${props.tag}" ts=${timestamp}`,
-  );
 
   return {
     kind: 'EVENT',

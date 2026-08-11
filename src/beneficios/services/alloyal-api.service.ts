@@ -76,34 +76,8 @@ export class AlloyalApiService {
       baseURL: process.env.BASE_URL_ALLOYAL?.replace(/\/+$/, ''),
     });
 
-    // Interceptors de debug: logam toda requisição/resposta feita via axiosInstance
-    this.axiosInstance.interceptors.request.use((config) => {
-      const fullUrl = `${config.baseURL ?? ''}${config.url ?? ''}`;
-      this.logger.log(
-        `[Alloyal ->] ${config.method?.toUpperCase()} ${fullUrl}` +
-          ` | params: ${this.safeStringify(config.params)}` +
-          ` | body: ${this.safeStringify(this.maskSensitiveFields(config.data))}` +
-          ` | headers: ${this.safeStringify(this.maskHeaders(config.headers))}`,
-      );
-      return config;
-    });
-
     this.axiosInstance.interceptors.response.use(
-      (response) => {
-        const fullUrl = `${response.config.baseURL ?? ''}${response.config.url ?? ''}`;
-        this.logger.log(
-          `[Alloyal <-] ${response.status} ${response.config.method?.toUpperCase()} ${fullUrl}` +
-            ` | response headers (auth): ${this.safeStringify(
-              this.maskHeaders({
-                uid: response.headers?.['uid'],
-                client: response.headers?.['client'],
-                'access-token': response.headers?.['access-token'],
-              }),
-            )}` +
-            ` | data: ${this.safeStringify(response.data)}`,
-        );
-        return response;
-      },
+      (response) => response,
       (error) => {
         this.logAxiosError('axiosInstance', error);
         return Promise.reject(error);
@@ -215,10 +189,6 @@ export class AlloyalApiService {
       businessCnpjEnv,
     };
 
-    this.logger.log(
-      `${baseTag(baseOrigin)} Alloyal credentials selected for ${operation}: apiSecretEnv=${apiSecretEnv}, businessIdEnv=${businessIdEnv}, businessCnpjEnv=${businessCnpjEnv}, businessId=${credentials.businessId}, businessCnpj=${credentials.businessCnpj}`,
-    );
-
     return credentials;
   }
 
@@ -226,10 +196,6 @@ export class AlloyalApiService {
     const origin = new URL(
       process.env.BASE_URL_ALLOYAL || 'https://api.lecupon.com',
     ).origin;
-
-    this.logger.log(
-      `${baseTag(baseOrigin)} Alloyal base URL origin selected: ${origin}`,
-    );
 
     return origin;
   }
@@ -271,19 +237,13 @@ export class AlloyalApiService {
    */
   async login(cpf: string, password: string): Promise<AlloyalSessionHeaders> {
     try {
-      const { apiSecret, baseOrigin, apiSecretEnv } =
+      const { apiSecret, baseOrigin } =
         this.resolveAlloyalCredentials('login');
       const body = {
         cpf,
         password,
       };
 
-      this.logger.log(
-        `${baseTag(baseOrigin)} [login] POST ${this.axiosInstance.defaults.baseURL}/auth/sign_in` +
-          ` | cpf: ${cpf}` +
-          ` | password: ${maskSecret(password)}` +
-          ` | api-secret (${apiSecretEnv}): ${maskSecret(apiSecret)}`,
-      );
       const response: AxiosResponse = await this.axiosInstance.post(
         '/auth/sign_in',
         body,
@@ -299,13 +259,6 @@ export class AlloyalApiService {
       const client = headers['client'];
       const accessToken = headers['access-token'];
 
-      this.logger.log(
-        `${baseTag(baseOrigin)} [login] Resposta status ${response.status}` +
-          ` | uid: ${uid ?? '(ausente)'}` +
-          ` | client: ${maskSecret(client)}` +
-          ` | access-token: ${maskSecret(accessToken)}`,
-      );
-
       if (!uid || !client || !accessToken) {
         this.logger.error(
           `${baseTag(baseOrigin)} [login] Headers de autenticação ausentes na resposta` +
@@ -315,9 +268,6 @@ export class AlloyalApiService {
         throw new Error('Missing authentication headers in response');
       }
 
-      this.logger.log(
-        `${baseTag(baseOrigin)} [login] Login na API Alloyal realizado com sucesso`,
-      );
       return {
         uid,
         client,
@@ -644,7 +594,7 @@ export class AlloyalApiService {
     try {
       const clientEmployeeEmail = process.env.x_clientemployee_email;
       const clientEmployeeToken = process.env.x_clientemployee_token;
-      const { baseOrigin, businessId, businessCnpj } =
+      const { baseOrigin, businessCnpj } =
         this.resolveAlloyalCredentials('searchUserByCpf');
 
       if (!clientEmployeeEmail || !clientEmployeeToken) {
@@ -667,14 +617,6 @@ export class AlloyalApiService {
         term: cleanCpf,
       };
 
-      this.logger.log(
-        `${baseTag(baseOrigin)} [searchUserByCpf] GET ${url}` +
-          ` | businessId=${businessId} | businessCnpj=${businessCnpj}` +
-          ` | params: ${this.safeStringify(params)}` +
-          ` | x-clientemployee-email: ${clientEmployeeEmail}` +
-          ` | x-clientemployee-token: ${maskSecret(clientEmployeeToken)}`,
-      );
-
       const response = await axios.get(url, {
         headers: {
           'x-clientemployee-email': clientEmployeeEmail,
@@ -682,11 +624,6 @@ export class AlloyalApiService {
         },
         params,
       });
-
-      this.logger.log(
-        `${baseTag(baseOrigin)} [searchUserByCpf] Resposta status ${response.status}` +
-          ` | data: ${this.safeStringify(response.data)}`,
-      );
 
       // Retorna array de usuários ou array vazio
       return Array.isArray(response.data) ? response.data : [];
@@ -1056,7 +993,7 @@ export class AlloyalApiService {
     try {
       const clientEmployeeEmail = process.env.x_clientemployee_email;
       const clientEmployeeToken = process.env.x_clientemployee_token;
-      const { baseOrigin, businessId, businessCnpj } =
+      const { baseOrigin, businessCnpj } =
         this.resolveAlloyalCredentials('createUser');
 
       if (!clientEmployeeEmail || !clientEmployeeToken) {
@@ -1080,14 +1017,6 @@ export class AlloyalApiService {
 
       const url = `${apiBaseOrigin}/client/v2/businesses/${businessCnpj}/users`;
 
-      this.logger.log(
-        `${baseTag(baseOrigin)} [createUser] POST ${url}` +
-          ` | businessId=${businessId} | businessCnpj=${businessCnpj}` +
-          ` | body: ${this.safeStringify(this.maskSensitiveFields(body))}` +
-          ` | X-ClientEmployee-Email: ${clientEmployeeEmail}` +
-          ` | X-ClientEmployee-Token: ${maskSecret(clientEmployeeToken)}`,
-      );
-
       const response = await axios.post(url, body, {
         headers: {
           'Content-Type': 'application/json',
@@ -1096,11 +1025,6 @@ export class AlloyalApiService {
           'X-ClientEmployee-Token': clientEmployeeToken,
         },
       });
-
-      this.logger.log(
-        `${baseTag(baseOrigin)} [createUser] Resposta status ${response.status}` +
-          ` | data: ${this.safeStringify(response.data)}`,
-      );
 
       const user: AlloyalUserDto = response.data;
 
@@ -1146,7 +1070,7 @@ export class AlloyalApiService {
     try {
       const clientEmployeeEmail = process.env.x_clientemployee_email;
       const clientEmployeeToken = process.env.x_clientemployee_token;
-      const { baseOrigin, businessId, businessCnpj } =
+      const { baseOrigin, businessCnpj } =
         this.resolveAlloyalCredentials('updateUser');
 
       if (!clientEmployeeEmail || !clientEmployeeToken) {
@@ -1162,14 +1086,6 @@ export class AlloyalApiService {
       const cleanCpf = cpf.replace(/\D/g, '');
       const url = `${apiBaseOrigin}/client/v2/businesses/${businessCnpj}/users/${cleanCpf}`;
 
-      this.logger.log(
-        `${baseTag(baseOrigin)} [updateUser] PATCH ${url}` +
-          ` | businessId=${businessId} | businessCnpj=${businessCnpj}` +
-          ` | body: ${this.safeStringify(this.maskSensitiveFields(dto))}` +
-          ` | X-ClientEmployee-Email: ${clientEmployeeEmail}` +
-          ` | X-ClientEmployee-Token: ${maskSecret(clientEmployeeToken)}`,
-      );
-
       const response = await axios.patch(url, dto, {
         headers: {
           'Tentant-id': businessCnpj,
@@ -1177,11 +1093,6 @@ export class AlloyalApiService {
           'X-ClientEmployee-Token': clientEmployeeToken,
         },
       });
-
-      this.logger.log(
-        `${baseTag(baseOrigin)} [updateUser] Resposta status ${response.status}` +
-          ` | data: ${this.safeStringify(response.data)}`,
-      );
 
       return response.data;
     } catch (error) {

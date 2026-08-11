@@ -29,22 +29,17 @@ export class AssociadoController {
 
   @Post('primeiro-acesso')
   async primeiroAcesso(@Body() data: PrimeiroAcessoDto) {
-    this.logger.log(
-      `Dados recebido no primeiro acesso: ${JSON.stringify(data)}`,
-    );
     return this.associadoService.primeiroAcesso(data.cpf);
   }
 
   @Get('cpf')
   async findByCpf(@Query('cpf') cpf: string) {
-    this.logger.log(`Buscando associado com CPF: ${cpf}`);
     const resposta = await this.associadoService.findByCpf(cpf);
     return resposta;
   }
 
   @Get(':id')
   async findById(@Param('id', ParseIntPipe) id: number) {
-    this.logger.log(`Buscando associado com ID: ${id}`);
     const resposta = await this.associadoService.findById(id);
     return resposta;
   }
@@ -62,7 +57,6 @@ export class AssociadoController {
   @Get('cpf/:cpf/veiculos')
   @UseGuards(JwtAuthGuard)
   async findVehiclesByCpf(@Param('cpf') cpf: string) {
-    this.logger.log(`Buscando veículos do associado pelo CPF: ${cpf}`);
     // Exemplo de uso de BaseContextService em rota autenticada
     try {
       const baseOrigin = this.baseContextService.getBaseOrigin();

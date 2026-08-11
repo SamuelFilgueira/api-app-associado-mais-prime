@@ -86,8 +86,6 @@ export class SgaAuthService {
     const credentials: SgaAuthCredentials =
       this.tokenResolver.resolveSgaAuthCredentials(baseOrigin);
 
-    this.logger.log(`${baseTag(baseOrigin)} autenticando usuário SGA`);
-
     const response = await axios.post<SgaAuthResponse>(
       'https://api.hinova.com.br/api/sga/v2/usuario/autenticar',
       {

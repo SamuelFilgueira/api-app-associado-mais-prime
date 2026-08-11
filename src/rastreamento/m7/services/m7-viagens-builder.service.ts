@@ -169,10 +169,6 @@ export class M7ViagensBuilderService {
     const IGNITION_FALSE_BLIP_SECONDS = 120;
     const DISTANCIA_MINIMA_KM = 0.02;
 
-    this.logger.log(
-      `[${baseOrigin}] [V2] iniciar reconstrução por histórico | pontosRaw=${pontosRaw.length} thresholdMov=${MOVING_SPEED_THRESHOLD} maxGap=${MAX_GAP_SECONDS}s`,
-    );
-
     type Ponto = {
       ts: Date;
       dataGps: string;
@@ -207,10 +203,6 @@ export class M7ViagensBuilderService {
         const diff = a.ts.getTime() - b.ts.getTime();
         return diff !== 0 ? diff : a.codigoPosicao - b.codigoPosicao;
       });
-
-    this.logger.debug(
-      `[${baseOrigin}] [V2] pontos normalizados=${pontos.length}`,
-    );
 
     if (pontos.length > 0) {
       this.logger.debug(
@@ -258,10 +250,6 @@ export class M7ViagensBuilderService {
       i = j - 1;
     }
 
-    this.logger.log(
-      `[${baseOrigin}] [V2] suavização ignição aplicada | falseBlipsCorrigidos=${blipsIgnicaoCorrigidos} janelaBlip=${IGNITION_FALSE_BLIP_SECONDS}s`,
-    );
-
     const ciclos: Array<{ start: number; end: number }> = [];
     let inicioCiclo = -1;
 
@@ -284,10 +272,6 @@ export class M7ViagensBuilderService {
     if (inicioCiclo !== -1 && inicioCiclo < pontos.length - 1) {
       ciclos.push({ start: inicioCiclo, end: pontos.length - 1 });
     }
-
-    this.logger.log(
-      `[${baseOrigin}] [V2] ciclos de ignição detectados=${ciclos.length}`,
-    );
 
     type ViagemIntermediaria = {
       saida: string;
@@ -395,10 +379,6 @@ export class M7ViagensBuilderService {
 
       const distanciaKm = Math.round(distanciaKmBruta * 100) / 100;
 
-      this.logger.debug(
-        `[${baseOrigin}] [V2] ciclo saida=${inicioMov.dataGps} chegada=${fimMov.dataGps} haversineKm=${Math.round(distanciaHaversineKm * 100) / 100} distanciaKm=${distanciaKm} tempoMovSec=${tempoMovSec} seq=${seq.length}pts`,
-      );
-
       if (distanciaKmBruta < DISTANCIA_MINIMA_KM) {
         descartes.distanciaZerada += 1;
         continue;
@@ -432,10 +412,6 @@ export class M7ViagensBuilderService {
         destinoCidade: destinoPonto.cidade,
       });
     }
-
-    this.logger.log(
-      `[${baseOrigin}] [V2] funil ciclos=${ciclos.length} aprovados=${viagensIntermediarias.length} descartes={seqCurta:${descartes.seqCurta},semMovimento:${descartes.semMovimento},movInvalido:${descartes.movimentoInvalido},dist0:${descartes.distanciaZerada},tempo<=40s:${descartes.tempoMovCurto}}`,
-    );
 
     const viagens: ViagemM7Dto[] = await Promise.all(
       viagensIntermediarias.map(async (viagem) => {
@@ -480,17 +456,6 @@ export class M7ViagensBuilderService {
       }),
     );
 
-    const origemResolvida = viagens.filter((viagem) =>
-      isEnderecoValido(viagem.origem),
-    ).length;
-    const destinoResolvido = viagens.filter((viagem) =>
-      isEnderecoValido(viagem.destino),
-    ).length;
-
-    this.logger.log(
-      `[${baseOrigin}] [V2] geocode concluído viagens=${viagens.length} origemResolvida=${origemResolvida}/${viagens.length} destinoResolvido=${destinoResolvido}/${viagens.length}`,
-    );
-
     const dias = agruparViagensPorDia(viagens);
     const distanciaTotalKm =
       Math.round(viagens.reduce((acc, viagem) => acc + viagem.distanciaKm, 0) * 100) /
@@ -498,10 +463,6 @@ export class M7ViagensBuilderService {
     const velocidadeMaxima = viagens.reduce(
       (max, viagem) => Math.max(max, viagem.velocidadeMaxima),
       0,
-    );
-
-    this.logger.log(
-      `[${baseOrigin}] [V2] resumo reconstrução dias=${dias.length} viagens=${viagens.length} distanciaTotalKm=${distanciaTotalKm} velocidadeMaxima=${velocidadeMaxima}`,
     );
 
     return { viagens, dias, distanciaTotalKm, velocidadeMaxima };

@@ -22,15 +22,10 @@ export class WebhookProcessor extends WorkerHost {
   }
 
   async process(job: Job<{ payload: unknown }>): Promise<any> {
-    this.logger.log(
-      `Processando webhook job #${job.id} (attempt ${job.attemptsMade + 1})`,
-    );
-
     try {
       const result = await this.rastreamentoService.processarWebhookM7(
         job.data.payload,
       );
-      this.logger.log(`Webhook job #${job.id} concluído com sucesso`);
       return result;
     } catch (error) {
       this.logger.error(

@@ -53,27 +53,7 @@ export class BoletoVerificacaoProcessor extends WorkerHost {
       debugId,
     } = job.data;
 
-    this.logger.log(
-      debugLog(BoletoVerificacaoProcessor.name, 'Job iniciado verificar-boleto', debugId, {
-        jobId: job.id,
-        attemptsMade: job.attemptsMade,
-        nossoNumero: nosso_numero,
-        codigoVeiculo: codigo_veiculo,
-        codigoAssociado: codigo_associado ?? null,
-        baseOrigin,
-        temNome: !!nome,
-        temTelefone: !!telefone_celular,
-      }),
-    );
-
     const url = `https://api.hinova.com.br/api/sga/v2/processa-pdf/boleto`;
-
-    this.logger.log(
-      debugLog(BoletoVerificacaoProcessor.name, 'Consultando status do boleto', debugId, {
-        nossoNumero: nosso_numero,
-        url,
-      }),
-    );
 
     const response = await this.sgaAuthService.executeRequestWithAuth(
       baseOrigin,
@@ -96,15 +76,6 @@ export class BoletoVerificacaoProcessor extends WorkerHost {
       );
       return;
     }
-
-    this.logger.debug(
-      debugLog(BoletoVerificacaoProcessor.name, 'Resposta raw processa-pdf/boleto', debugId, {
-        nossoNumero: nosso_numero,
-        status: response.status,
-        type: Array.isArray(response.data) ? 'array' : typeof response.data,
-        body: response.data,
-      }),
-    );
 
     type BoletoInfo = {
       nosso_numero?: number | string;
@@ -166,16 +137,6 @@ export class BoletoVerificacaoProcessor extends WorkerHost {
         ? String(codigoSituacaoRaw)
         : undefined;
 
-    this.logger.log(
-      debugLog(BoletoVerificacaoProcessor.name, 'Status do boleto verificado', debugId, {
-        nossoNumero: nosso_numero,
-        codigoSituacao: codigoSituacao ?? 'N/A',
-        totalRegistros: boletos.length,
-        registroSelecionado: !!boletoInfo,
-        keys: Object.keys(boletoInfo ?? {}).join(', '),
-      }),
-    );
-
     // Fallback: quando processa-pdf retorna vazio/N/A, consultar boletos por veículo
     if (!codigoSituacao) {
       const now = new Date();
@@ -212,12 +173,6 @@ export class BoletoVerificacaoProcessor extends WorkerHost {
         if (boletoFallback?.codigo_situacao_boleto !== undefined) {
           codigoSituacao = String(boletoFallback.codigo_situacao_boleto);
           boletoInfo = boletoFallback as BoletoInfo;
-          this.logger.log(
-            debugLog(BoletoVerificacaoProcessor.name, 'Status recuperado via fallback', debugId, {
-              nossoNumero: nosso_numero,
-              codigoSituacao,
-            }),
-          );
         } else {
           this.logger.warn(
             debugLog(BoletoVerificacaoProcessor.name, 'Fallback sem status para nosso_numero informado', debugId, {
@@ -280,9 +235,6 @@ export class BoletoVerificacaoProcessor extends WorkerHost {
     }
 
     if (codigoSituacao !== '1' && codigoSituacao !== '4') {
-      this.logger.log(
-        `Boleto ainda n\u00e3o pago | nosso_numero=${nosso_numero} | situacao=${codigoSituacao ?? 'N/A'} | pr\u00f3xima verifica\u00e7\u00e3o em ~2min`,
-      );
       return;
     }
 
@@ -341,14 +293,6 @@ export class BoletoVerificacaoProcessor extends WorkerHost {
           validateStatus: () => true,
         });
 
-      this.logger.log(
-        debugLog(BoletoVerificacaoProcessor.name, 'Associado reativado (situação 1)', debugId, {
-          codigoAssociado: codigo_associado,
-          status: alterarAssociadoResponse.status,
-          body: alterarAssociadoResponse.data,
-        }),
-      );
-
       if (alterarAssociadoResponse.status >= 400) {
         this.logger.warn(
           debugLog(BoletoVerificacaoProcessor.name, 'Falha ao reativar associado (situação 1)', debugId, {
@@ -370,12 +314,6 @@ export class BoletoVerificacaoProcessor extends WorkerHost {
     // Remover o job recorrente
     if (job.repeatJobKey) {
       await this.queue.removeRepeatableByKey(job.repeatJobKey);
-      this.logger.log(
-        debugLog(BoletoVerificacaoProcessor.name, 'Job de verificação removido', debugId, {
-          nossoNumero: nosso_numero,
-          repeatJobKey: job.repeatJobKey,
-        }),
-      );
     }
 
     // Notificar usuário via Suri que o boleto foi pago
@@ -386,23 +324,8 @@ export class BoletoVerificacaoProcessor extends WorkerHost {
         : '';
       const phoneNormalized = '55' + telefone_celular.replace(/\D/g, '');
 
-      this.logger.log(
-          debugLog(BoletoVerificacaoProcessor.name, 'Enviando notificação Suri (boleto pago)', debugId, {
-            nossoNumero: nosso_numero,
-            phone: phoneNormalized,
-            primeiroNome: primeiroNomeFormatado,
-            templateId: process.env.suri_template_id_boleto_pago,
-          }),
-      );
-      this.logger.debug(
-          debugLog(BoletoVerificacaoProcessor.name, 'Payload Suri (boleto pago)', debugId, {
-            suriBaseUrl: process.env.suri_baseUrl,
-            nome,
-          }),
-      );
-
       try {
-        const suriResponse = await axios.post(
+        await axios.post(
           process.env.suri_baseUrl!,
           {
             user: {
@@ -432,17 +355,6 @@ export class BoletoVerificacaoProcessor extends WorkerHost {
           },
         );
 
-        this.logger.log(
-          debugLog(BoletoVerificacaoProcessor.name, 'Notificação Suri (boleto pago) enviada', debugId, {
-            nossoNumero: nosso_numero,
-            status: suriResponse.status,
-          }),
-        );
-        this.logger.debug(
-          debugLog(BoletoVerificacaoProcessor.name, 'Resposta Suri (boleto pago)', debugId, {
-            body: suriResponse.data,
-          }),
-        );
       } catch (suriError) {
         this.logger.error(
           debugLog(BoletoVerificacaoProcessor.name, 'Falha ao enviar notificação Suri (boleto pago)', debugId, {

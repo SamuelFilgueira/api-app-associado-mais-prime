@@ -37,7 +37,6 @@ import { M7ReverseGeocodeService } from './m7-reverse-geocode.service';
 import { M7ViagensBuilderService } from './m7-viagens-builder.service';
 
 const M7_REQUEST_TIMEOUT = 50_000;
-const MAX_LOG_PAYLOAD_LENGTH = 1_500;
 
 type TokenState = {
   token: string | null;
@@ -48,20 +47,6 @@ type TokenState = {
 @Injectable()
 export class HistoricoM7Service {
   private readonly logger = new Logger(HistoricoM7Service.name);
-
-  private stringifyForLog(data: unknown): string {
-    const serialized = JSON.stringify(data);
-
-    if (!serialized) {
-      return '(vazio)';
-    }
-
-    if (serialized.length <= MAX_LOG_PAYLOAD_LENGTH) {
-      return serialized;
-    }
-
-    return `${serialized.slice(0, MAX_LOG_PAYLOAD_LENGTH)}... [truncated ${serialized.length - MAX_LOG_PAYLOAD_LENGTH} chars]`;
-  }
 
   private readonly tokenState: Record<BaseOrigin, TokenState> = mapTenantBases(
     () => ({ token: null, tokenExpires: null, tokenRenewalPromise: null }),
@@ -204,9 +189,6 @@ export class HistoricoM7Service {
     baseOrigin: BaseOrigin,
   ): Promise<M7ConsultaVeiculoResponse> {
     const url = `${process.env.M7_API_BASE_URL}api/veiculos/consulta`;
-    this.logger.debug(
-      `[${baseOrigin}] consultarVeiculo → POST ${url} | body: ${JSON.stringify({ cnpj, chassi })}`,
-    );
     try {
       const data = await this.executarComReautenticacao(baseOrigin, (token) =>
         axios.post(
@@ -217,9 +199,6 @@ export class HistoricoM7Service {
             timeout: M7_REQUEST_TIMEOUT,
           },
         ),
-      );
-      this.logger.debug(
-        `[${baseOrigin}] consultarVeiculo ← resposta: ${JSON.stringify(data)}`,
       );
       return data as M7ConsultaVeiculoResponse;
     } catch (error) {
@@ -250,7 +229,6 @@ export class HistoricoM7Service {
       : dataFinal;
 
     const endpoint = `${process.env.M7_API_BASE_URL}api/monitorado/${codigoVeiculo}/trajetos?data_inicio=${toDateTimeParam(dataInicial)}&data_fim=${toDateTimeParam(dataFinalConsulta)}`;
-    this.logger.debug(`[${baseOrigin}] buscarTrajetos → GET ${endpoint}`);
 
     try {
       const data = await this.executarComReautenticacao(baseOrigin, (token) =>
@@ -258,9 +236,6 @@ export class HistoricoM7Service {
           headers: { Authorization: `Bearer ${token}` },
           timeout: M7_REQUEST_TIMEOUT,
         }),
-      );
-      this.logger.debug(
-        `[${baseOrigin}] buscarTrajetos ← resposta: ${this.stringifyForLog(data)}`,
       );
 
       const resposta = data as M7TrajetosApiResponse;
@@ -316,7 +291,6 @@ export class HistoricoM7Service {
       : dataFinal;
 
     const endpoint = `${process.env.M7_API_BASE_URL}api/historico/${dataInicial}/${dataFinalConsulta}/${codigoVeiculo}`;
-    this.logger.debug(`[${baseOrigin}] buscarHistoricoGps → GET ${endpoint}`);
 
     try {
       const data = await this.executarComReautenticacao(baseOrigin, (token) =>
@@ -324,10 +298,6 @@ export class HistoricoM7Service {
           headers: { Authorization: `Bearer ${token}` },
           timeout: M7_REQUEST_TIMEOUT,
         }),
-      );
-
-      this.logger.debug(
-        `[${baseOrigin}] buscarHistoricoGps ← resposta: ${this.stringifyForLog(data)}`,
       );
 
       const resposta = data as M7HistoricoApiResponse;
@@ -379,10 +349,6 @@ export class HistoricoM7Service {
     dataFinal: string,
     baseOrigin: BaseOrigin,
   ): Promise<Buffer> {
-    this.logger.log(
-      `[${baseOrigin}] [V2] gerarPdfV2 início | cnpj=${cnpj} chassi=${chassi} período=${dataInicial}..${dataFinal}`,
-    );
-
     const veiculoData = await this.consultarVeiculo(cnpj, chassi, baseOrigin);
 
     if (!veiculoData?.veiculo?.codigo) {
@@ -401,10 +367,6 @@ export class HistoricoM7Service {
     const pontosRaw = Array.isArray(historicoRaw?.historico)
       ? historicoRaw.historico
       : [];
-
-    this.logger.log(
-      `[${baseOrigin}] [V2] histórico recebido | pontos=${pontosRaw.length}`,
-    );
 
     const { viagens, dias, distanciaTotalKm, velocidadeMaxima } =
       await this.viagensBuilderService.construirViagensEDiasPorHistorico(
@@ -429,10 +391,6 @@ export class HistoricoM7Service {
       },
       dias,
     };
-
-    this.logger.log(
-      `[${baseOrigin}] [V2] gerarPdfV2 fim | dias=${dias.length} viagens=${viagens.length} distanciaTotalKm=${distanciaTotalKm} velocidadeMaxima=${velocidadeMaxima}`,
-    );
 
     return this.pdfService.gerarPdf(dadosPdf);
   }
@@ -570,10 +528,6 @@ export class HistoricoM7Service {
       ? historicoRaw.historico
       : [];
 
-    this.logger.debug(
-      `[${baseOrigin}] gerarPdfContestacao: ${pontosRaw.length} registros brutos recebidos`,
-    );
-
     const pontos = await this.reverseGeocodeService.montarPontosContestacao(
       pontosRaw,
       baseOrigin,
@@ -616,17 +570,9 @@ export class HistoricoM7Service {
       ? historicoRaw.historico
       : [];
 
-    this.logger.log(
-      `[${baseOrigin}] gerarPdfContestacaoV2: ${pontosRaw.length} pontos recebidos | período=${dataInicial}..${dataFinal}`,
-    );
-
     const pontos = await this.reverseGeocodeService.montarPontosContestacao(
       pontosRaw,
       baseOrigin,
-    );
-
-    this.logger.log(
-      `[${baseOrigin}] gerarPdfContestacaoV2: ${pontos.length} pontos geocodificados`,
     );
 
     const dadosPdf: HistoricoM7ContestacaoPdfDataDto = {
@@ -663,16 +609,8 @@ export class HistoricoM7Service {
       ? trajetosRaw.trajetos
       : [];
 
-    this.logger.debug(
-      `[${baseOrigin}] obterResumo: ${rawList.length} registros brutos recebidos`,
-    );
-
     const { viagens, dias, distanciaTotalKm, velocidadeMaxima } =
       this.viagensBuilderService.construirViagensEDias(rawList);
-
-    this.logger.debug(
-      `[${baseOrigin}] obterResumo: ${viagens.length} viagens válidas mapeadas`,
-    );
 
     return {
       veiculo: { codigo, placa, chassi: chassiM7 },

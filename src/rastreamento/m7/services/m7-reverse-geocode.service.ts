@@ -419,9 +419,6 @@ export class M7ReverseGeocodeService {
 
       if (rua || bairro) {
         const endereco = partes.join(', ');
-        this.logger.debug(
-          `[${baseOrigin}] nominatim_rj hit ${latitude},${longitude} → ${endereco}`,
-        );
         return endereco;
       }
     } catch (error) {

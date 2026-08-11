@@ -60,10 +60,6 @@ export class AnalyticsController {
       );
     }
 
-    this.logger.log(
-      `Analytics ingest request: linkUserEnabled=${linkUserEnabled}, hasAuthorizationHeader=${hasAuthorizationHeader}, resolvedJwtUserId=${jwtUserId ?? 'null'}`,
-    );
-
     return this.analyticsService.ingest(req.body, clientIp, rateLimitEnabled, jwtUserId);
   }
 
@@ -75,13 +71,8 @@ export class AnalyticsController {
     // Caminho principal: user já resolvido pelo AuthGuard('jwt')
     const fromGuard = req.user?.userId ?? req.user?.sub ?? req.user?.id;
     if (fromGuard !== undefined && fromGuard !== null) {
-      this.logger.log(`resolveJwtUserId: resolved from guard — ${fromGuard}`);
       return fromGuard;
     }
-
-    this.logger.log(
-      `resolveJwtUserId: req.user not populated by guard (user=${JSON.stringify(req.user)}), attempting manual JWT decode`,
-    );
 
     // Fallback seguro: verificar token manualmente e extrair claims comuns de id.
     const authHeader = req.headers.authorization;
@@ -105,8 +96,6 @@ export class AnalyticsController {
         secret: process.env.JWT_SECRET || 'minha_chave_secreta',
         ignoreExpiration: false,
       });
-
-      this.logger.log(`resolveJwtUserId: manual verify OK — payload keys: ${Object.keys(payload).join(', ')}`);
 
       const resolved =
         (payload.userId as number | string | undefined) ??

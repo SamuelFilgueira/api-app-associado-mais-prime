@@ -13,7 +13,6 @@ import {
   BaseOrigin,
   SgaAuthCredentials,
 } from './token-resolver.service';
-import { baseTag } from './log.util';
 
 interface RequestWithUser extends Request {
   user?: JwtUser;
@@ -41,91 +40,78 @@ export class BaseContextService {
       );
     }
 
-    this.logger.log(`${baseTag(baseOrigin)} Base de origem obtida`);
     return baseOrigin;
   }
 
   getSgaAuthCredentials(): SgaAuthCredentials {
     const base = this.getBaseOrigin();
     const credentials = this.tokenResolver.resolveSgaAuthCredentials(base);
-    this.logger.log(`${baseTag(base)} SGA credentials resolved`);
     return credentials;
   }
 
   getLogicaToken(): string {
     const base = this.getBaseOrigin();
     const token = this.tokenResolver.resolveLogicaToken(base);
-    this.logger.log(`${baseTag(base)} LOGICA token resolved`);
     return token;
   }
 
   getSoftruckToken(): string {
     const base = this.getBaseOrigin();
     const token = this.tokenResolver.resolveSoftruckToken(base);
-    this.logger.log(`${baseTag(base)} SOFTRUCK token resolved`);
     return token;
   }
 
   getSoftruckUsername(): string {
     const base = this.getBaseOrigin();
     const username = this.tokenResolver.resolveSoftruckUsername(base);
-    this.logger.log(`${baseTag(base)} SOFTRUCK username resolved`);
     return username;
   }
 
   getSoftruckPassword(): string {
     const base = this.getBaseOrigin();
     const password = this.tokenResolver.resolveSoftruckPassword(base);
-    this.logger.log(`${baseTag(base)} SOFTRUCK password resolved`);
     return password;
   }
 
   getSoftruckPublicKey(): string {
     const base = this.getBaseOrigin();
     const key = this.tokenResolver.resolveSoftruckPublicKey(base);
-    this.logger.log(`${baseTag(base)} SOFTRUCK public key resolved`);
     return key;
   }
 
   getClubgasToken(): string {
     const base = this.getBaseOrigin();
     const token = this.tokenResolver.resolveClubgasToken(base);
-    this.logger.log(`${baseTag(base)} CLUBGAS token resolved`);
     return token;
   }
 
   getM7Token(): string {
     const base = this.getBaseOrigin();
     const token = this.tokenResolver.resolveM7Token(base);
-    this.logger.log(`${baseTag(base)} M7 token resolved`);
     return token;
   }
 
   getM7Codigo(): string {
     const base = this.getBaseOrigin();
     const codigo = this.tokenResolver.resolveM7Codigo(base);
-    this.logger.log(`${baseTag(base)} M7 Codigo resolved`);
     return codigo;
   }
 
   getApiSecretAlloyal(): string {
     const base = this.getBaseOrigin();
     const secret = this.tokenResolver.resolveApiSecretAlloyal(base);
-    this.logger.log(`${baseTag(base)} API Secret Alloyal resolved`);
     return secret;
   }
 
   getAlloyalBusinessId(): string {
     const base = this.getBaseOrigin();
     const businessId = this.tokenResolver.resolveAlloyalBusinessId(base);
-    this.logger.log(`${baseTag(base)} Alloyal Business ID resolved`);
     return businessId;
   }
 
   getAlloyalBusinessCnpj(): string {
     const base = this.getBaseOrigin();
     const businessCnpj = this.tokenResolver.resolveAlloyalBusinessCnpj(base);
-    this.logger.log(`${baseTag(base)} Alloyal Business CNPJ resolved`);
     return businessCnpj;
   }
 }

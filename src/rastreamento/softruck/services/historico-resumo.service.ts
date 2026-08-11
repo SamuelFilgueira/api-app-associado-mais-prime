@@ -53,18 +53,10 @@ export class HistoricoResumoService {
   ): Promise<HistoricoResumoResponseDto> {
     this.validarPeriodo(dataInicial, dataFinal);
 
-    this.logger.log(
-      `[${baseOrigin}] obterResumo chassi=${chassi} período=${dataInicial}→${dataFinal}`,
-    );
-
     const { vehicleData, deviceData } =
       await this.softruck.resolveVehicleAndDevice(chassi, baseOrigin, publicKey);
 
     const accs = gerarListaAcc(dataInicial, dataFinal);
-
-    this.logger.log(
-      `[${baseOrigin}] Consultando by-keys para ${accs.length} dia(s) — vehicleId=${vehicleData.id} deviceId=${deviceData.deviceId}`,
-    );
 
     // ── Passo 1: busca by-keys para todos os dias ──────────────
     const byKeysResultados = await processarComConcorrencia(
@@ -85,10 +77,6 @@ export class HistoricoResumoService {
       (r): r is SoftruckByKeysApiResponse => !!r?.data?.id,
     );
 
-    this.logger.log(
-      `[${baseOrigin}] ${diasComDados.length} dia(s) com dados de ${accs.length} consultado(s)`,
-    );
-
     // ── Passo 3: mapeia segmentos por dia ─────────────────────
     const dias: DiaResumoDto[] = [];
 
@@ -104,13 +92,6 @@ export class HistoricoResumoService {
     dias.sort((a, b) => a.acc - b.acc);
 
     const summary = calcularResumoSummary(dias);
-
-    this.logger.log(
-      `[${baseOrigin}] resumo concluído: ${dias.length} dia(s), ` +
-        `${summary.totalSegmentos} segmento(s), ` +
-        `${summary.distanciaTotalMetros}m, ` +
-        `${summary.duracaoTotalSegundos}s`,
-    );
 
     const vehicle: VehicleInfoDto = {
       chassi,

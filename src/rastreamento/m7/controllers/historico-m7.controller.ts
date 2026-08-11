@@ -46,10 +46,6 @@ export class HistoricoM7Controller {
     const user = req.user;
     const baseOrigin = this.baseContextService.getBaseOrigin();
 
-    this.logger.log(
-      `[${baseOrigin}] gerarPdf M7 solicitado | cnpj=${query.cnpj} chassi=${query.chassi} dataInicial=${query.dataInicial} dataFinal=${query.dataFinal}`,
-    );
-
     const pdfBuffer = await this.historicoM7Service.gerarPdf(
       query.cnpj,
       query.chassi,
@@ -92,10 +88,6 @@ export class HistoricoM7Controller {
     const user = req.user;
     const baseOrigin = this.baseContextService.getBaseOrigin();
 
-    this.logger.log(
-      `[${baseOrigin}] gerarPdfV2 M7 solicitado | cnpj=${query.cnpj} chassi=${query.chassi} dataInicial=${query.dataInicial} dataFinal=${query.dataFinal}`,
-    );
-
     const pdfBuffer = await this.historicoM7Service.gerarPdfV2(
       query.cnpj,
       query.chassi,
@@ -136,10 +128,6 @@ export class HistoricoM7Controller {
   ): Promise<void> {
     const user = req.user;
     const baseOrigin = this.baseContextService.getBaseOrigin();
-
-    this.logger.log(
-      `[${baseOrigin}] gerarPdfContestacao M7 solicitado | cnpj=${query.cnpj} chassi=${query.chassi} dataInicial=${query.dataInicial} dataFinal=${query.dataFinal}`,
-    );
 
     const pdfBuffer = await this.historicoM7Service.gerarPdfContestacao(
       query.cnpj,
@@ -183,10 +171,6 @@ export class HistoricoM7Controller {
   ): Promise<void> {
     const user = req.user;
     const baseOrigin = this.baseContextService.getBaseOrigin();
-
-    this.logger.log(
-      `[${baseOrigin}] gerarPdfContestacaoV2 M7 solicitado | cnpj=${query.cnpj} chassi=${query.chassi} dataInicial=${query.dataInicial} dataFinal=${query.dataFinal}`,
-    );
 
     const pdfBuffer = await this.historicoM7Service.gerarPdfContestacaoV2(
       query.cnpj,
