@@ -4,6 +4,6 @@ import { BeneficiosVeiculoService } from 'src/sga/beneficios-veiculo/services/be
 
 @Module({
   controllers: [BeneficiosVeiculoController],
-  providers: [BeneficiosVeiculoService]
+  providers: [BeneficiosVeiculoService],
 })
 export class BeneficiosVeiculoModule {}

@@ -35,7 +35,9 @@ export class ReinspectionPaymentsAdminController {
   listByUserVehicle(
     @Param('userVehicleId', ParseIntPipe) userVehicleId: number,
   ) {
-    return this.reinspectionPaymentsAdminService.listByUserVehicle(userVehicleId);
+    return this.reinspectionPaymentsAdminService.listByUserVehicle(
+      userVehicleId,
+    );
   }
 
   @Get(':id')

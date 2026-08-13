@@ -54,14 +54,18 @@ export class BeneficiosVeiculoService {
     const baseUrl = `https://api.hinova.com.br/api/sga/v2/produto-vinculado-veiculo/listar/${normalizedCodigoVeiculo}`;
 
     try {
-      const response = await this.sgaAuthService.executeRequestWithAuth<BeneficiosResponse>(baseOrigin, {
-        method: 'GET',
-        url: baseUrl,
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        validateStatus: () => true,
-      });
+      const response =
+        await this.sgaAuthService.executeRequestWithAuth<BeneficiosResponse>(
+          baseOrigin,
+          {
+            method: 'GET',
+            url: baseUrl,
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            validateStatus: () => true,
+          },
+        );
 
       if (response.status >= 400) {
         this.logger.error(

@@ -18,7 +18,11 @@ export class CartaoService {
     @InjectQueue(FUEL_ECONOMY_QUEUE) private readonly fuelEconomyQueue: Queue,
   ) {}
 
-  async gerarCartaoVirtual(userId: number, chassi: string, baseOrigin: BaseOrigin) {
+  async gerarCartaoVirtual(
+    userId: number,
+    chassi: string,
+    baseOrigin: BaseOrigin,
+  ) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user || !user.cpf) {
       throw new NotFoundException('CPF não encontrado para o usuário');
@@ -60,7 +64,10 @@ export class CartaoService {
       data: { status: 'EXPIRED' },
     });
 
-    const session = await this.fuelSessionService.createPendingSession(userId, 0);
+    const session = await this.fuelSessionService.createPendingSession(
+      userId,
+      0,
+    );
 
     const job = await this.fuelEconomyQueue.add(
       'check-fuel-economy',

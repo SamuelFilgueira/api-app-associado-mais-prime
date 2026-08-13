@@ -1,4 +1,11 @@
-import { Body, Controller, HttpCode, HttpStatus, Post, Req } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  HttpCode,
+  HttpStatus,
+  Post,
+  Req,
+} from '@nestjs/common';
 import { Request } from 'express';
 import { randomUUID } from 'crypto';
 import { AppVersionService } from 'src/app-version/services/app-version.service';
@@ -15,7 +22,11 @@ export class AppVersionController {
     @Body() payload: ValidateAppVersionDto,
     @Req()
     req: Request & {
-      user?: { userId?: number | string; sub?: number | string; id?: number | string };
+      user?: {
+        userId?: number | string;
+        sub?: number | string;
+        id?: number | string;
+      };
     },
   ): Promise<ValidateAppVersionResponseDto> {
     return this.appVersionService.validateVersion(payload, {
@@ -27,8 +38,12 @@ export class AppVersionController {
   }
 
   private resolveRequestId(req: Request): string {
-    const requestIdHeader = req.headers['x-request-id'] ?? req.headers['x-correlation-id'];
-    if (typeof requestIdHeader === 'string' && requestIdHeader.trim().length > 0) {
+    const requestIdHeader =
+      req.headers['x-request-id'] ?? req.headers['x-correlation-id'];
+    if (
+      typeof requestIdHeader === 'string' &&
+      requestIdHeader.trim().length > 0
+    ) {
       return requestIdHeader.trim();
     }
     return randomUUID();
@@ -36,7 +51,11 @@ export class AppVersionController {
 
   private resolveUserId(
     user:
-      | { userId?: number | string; sub?: number | string; id?: number | string }
+      | {
+          userId?: number | string;
+          sub?: number | string;
+          id?: number | string;
+        }
       | undefined,
   ): number | undefined {
     const value = user?.userId ?? user?.sub ?? user?.id;

@@ -236,10 +236,9 @@ export class FileUploadService {
 
   buildUrl(relativePath: string | null | undefined): string | null {
     if (!relativePath) return null;
-    const baseUrl = (process.env.APP_URL ?? 'https://app-dev.texvngroup.com.br').replace(
-      /\/+$/,
-      '',
-    );
+    const baseUrl = (
+      process.env.APP_URL ?? 'https://app-dev.texvngroup.com.br'
+    ).replace(/\/+$/, '');
     return `${baseUrl}/${relativePath}`;
   }
 

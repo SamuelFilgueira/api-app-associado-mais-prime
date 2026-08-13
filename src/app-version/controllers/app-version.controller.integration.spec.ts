@@ -23,7 +23,9 @@ describe('AppVersionController (integration)', () => {
     }).compile();
 
     app = moduleFixture.createNestApplication();
-    app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+    app.useGlobalPipes(
+      new ValidationPipe({ whitelist: true, transform: true }),
+    );
     await app.init();
   });
 
@@ -47,7 +49,8 @@ describe('AppVersionController (integration)', () => {
       forceUpdateEnabled: true,
       title: 'Atualizacao obrigatoria',
       message: 'Atualize para continuar',
-      storeUrl: 'https://play.google.com/store/apps/details?id=com.maisprime.vantagens',
+      storeUrl:
+        'https://play.google.com/store/apps/details?id=com.maisprime.vantagens',
       effectiveFrom: new Date(),
       effectiveUntil: null,
       isActive: true,
@@ -86,8 +89,10 @@ describe('AppVersionController (integration)', () => {
       minSupportedBuildNumber: null,
       forceUpdateEnabled: true,
       title: 'Atualizacao obrigatoria',
-      message: 'Uma nova versao do app esta disponivel. Atualize para continuar.',
-      storeUrl: 'https://play.google.com/store/apps/details?id=com.maisprime.vantagens',
+      message:
+        'Uma nova versao do app esta disponivel. Atualize para continuar.',
+      storeUrl:
+        'https://play.google.com/store/apps/details?id=com.maisprime.vantagens',
       effectiveFrom: new Date(),
       effectiveUntil: null,
       isActive: true,
@@ -110,8 +115,10 @@ describe('AppVersionController (integration)', () => {
     expect(response.body).toMatchObject({
       forceUpdate: true,
       title: 'Atualizacao obrigatoria',
-      message: 'Uma nova versao do app esta disponivel. Atualize para continuar.',
-      storeUrl: 'https://play.google.com/store/apps/details?id=com.maisprime.vantagens',
+      message:
+        'Uma nova versao do app esta disponivel. Atualize para continuar.',
+      storeUrl:
+        'https://play.google.com/store/apps/details?id=com.maisprime.vantagens',
       minSupportedVersion: '1.1.8',
       minSupportedRuntimeVersion: '1.1.8',
     });

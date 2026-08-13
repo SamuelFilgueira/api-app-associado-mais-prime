@@ -136,7 +136,9 @@ export class AssociadoService {
       data?.error?.some((msg: string) =>
         msg.includes('Associado não encontrado'),
       ) ||
-      !['ATIVO', 'INADIMPLENTE 20 DIAS', 'INADIMPLENTE'].includes(data?.descricao_situacao)
+      !['ATIVO', 'INADIMPLENTE 20 DIAS', 'INADIMPLENTE'].includes(
+        data?.descricao_situacao,
+      )
     ) {
       throw new BadRequestException('Cpf de associado inválido para cadastro');
     }
@@ -189,7 +191,7 @@ export class AssociadoService {
     try {
       const existing = await this.prisma.user.findFirst({ where: { cpf } });
       if (existing?.baseOrigin) {
-        return existing.baseOrigin as BaseOrigin;
+        return existing.baseOrigin;
       }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'erro desconhecido';
@@ -241,7 +243,9 @@ export class AssociadoService {
         validateStatus: () => true,
       });
     } catch (err: any) {
-      this.logger.error(`Erro ao consultar SGA para verificar situação: ${err?.message}`);
+      this.logger.error(
+        `Erro ao consultar SGA para verificar situação: ${err?.message}`,
+      );
       throw new InternalServerErrorException('Erro ao consultar SGA');
     }
 
@@ -250,7 +254,9 @@ export class AssociadoService {
     if (
       response.status >= 400 ||
       data?.mensagem === 'Não aceitável' ||
-      !['ATIVO', 'INADIMPLENTE 20 DIAS', 'INADIMPLENTE'].includes(data?.descricao)
+      !['ATIVO', 'INADIMPLENTE 20 DIAS', 'INADIMPLENTE'].includes(
+        data?.descricao,
+      )
     ) {
       throw new ForbiddenException(
         'Associado sem permissão para acessar a aplicação',

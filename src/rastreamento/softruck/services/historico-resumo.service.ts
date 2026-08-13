@@ -1,6 +1,8 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { BaseOrigin } from 'src/shared/token-resolver.service';
 import { RastreamentoSoftruck } from 'src/rastreamento/softruck/services/rastreamento-softruck.service';
+import { HistoricoProviderResolverService } from 'src/rastreamento/services/historico-provider-resolver.service';
+import { LogicaHistoricoService } from 'src/rastreamento/logica/services/logica-historico.service';
 import {
   DiaResumoDto,
   HistoricoResumoResponseDto,
@@ -27,7 +29,11 @@ const MAX_CONCORRENCIA = 3;
 export class HistoricoResumoService {
   private readonly logger = new Logger(HistoricoResumoService.name);
 
-  constructor(private readonly softruck: RastreamentoSoftruck) {}
+  constructor(
+    private readonly softruck: RastreamentoSoftruck,
+    private readonly providerResolver: HistoricoProviderResolverService,
+    private readonly logicaHistorico: LogicaHistoricoService,
+  ) {}
 
   /**
    * Retorna o histórico de trajetórias agrupado por data para o período informado.
@@ -53,8 +59,26 @@ export class HistoricoResumoService {
   ): Promise<HistoricoResumoResponseDto> {
     this.validarPeriodo(dataInicial, dataFinal);
 
-    const { vehicleData, deviceData } =
-      await this.softruck.resolveVehicleAndDevice(chassi, baseOrigin, publicKey);
+    // Veículos da Lógica caem neste mesmo endpoint (o app publicado não
+    // diferencia provider): o resolver detecta e delega, mantendo o contrato
+    // de resposta Softruck. Caminho Softruck segue inalterado.
+    const resolucao = await this.providerResolver.resolve(
+      chassi,
+      baseOrigin,
+      publicKey,
+    );
+
+    if (resolucao.provider === 'logica') {
+      return this.logicaHistorico.obterResumo(
+        chassi,
+        resolucao.veiculo,
+        dataInicial,
+        dataFinal,
+        baseOrigin,
+      );
+    }
+
+    const { vehicleData, deviceData } = resolucao;
 
     const accs = gerarListaAcc(dataInicial, dataFinal);
 

@@ -237,8 +237,7 @@ export class AlloyalApiService {
    */
   async login(cpf: string, password: string): Promise<AlloyalSessionHeaders> {
     try {
-      const { apiSecret, baseOrigin } =
-        this.resolveAlloyalCredentials('login');
+      const { apiSecret, baseOrigin } = this.resolveAlloyalCredentials('login');
       const body = {
         cpf,
         password,

@@ -47,7 +47,9 @@ describe('tenant.config', () => {
 
     it('reproduz exatamente os nomes de env do mapa literal anterior', () => {
       // Base principal — envs sem sufixo
-      expect(tenantEnvName('MAIS_PRIME', 'sgaUser')).toBe('USER_SGA_MAIS_PRIME');
+      expect(tenantEnvName('MAIS_PRIME', 'sgaUser')).toBe(
+        'USER_SGA_MAIS_PRIME',
+      );
       expect(tenantEnvName('MAIS_PRIME', 'sgaPassword')).toBe(
         'PASSWORD_SGA_MAIS_PRIME',
       );

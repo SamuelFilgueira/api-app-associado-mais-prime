@@ -1,4 +1,8 @@
-import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  InternalServerErrorException,
+  Logger,
+} from '@nestjs/common';
 import axios, { AxiosInstance } from 'axios';
 import { Agent as HttpAgent } from 'http';
 import { Agent as HttpsAgent } from 'https';
@@ -34,6 +38,19 @@ const TOKEN_TTL_BUFFER_MS = 60_000; // 1 minuto antes de expirar
 const SOFTRUCK_REV_GEOCODE_TIMEOUT_MS = Number(
   process.env.SOFTRUCK_REV_GEOCODE_TIMEOUT_MS ?? 900,
 );
+
+/**
+ * Lançada quando o chassi não existe na base Softruck.
+ * Mantém mensagem e status idênticos à exceção genérica anterior (a resposta
+ * HTTP externa não muda); existe como classe própria apenas para o
+ * HistoricoProviderResolverService distinguir "chassi não é Softruck" de
+ * falhas reais da API antes de sondar a Lógica.
+ */
+export class SoftruckVehicleNotFoundException extends InternalServerErrorException {
+  constructor() {
+    super('Veículo não encontrado na base Softruck');
+  }
+}
 
 @Injectable()
 export class RastreamentoSoftruck {
@@ -336,8 +353,9 @@ export class RastreamentoSoftruck {
       }
 
       const payload = this.decodeJwt(token);
-      const expiresAt =
-        payload?.exp ? payload.exp * 1000 : Date.now() + CACHE_TTL;
+      const expiresAt = payload?.exp
+        ? payload.exp * 1000
+        : Date.now() + CACHE_TTL;
 
       this.softruckTokenByBase.set(baseOrigin, { token, expiresAt });
       this.logger.log(
@@ -390,7 +408,12 @@ export class RastreamentoSoftruck {
     baseOrigin: BaseOrigin,
     publicKey: string,
     tokenOverride?: string,
-  ): Promise<{ id: string; plate: string; brandName: string; modelName: string }> {
+  ): Promise<{
+    id: string;
+    plate: string;
+    brandName: string;
+    modelName: string;
+  }> {
     const cached = this.getCached(this.vehicleCache, chassi);
     if (cached) {
       return cached;
@@ -403,7 +426,11 @@ export class RastreamentoSoftruck {
         () =>
           this.axiosInstance.get<SoftruckVehicleResponse>(url, {
             params,
-            headers: this.getRequestHeaders(baseOrigin, publicKey, tokenOverride),
+            headers: this.getRequestHeaders(
+              baseOrigin,
+              publicKey,
+              tokenOverride,
+            ),
             timeout: SOFTRUCK_REQUEST_TIMEOUT,
           }),
         baseOrigin,
@@ -411,9 +438,7 @@ export class RastreamentoSoftruck {
       );
 
       if (!response.data?.data?.length) {
-        throw new InternalServerErrorException(
-          'Veículo não encontrado na base Softruck',
-        );
+        throw new SoftruckVehicleNotFoundException();
       }
 
       const vehicleData = response.data.data[0];
@@ -429,7 +454,9 @@ export class RastreamentoSoftruck {
     } catch (error) {
       if (error instanceof InternalServerErrorException) throw error;
       this.logger.error(`Erro ao obter vehicle_id: ${this.formatError(error)}`);
-      throw new InternalServerErrorException('Erro ao buscar veículo pelo chassi');
+      throw new InternalServerErrorException(
+        'Erro ao buscar veículo pelo chassi',
+      );
     }
   }
 
@@ -452,7 +479,11 @@ export class RastreamentoSoftruck {
       const response = await this.executarComReautenticacao(
         () =>
           this.axiosInstance.get<SoftruckDeviceAssociationResponse>(url, {
-            headers: this.getRequestHeaders(baseOrigin, publicKey, tokenOverride),
+            headers: this.getRequestHeaders(
+              baseOrigin,
+              publicKey,
+              tokenOverride,
+            ),
             timeout: SOFTRUCK_REQUEST_TIMEOUT,
           }),
         baseOrigin,
@@ -514,9 +545,15 @@ export class RastreamentoSoftruck {
       const response = await this.executarComReautenticacao(
         () =>
           this.axiosInstance.get<SoftruckTrackingResponse>(
-            this.buildSoftruckUrl(`/vehicles/${vehicleId}/tracking/${deviceId}`),
+            this.buildSoftruckUrl(
+              `/vehicles/${vehicleId}/tracking/${deviceId}`,
+            ),
             {
-              headers: this.getRequestHeaders(baseOrigin, publicKey, tokenOverride),
+              headers: this.getRequestHeaders(
+                baseOrigin,
+                publicKey,
+                tokenOverride,
+              ),
               timeout: SOFTRUCK_REQUEST_TIMEOUT,
             },
           ),
@@ -548,7 +585,12 @@ export class RastreamentoSoftruck {
     baseOrigin: BaseOrigin,
     publicKey: string,
   ): Promise<{
-    vehicleData: { id: string; plate: string; brandName: string; modelName: string };
+    vehicleData: {
+      id: string;
+      plate: string;
+      brandName: string;
+      modelName: string;
+    };
     deviceData: { vehicleId: string; deviceId: string };
   }> {
     const storedToken = this.softruckTokenByBase.get(baseOrigin);
@@ -561,8 +603,16 @@ export class RastreamentoSoftruck {
       await this.autenticarSoftruck(baseOrigin, publicKey);
     }
 
-    const vehicleData = await this.obterVehicleId(chassi, baseOrigin, publicKey);
-    const deviceData = await this.obterDeviceId(vehicleData.id, baseOrigin, publicKey);
+    const vehicleData = await this.obterVehicleId(
+      chassi,
+      baseOrigin,
+      publicKey,
+    );
+    const deviceData = await this.obterDeviceId(
+      vehicleData.id,
+      baseOrigin,
+      publicKey,
+    );
     return { vehicleData, deviceData };
   }
 
@@ -575,7 +625,9 @@ export class RastreamentoSoftruck {
     publicKey: string,
   ): Promise<SoftruckByKeysApiResponse | null> {
     try {
-      const url = this.buildSoftruckUrl(`/vehicles/${vehicleId}/trajectories/by-keys`);
+      const url = this.buildSoftruckUrl(
+        `/vehicles/${vehicleId}/trajectories/by-keys`,
+      );
       const params = {
         'filters[acc][eq]': acc,
         'filters[did][eq]': deviceId,
@@ -611,7 +663,9 @@ export class RastreamentoSoftruck {
     publicKey: string,
   ): Promise<SoftruckGeomFeatureCollection | null> {
     try {
-      const url = this.buildSoftruckUrl(`/vehicles/${vehicleId}/trajectories/geom`);
+      const url = this.buildSoftruckUrl(
+        `/vehicles/${vehicleId}/trajectories/geom`,
+      );
       const params = {
         'filters[acc][eq]': acc,
         'filters[did][eq]': deviceId,
@@ -709,4 +763,3 @@ export class RastreamentoSoftruck {
 
 // Re-export public types for convenience
 export type { UltimaPosicaoSoftruckResponse } from 'src/rastreamento/softruck/dto/ultima-posicao.dto';
-

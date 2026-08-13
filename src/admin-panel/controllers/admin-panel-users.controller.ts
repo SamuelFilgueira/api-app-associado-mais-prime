@@ -20,7 +20,9 @@ import { UpdateAdminPanelUserDto } from 'src/admin-panel/dto/update-admin-panel-
 @UseGuards(JwtAuthGuard, AdminRoleGuard)
 @Controller('admin-panel/users')
 export class AdminPanelUsersController {
-  constructor(private readonly adminPanelUsersService: AdminPanelUsersService) {}
+  constructor(
+    private readonly adminPanelUsersService: AdminPanelUsersService,
+  ) {}
 
   @Post()
   @HttpCode(HttpStatus.CREATED)

@@ -89,12 +89,8 @@ export function mapearDiaItems(
   // ── Merge e ordenação cronológica ─────────────────────────
   const items: DiaResumoItemDto[] = [...trajetos, ...eventos];
   items.sort((a, b) => {
-    const tsA: string = isTrajeto(a)
-      ? a.inicio.act
-      : (a as DiaItemEventoDto).timestamp;
-    const tsB: string = isTrajeto(b)
-      ? b.inicio.act
-      : (b as DiaItemEventoDto).timestamp;
+    const tsA: string = isTrajeto(a) ? a.inicio.act : a.timestamp;
+    const tsB: string = isTrajeto(b) ? b.inicio.act : b.timestamp;
     return tsA < tsB ? -1 : tsA > tsB ? 1 : 0;
   });
 

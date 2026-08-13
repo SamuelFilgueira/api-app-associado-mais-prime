@@ -14,17 +14,18 @@ export interface M7ConsultaVeiculoResponse {
   };
 }
 
-
-export interface M7ConsultaMonitoradoResponse{
-  monitorados: [ { 
-    codigo: number;
-    identificador: string;
-    data_gps: string;
-    data_sistema: string;
-    latitude: number | string;
-    longitude: number | string;
-    endereco: string;
-  } ]
+export interface M7ConsultaMonitoradoResponse {
+  monitorados: [
+    {
+      codigo: number;
+      identificador: string;
+      data_gps: string;
+      data_sistema: string;
+      latitude: number | string;
+      longitude: number | string;
+      endereco: string;
+    },
+  ];
 }
 
 /** Item bruto retornado pelo GET /api/monitorado/{codigo}/trajetos */

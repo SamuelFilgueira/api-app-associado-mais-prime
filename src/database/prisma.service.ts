@@ -17,7 +17,9 @@ const PRISMA_POOL_TIMEOUT = Number.isFinite(PRISMA_POOL_TIMEOUT_RAW)
   ? Math.max(1, Math.trunc(PRISMA_POOL_TIMEOUT_RAW))
   : 30;
 
-function montarDatabaseUrlComPool(databaseUrl: string | undefined): string | undefined {
+function montarDatabaseUrlComPool(
+  databaseUrl: string | undefined,
+): string | undefined {
   if (!databaseUrl) return undefined;
 
   try {

@@ -1,6 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import axios, { AxiosRequestConfig, AxiosResponse } from 'axios';
-import { BaseOrigin, SgaAuthCredentials, TokenResolverService } from './token-resolver.service';
+import {
+  BaseOrigin,
+  SgaAuthCredentials,
+  TokenResolverService,
+} from './token-resolver.service';
 import { baseTag } from './log.util';
 
 interface SgaAuthResponse {
@@ -16,7 +20,10 @@ export class SgaAuthService {
 
   constructor(private readonly tokenResolver: TokenResolverService) {}
 
-  async getUserToken(baseOrigin: BaseOrigin, forceRefresh = false): Promise<string> {
+  async getUserToken(
+    baseOrigin: BaseOrigin,
+    forceRefresh = false,
+  ): Promise<string> {
     if (!forceRefresh) {
       const cached = this.userTokenCache.get(baseOrigin);
       if (cached) {
@@ -57,7 +64,9 @@ export class SgaAuthService {
       return response;
     }
 
-    this.logger.warn(`${baseTag(baseOrigin)} token_usuario inválido. Reautenticando automaticamente.`);
+    this.logger.warn(
+      `${baseTag(baseOrigin)} token_usuario inválido. Reautenticando automaticamente.`,
+    );
     this.invalidateUserToken(baseOrigin);
     tokenUsuario = await this.getUserToken(baseOrigin, true);
     response = await makeRequest(tokenUsuario);

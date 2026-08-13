@@ -1,11 +1,16 @@
-import { Injectable, InternalServerErrorException, Logger, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  InternalServerErrorException,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import axios from 'axios';
-import { maskSecret } from 'src/shared/log.util';
 import {
   IRastreamentoProvider,
   RastreamentoBaseContext,
   RastreamentoCandidatoResult,
 } from 'src/rastreamento/providers/rastreamento-provider.interface';
+import { LogicaAuthService } from 'src/rastreamento/logica/services/logica-auth.service';
 
 /** Timeout padrão para chamadas HTTP à API Lógica Soluções (em ms) */
 const LOGICA_REQUEST_TIMEOUT = 15_000;
@@ -29,13 +34,6 @@ export interface UltimaPosicaoLogicaResponse {
   hodometro: number;
   velocidade: number;
   voltagem: number;
-}
-
-interface LogicaAuthResponse {
-  erro?: boolean;
-  logado?: boolean;
-  token?: string;
-  mensagem?: string;
 }
 
 interface LogicaUltimaPosicaoPayload {
@@ -74,8 +72,7 @@ export class LogicaRastreamentoService implements IRastreamentoProvider {
   private readonly logger = new Logger(LogicaRastreamentoService.name);
   readonly providerName = 'logica' as const;
 
-  /** Cache em memória para token dinâmico por base — gerenciado no escopo da instância */
-  private readonly tokenCache = new Map<string, string>();
+  constructor(private readonly logicaAuth: LogicaAuthService) {}
 
   // -------------------------------------------------------------------------
   // IRastreamentoProvider
@@ -108,19 +105,18 @@ export class LogicaRastreamentoService implements IRastreamentoProvider {
     token?: string,
     context?: { baseOrigin?: string; tokenKey?: string },
   ): Promise<UltimaPosicaoLogicaResponse> {
-    const cacheKey = context?.baseOrigin ?? 'default';
     const normalizedChassi = chassi?.trim();
 
     if (!normalizedChassi) {
-      throw new NotFoundException('Chassi não informado para consulta na Lógica');
+      throw new NotFoundException(
+        'Chassi não informado para consulta na Lógica',
+      );
     }
 
-    const usedToken =
-      this.tokenCache.get(cacheKey) ?? token ?? process.env.LOGICA_TOKEN;
-    if (!usedToken) {
-      this.logger.error('LOGICA token não fornecido nem presente em env');
-      throw new InternalServerErrorException('LOGICA_TOKEN não definido nas variáveis de ambiente');
-    }
+    const usedToken = this.logicaAuth.obterTokenInicial(
+      context?.baseOrigin,
+      token,
+    );
 
     let data: unknown;
     try {
@@ -138,17 +134,25 @@ export class LogicaRastreamentoService implements IRastreamentoProvider {
       this.logger.warn(
         `Token da Lógica inválido/expirado para baseOrigin=${context?.baseOrigin ?? 'N/A'}. Tentando nova autenticação.`,
       );
-      const refreshedToken = await this.autenticar(context?.baseOrigin);
+      const refreshedToken = await this.logicaAuth.renovarToken(
+        context?.baseOrigin,
+      );
       data = await this.consultarListaVeiculo(normalizedChassi, refreshedToken);
     }
 
     const parsedData = data as LogicaListaResponsePayload;
 
-    if (!parsedData.lista || !Array.isArray(parsedData.lista) || parsedData.lista.length === 0) {
+    if (
+      !parsedData.lista ||
+      !Array.isArray(parsedData.lista) ||
+      parsedData.lista.length === 0
+    ) {
       this.logger.warn(
         `Resposta sem lista válida da Lógica para chassi=${normalizedChassi}: ${JSON.stringify(parsedData)}`,
       );
-      throw new NotFoundException('Nenhum veículo encontrado para o chassi informado');
+      throw new NotFoundException(
+        'Nenhum veículo encontrado para o chassi informado',
+      );
     }
 
     const item = parsedData.lista[0];
@@ -164,7 +168,9 @@ export class LogicaRastreamentoService implements IRastreamentoProvider {
       alertaIgnicao: item.alertaIgnicao,
       cidade: ultimaPosicao.cidade,
       estado: ultimaPosicao.estado,
-      endereco: ultimaPosicao.endereco + (ultimaPosicao.numero ? `, ${ultimaPosicao.numero}` : ''),
+      endereco:
+        ultimaPosicao.endereco +
+        (ultimaPosicao.numero ? `, ${ultimaPosicao.numero}` : ''),
       bairro: ultimaPosicao.bairro,
       ultimaTrasmissao: ultimaPosicao.ultimaTrasmissao,
       latitude: ultimaPosicao.latitude,
@@ -181,7 +187,10 @@ export class LogicaRastreamentoService implements IRastreamentoProvider {
   // Internos
   // -------------------------------------------------------------------------
 
-  private async consultarListaVeiculo(chassi: string, token: string): Promise<unknown> {
+  private async consultarListaVeiculo(
+    chassi: string,
+    token: string,
+  ): Promise<unknown> {
     const params = new URLSearchParams();
     params.append('chassi', chassi);
     params.append('token', token);
@@ -194,49 +203,13 @@ export class LogicaRastreamentoService implements IRastreamentoProvider {
     return response.data;
   }
 
-  private async autenticar(baseOrigin?: string): Promise<string> {
-    const apiNumber = process.env.LOGICA_API_NUMBER;
-    if (!apiNumber) {
-      throw new InternalServerErrorException('LOGICA_API_NUMBER não definido nas variáveis de ambiente');
-    }
-
-    const params = new URLSearchParams();
-    params.append('usuario', apiNumber);
-    params.append('senha', apiNumber);
-
-    const response = await axios.post<LogicaAuthResponse>(
-      this.buildUrl('/autentica'),
-      params,
-      {
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        timeout: LOGICA_REQUEST_TIMEOUT,
-      },
-    );
-
-    const authData = response.data;
-    const refreshedToken = authData?.token;
-
-    if (!refreshedToken || authData?.erro === true || authData?.logado === false) {
-      this.logger.error(
-        `Falha ao autenticar na Lógica baseOrigin=${baseOrigin ?? 'N/A'} status=${response.status} body=${JSON.stringify(authData)}`,
-      );
-      throw new InternalServerErrorException('Falha ao autenticar na API Lógica para renovação de token');
-    }
-
-    const cacheKey = baseOrigin ?? 'default';
-    this.tokenCache.set(cacheKey, refreshedToken);
-    this.logger.log(
-      `Token da Lógica renovado com sucesso baseOrigin=${baseOrigin ?? 'N/A'} token=${maskSecret(refreshedToken)}`,
-    );
-
-    return refreshedToken;
-  }
-
   private buildUrl(path: string): string {
     const baseUrl = process.env.LOGICA_API_BASE_URL;
 
     if (!baseUrl) {
-      throw new InternalServerErrorException('LOGICA_API_BASE_URL não definida nas variáveis de ambiente');
+      throw new InternalServerErrorException(
+        'LOGICA_API_BASE_URL não definida nas variáveis de ambiente',
+      );
     }
 
     const normalized = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
@@ -253,7 +226,10 @@ export class LogicaRastreamentoService implements IRastreamentoProvider {
       typeof value.mensagem === 'string' ? value.mensagem.toLowerCase() : '';
 
     if (logado === false || erro === true) return true;
-    if (mensagem.includes('token') && (mensagem.includes('inv') || mensagem.includes('expir'))) {
+    if (
+      mensagem.includes('token') &&
+      (mensagem.includes('inv') || mensagem.includes('expir'))
+    ) {
       return true;
     }
 
@@ -271,8 +247,12 @@ export class LogicaRastreamentoService implements IRastreamentoProvider {
     if (brDateMatch) {
       const [, day, month, year, hour, minute, second] = brDateMatch;
       const parsed = new Date(
-        Number(year), Number(month) - 1, Number(day),
-        Number(hour), Number(minute), Number(second ?? '0'),
+        Number(year),
+        Number(month) - 1,
+        Number(day),
+        Number(hour),
+        Number(minute),
+        Number(second ?? '0'),
       ).getTime();
       if (!Number.isNaN(parsed)) return parsed;
     }

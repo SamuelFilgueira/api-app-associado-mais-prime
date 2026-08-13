@@ -1,4 +1,8 @@
-import { clampInt, sanitizeVersionString, CLAMP } from '../utils/analytics-sanitizer.util';
+import {
+  clampInt,
+  sanitizeVersionString,
+  CLAMP,
+} from '../utils/analytics-sanitizer.util';
 
 describe('analytics-sanitizer.util', () => {
   describe('clampInt', () => {

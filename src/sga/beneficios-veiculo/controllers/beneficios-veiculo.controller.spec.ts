@@ -21,7 +21,9 @@ describe('BeneficiosVeiculoController', () => {
       ],
     }).compile();
 
-    controller = module.get<BeneficiosVeiculoController>(BeneficiosVeiculoController);
+    controller = module.get<BeneficiosVeiculoController>(
+      BeneficiosVeiculoController,
+    );
   });
 
   it('should be defined', () => {

@@ -104,7 +104,7 @@ function gerarLinhasPosicoes(posicoes: TrajetoPosicao[]): string {
         <tr style="${bgStyle}">
           <td>${escapeHtml(formatarDataHora(ponto.data))}</td>
           <td>${escapeHtml(String(ponto.velocidade ?? 0))}</td>
-          <td>${escapeHtml(String(ponto.ignicao ?? 'N/D'))}</td>
+          <td>${escapeHtml(ponto.ignicao?.trim() || 'N/D')}</td>
           <td style="white-space:pre-line; font-family:monospace;">${escapeHtml(
             formatarPosicao(Number(ponto.latitude), Number(ponto.longitude)),
           )}</td>

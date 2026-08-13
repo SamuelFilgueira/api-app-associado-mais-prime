@@ -25,12 +25,20 @@ export interface AppVersionValidationLogInput {
 @Injectable()
 export class AppVersionPolicyRepository {
   private readonly cache = new Map<'android' | 'ios', CacheEntry>();
-  private readonly cacheTtlMs = this.resolveNumberEnv('APP_VERSION_POLICY_CACHE_TTL_MS', 5_000);
-  private readonly queryTimeoutMs = this.resolveNumberEnv('APP_VERSION_POLICY_QUERY_TIMEOUT_MS', 1_500);
+  private readonly cacheTtlMs = this.resolveNumberEnv(
+    'APP_VERSION_POLICY_CACHE_TTL_MS',
+    5_000,
+  );
+  private readonly queryTimeoutMs = this.resolveNumberEnv(
+    'APP_VERSION_POLICY_QUERY_TIMEOUT_MS',
+    1_500,
+  );
 
   constructor(private readonly prisma: PrismaService) {}
 
-  async getActivePolicy(platform: 'android' | 'ios'): Promise<AppVersionPolicy | null> {
+  async getActivePolicy(
+    platform: 'android' | 'ios',
+  ): Promise<AppVersionPolicy | null> {
     const nowMs = Date.now();
     const cached = this.cache.get(platform);
     if (cached && cached.expiresAt > nowMs) {
@@ -58,7 +66,9 @@ export class AppVersionPolicyRepository {
     return value;
   }
 
-  async logValidationDecision(input: AppVersionValidationLogInput): Promise<void> {
+  async logValidationDecision(
+    input: AppVersionValidationLogInput,
+  ): Promise<void> {
     const data: Prisma.AppVersionValidationLogUncheckedCreateInput = {
       requestId: input.requestId,
       platform: input.platform,

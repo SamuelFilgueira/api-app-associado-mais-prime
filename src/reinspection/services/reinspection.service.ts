@@ -37,16 +37,32 @@ export class ReinspectionService {
     private readonly sgaService: SgaService,
   ) {}
 
-  private log(debugId: string | undefined, message: string, meta?: Record<string, unknown>) {
+  private log(
+    debugId: string | undefined,
+    message: string,
+    meta?: Record<string, unknown>,
+  ) {
     this.logger.log(debugLog(ReinspectionService.name, message, debugId, meta));
   }
 
-  private warn(debugId: string | undefined, message: string, meta?: Record<string, unknown>) {
-    this.logger.warn(debugLog(ReinspectionService.name, message, debugId, meta));
+  private warn(
+    debugId: string | undefined,
+    message: string,
+    meta?: Record<string, unknown>,
+  ) {
+    this.logger.warn(
+      debugLog(ReinspectionService.name, message, debugId, meta),
+    );
   }
 
-  private error(debugId: string | undefined, message: string, meta?: Record<string, unknown>) {
-    this.logger.error(debugLog(ReinspectionService.name, message, debugId, meta));
+  private error(
+    debugId: string | undefined,
+    message: string,
+    meta?: Record<string, unknown>,
+  ) {
+    this.logger.error(
+      debugLog(ReinspectionService.name, message, debugId, meta),
+    );
   }
 
   async create(dto: CreateReinspectionDto, _userId: unknown, debugId?: string) {
@@ -226,7 +242,8 @@ export class ReinspectionService {
     } catch (emailError) {
       this.error(debugId, 'Falha ao enviar e-mail de revistoria', {
         reinspectionId,
-        error: emailError instanceof Error ? emailError.message : String(emailError),
+        error:
+          emailError instanceof Error ? emailError.message : String(emailError),
       });
     }
 
@@ -268,10 +285,7 @@ export class ReinspectionService {
     }));
   }
 
-  async upsertTemplatePhoto(
-    dto: UpsertTemplatePhotoDto,
-    file: any,
-  ) {
+  async upsertTemplatePhoto(dto: UpsertTemplatePhotoDto, file: any) {
     if (!file) {
       throw new BadRequestException('Foto do template é obrigatória');
     }
@@ -619,7 +633,8 @@ export class ReinspectionService {
         reinspectionId: updated.id,
         chassi: vehicle.chassi,
         plate: vehicle.plate ?? 'N/A',
-        error: emailError instanceof Error ? emailError.message : String(emailError),
+        error:
+          emailError instanceof Error ? emailError.message : String(emailError),
       });
     }
 
@@ -648,17 +663,21 @@ export class ReinspectionService {
     debugId?: string,
   ) {
     if (!plate) {
-      this.warn(debugId, 'Boleto de reativação não criado: placa não disponível', {
-        trigger,
-        reinspectionId,
-        userVehicleId,
-      });
+      this.warn(
+        debugId,
+        'Boleto de reativação não criado: placa não disponível',
+        {
+          trigger,
+          reinspectionId,
+          userVehicleId,
+        },
+      );
       return;
     }
 
     const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
-    const existingOpenPayment =
-      await this.prisma.reinspectionPayment.findFirst({
+    const existingOpenPayment = await this.prisma.reinspectionPayment.findFirst(
+      {
         where: {
           userVehicleId,
           pago: false,
@@ -670,28 +689,40 @@ export class ReinspectionService {
           nossoNumero: true,
           situacaoBoleto: true,
         },
-      });
+      },
+    );
 
     if (existingOpenPayment) {
-      this.log(debugId, 'Boleto de reativação já existente; nova criação ignorada', {
-        trigger,
-        reinspectionId,
-        userVehicleId,
-        paymentId: existingOpenPayment.id,
-        nossoNumero: existingOpenPayment.nossoNumero ?? 'N/A',
-        situacao: existingOpenPayment.situacaoBoleto,
-      });
+      this.log(
+        debugId,
+        'Boleto de reativação já existente; nova criação ignorada',
+        {
+          trigger,
+          reinspectionId,
+          userVehicleId,
+          paymentId: existingOpenPayment.id,
+          nossoNumero: existingOpenPayment.nossoNumero ?? 'N/A',
+          situacao: existingOpenPayment.situacaoBoleto,
+        },
+      );
       return;
     }
 
     try {
-      await this.sgaService.criarBoletoReativacao(userVehicleId, plate, debugId);
+      await this.sgaService.criarBoletoReativacao(
+        userVehicleId,
+        plate,
+        debugId,
+      );
     } catch (boletoError) {
       this.error(debugId, 'Falha ao criar boleto de reativação', {
         trigger,
         reinspectionId,
         userVehicleId,
-        error: boletoError instanceof Error ? boletoError.message : String(boletoError),
+        error:
+          boletoError instanceof Error
+            ? boletoError.message
+            : String(boletoError),
       });
     }
   }
@@ -752,8 +783,7 @@ export class ReinspectionService {
 
     const hinovaUrl = `https://api.hinova.com.br/api/sga/v2/veiculo/foto/cadastrar`;
     const baseOrigin =
-      (reinspection.userVehicle?.user?.baseOrigin as BaseOrigin | null) ??
-      TENANT.defaultBase;
+      reinspection.userVehicle?.user?.baseOrigin ?? TENANT.defaultBase;
 
     const response = await this.sgaAuthService.executeRequestWithAuth(
       baseOrigin,
@@ -1034,7 +1064,8 @@ export class ReinspectionService {
     } catch (emailError) {
       this.error(debugId, 'Falha ao enviar e-mail de foto reenviada', {
         photoId,
-        error: emailError instanceof Error ? emailError.message : String(emailError),
+        error:
+          emailError instanceof Error ? emailError.message : String(emailError),
       });
     }
 

@@ -16,10 +16,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
  */
 @Module({
   imports: [EconomiaModule, NotificationsModule],
-  providers: [
-    FuelSessionService,
-    FuelEconomyProcessor,
-  ],
+  providers: [FuelSessionService, FuelEconomyProcessor],
   exports: [FuelSessionService],
 })
 export class FuelSessionModule {}

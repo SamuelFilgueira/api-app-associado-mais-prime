@@ -20,7 +20,7 @@ async function bootstrap() {
     validateEnvOrThrow();
   } catch (err) {
     const logger = new Logger('Bootstrap');
-    logger.error('App startup aborted due to missing env vars', err as any);
+    logger.error('App startup aborted due to missing env vars', err);
     process.exit(1);
   }
 

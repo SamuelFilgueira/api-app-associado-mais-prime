@@ -24,10 +24,7 @@ export class AuthController {
 
   @Post('login')
   async login(@Body() body: LoginDto) {
-    const user = await this.authService.validateUser(
-      body.cpf,
-      body.password,
-    );
+    const user = await this.authService.validateUser(body.cpf, body.password);
 
     if (!user) {
       throw new UnauthorizedException('Credenciais inválidas');
@@ -72,7 +69,10 @@ export class AuthController {
       throw new ForbiddenException('Endpoint de teste desabilitado.');
     }
     await this.mailService.sendPasswordReset(body.to, 'SenhaTest@123');
-    return { success: true, message: `E-mail de teste enviado para ${body.to} via Amazon SES.` };
+    return {
+      success: true,
+      message: `E-mail de teste enviado para ${body.to} via Amazon SES.`,
+    };
   }
   // ─────────────────────────────────────────────────────────────────────────
 }

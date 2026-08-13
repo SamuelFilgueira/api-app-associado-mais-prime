@@ -3,7 +3,10 @@ import {
   SoftruckGeomFeature,
   SoftruckGeomFeatureCollection,
 } from '../interfaces/softruck-trajectories.interface';
-import { HistoricoSegmentoDto, RouteSegment } from '../dto/historico-response.dto';
+import {
+  HistoricoSegmentoDto,
+  RouteSegment,
+} from '../dto/historico-response.dto';
 import { filterAndDeduplicateAlarms } from '../helpers/event-deduplicator.helper';
 import { simplifyRoutePoints } from '../helpers/route-simplifier.helper';
 import { buildRouteSegments } from '../helpers/trip-segmenter.helper';

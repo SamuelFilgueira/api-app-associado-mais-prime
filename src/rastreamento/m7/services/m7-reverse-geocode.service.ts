@@ -26,9 +26,10 @@ const M7_NOMINATIM_DB = process.env.M7_NOMINATIM_DB ?? 'nominatim_rj';
 const M7_NOMINATIM_TABLE = process.env.M7_NOMINATIM_TABLE ?? 'placex';
 const M7_NOMINATIM_ENABLED =
   (process.env.M7_NOMINATIM_ENABLED ?? 'true').toLowerCase() !== 'false';
-const M7_REV_GEOCODE_LEGACY_CACHE_FALLBACK = (
-  process.env.M7_REV_GEOCODE_LEGACY_CACHE_FALLBACK ?? 'false'
-).toLowerCase() === 'true';
+const M7_REV_GEOCODE_LEGACY_CACHE_FALLBACK =
+  (
+    process.env.M7_REV_GEOCODE_LEGACY_CACHE_FALLBACK ?? 'false'
+  ).toLowerCase() === 'true';
 
 @Injectable()
 export class M7ReverseGeocodeService {

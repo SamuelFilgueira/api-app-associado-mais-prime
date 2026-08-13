@@ -10,14 +10,28 @@ import { AuthGuard } from '@nestjs/passport';
 export class OptionalJwtAuthGuard extends AuthGuard('jwt') {
   private readonly logger = new Logger(OptionalJwtAuthGuard.name);
 
-  handleRequest<TUser = any>(err: any, user: any, info: any, _context: ExecutionContext): TUser {
+  handleRequest<TUser = any>(
+    err: any,
+    user: any,
+    info: any,
+    _context: ExecutionContext,
+  ): TUser {
     if (err) {
-      this.logger.warn(`OptionalJwtAuthGuard: authentication error — ${err?.message ?? err}`);
+      this.logger.warn(
+        `OptionalJwtAuthGuard: authentication error — ${err?.message ?? err}`,
+      );
     } else if (!user) {
-      const reason = info instanceof Error ? info.message : (info?.message ?? JSON.stringify(info));
-      this.logger.warn(`OptionalJwtAuthGuard: no user resolved — info: ${reason}`);
+      const reason =
+        info instanceof Error
+          ? info.message
+          : (info?.message ?? JSON.stringify(info));
+      this.logger.warn(
+        `OptionalJwtAuthGuard: no user resolved — info: ${reason}`,
+      );
     } else {
-      this.logger.log(`OptionalJwtAuthGuard: user resolved — userId=${user?.userId ?? user?.sub ?? user?.id ?? 'unknown'}`);
+      this.logger.log(
+        `OptionalJwtAuthGuard: user resolved — userId=${user?.userId ?? user?.sub ?? user?.id ?? 'unknown'}`,
+      );
     }
     return (user ?? null) as TUser;
   }

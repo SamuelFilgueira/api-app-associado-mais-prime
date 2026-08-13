@@ -96,7 +96,7 @@ export class BoletoService {
 
       if (userVehicle.user?.baseOrigin) {
         return {
-          baseOrigin: userVehicle.user.baseOrigin as BaseOrigin,
+          baseOrigin: userVehicle.user.baseOrigin,
           vehicleBelongsToUser: true,
         };
       }
@@ -199,11 +199,8 @@ export class BoletoService {
     codigo_veiculo: number,
     tokenBaseOrigin?: BaseOrigin,
   ) {
-    const { baseOrigin, vehicleBelongsToUser } = await this.resolveVehicleContext(
-      userId,
-      codigo_veiculo,
-      tokenBaseOrigin,
-    );
+    const { baseOrigin, vehicleBelongsToUser } =
+      await this.resolveVehicleContext(userId, codigo_veiculo, tokenBaseOrigin);
 
     if (!vehicleBelongsToUser) {
       this.logger.warn(

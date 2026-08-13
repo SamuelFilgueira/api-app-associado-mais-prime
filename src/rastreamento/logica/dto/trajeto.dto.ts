@@ -70,6 +70,13 @@ export interface TrajetoPosicao {
   tecladoEvento: string | null;
   eventoNome: string | null;
 
+  /**
+   * Presente apenas nas posições do /mobile/posicao: fixes com
+   * posicaoValida=false são leituras sem sinal de GPS (satelite=0) que a
+   * plataforma descarta antes de montar o relatório Deslocamento/Parada.
+   */
+  posicaoValida?: boolean;
+
   enderecoNumero: string;
   enderecoEndereco: string;
   enderecoBairro: string;

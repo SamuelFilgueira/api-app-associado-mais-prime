@@ -638,7 +638,12 @@ export class NotificationsService {
 
   async upsertPopup(
     id: number | undefined,
-    data: { imageUrl?: string; linkUrl?: string; linkLabel?: string; active?: boolean },
+    data: {
+      imageUrl?: string;
+      linkUrl?: string;
+      linkLabel?: string;
+      active?: boolean;
+    },
     userId: number,
     image?: Express.Multer.File,
   ) {
@@ -669,11 +674,16 @@ export class NotificationsService {
     }
 
     if (id) {
-      const existing = await this.prisma.notificationPopup.findUnique({ where: { id } });
+      const existing = await this.prisma.notificationPopup.findUnique({
+        where: { id },
+      });
       if (!existing) {
         throw new NotFoundException('Popup não encontrado');
       }
-      return this.prisma.notificationPopup.update({ where: { id }, data: upsertData });
+      return this.prisma.notificationPopup.update({
+        where: { id },
+        data: upsertData,
+      });
     }
 
     return this.prisma.notificationPopup.create({ data: upsertData });

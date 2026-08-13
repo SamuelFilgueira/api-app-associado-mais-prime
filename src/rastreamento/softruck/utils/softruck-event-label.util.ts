@@ -57,7 +57,9 @@ const EVENT_CATEGORIES: Record<SoftruckEventType, SoftruckEventCategory> = {
 /**
  * Retorna a categoria do evento (ALARM | INFO).
  */
-export function getEventCategory(type: SoftruckEventType): SoftruckEventCategory {
+export function getEventCategory(
+  type: SoftruckEventType,
+): SoftruckEventCategory {
   return EVENT_CATEGORIES[type] ?? SoftruckEventCategory.INFO;
 }
 
@@ -85,6 +87,8 @@ const EVENT_SEVERITIES: Record<SoftruckEventType, SoftruckEventSeverity> = {
 /**
  * Retorna a severidade do evento (LOW | MEDIUM | HIGH | CRITICAL).
  */
-export function getEventSeverity(type: SoftruckEventType): SoftruckEventSeverity {
+export function getEventSeverity(
+  type: SoftruckEventType,
+): SoftruckEventSeverity {
   return EVENT_SEVERITIES[type] ?? SoftruckEventSeverity.LOW;
 }

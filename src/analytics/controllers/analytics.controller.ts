@@ -36,14 +36,19 @@ export class AnalyticsController {
     @Req()
     req: Request & {
       body: unknown;
-      user?: { userId?: number | string; sub?: number | string; id?: number | string };
+      user?: {
+        userId?: number | string;
+        sub?: number | string;
+        id?: number | string;
+      };
     },
   ): Promise<{ message: string }> {
     const clientIp = this.extractClientIp(req);
     const rateLimitEnabled =
       process.env.ANALYTICS_RATE_LIMIT_ENABLED !== 'false';
     const linkUserEnabled = process.env.ANALYTICS_LINK_USER_ENABLED === 'true';
-    const hasAuthorizationHeader = typeof req.headers.authorization === 'string';
+    const hasAuthorizationHeader =
+      typeof req.headers.authorization === 'string';
 
     // userId extraído do JWT quando presente — ignorado se flag estiver desativada
     const jwtUserId = this.resolveJwtUserId(req);
@@ -60,12 +65,21 @@ export class AnalyticsController {
       );
     }
 
-    return this.analyticsService.ingest(req.body, clientIp, rateLimitEnabled, jwtUserId);
+    return this.analyticsService.ingest(
+      req.body,
+      clientIp,
+      rateLimitEnabled,
+      jwtUserId,
+    );
   }
 
   private resolveJwtUserId(
     req: Request & {
-      user?: { userId?: number | string; sub?: number | string; id?: number | string };
+      user?: {
+        userId?: number | string;
+        sub?: number | string;
+        id?: number | string;
+      };
     },
   ): number | string | null {
     // Caminho principal: user já resolvido pelo AuthGuard('jwt')
@@ -84,7 +98,9 @@ export class AnalyticsController {
     const match = authHeader.match(/^Bearer\s+(.+)$/i);
     const token = match?.[1]?.trim();
     if (!token) {
-      this.logger.warn('resolveJwtUserId: Authorization header present but token could not be extracted');
+      this.logger.warn(
+        'resolveJwtUserId: Authorization header present but token could not be extracted',
+      );
       return null;
     }
 
@@ -108,12 +124,16 @@ export class AnalyticsController {
           `resolveJwtUserId: JWT verified but no userId/sub/id claim found — payload: ${JSON.stringify(payload)}`,
         );
       } else {
-        this.logger.log(`resolveJwtUserId: resolved from manual verify — ${resolved}`);
+        this.logger.log(
+          `resolveJwtUserId: resolved from manual verify — ${resolved}`,
+        );
       }
 
       return resolved ?? null;
     } catch (err: unknown) {
-      this.logger.warn(`resolveJwtUserId: manual JWT verify failed — ${(err as Error)?.message ?? err}`);
+      this.logger.warn(
+        `resolveJwtUserId: manual JWT verify failed — ${(err as Error)?.message ?? err}`,
+      );
       return null;
     }
   }

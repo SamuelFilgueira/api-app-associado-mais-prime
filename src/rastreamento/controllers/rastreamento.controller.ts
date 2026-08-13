@@ -91,13 +91,14 @@ export class RastreamentoController {
   ) {
     const ctx = this.buildRastreamentoContext();
 
-    const pdfBuffer = await this.rastreamentoService.gerarRelatorioHistoricoSoftruckPDF(
-      query.chassi,
-      query.dataInicial,
-      query.dataFinal,
-      ctx.baseOrigin,
-      ctx.softruckPublicKey,
-    );
+    const pdfBuffer =
+      await this.rastreamentoService.gerarRelatorioHistoricoSoftruckPDF(
+        query.chassi,
+        query.dataInicial,
+        query.dataFinal,
+        ctx.baseOrigin,
+        ctx.softruckPublicKey,
+      );
 
     const safeChassi = query.chassi.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 20);
     const fileName = `trajetorias-${safeChassi}-${query.dataInicial}-${query.dataFinal}.pdf`;

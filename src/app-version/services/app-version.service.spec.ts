@@ -54,7 +54,8 @@ describe('AppVersionService', () => {
       forceUpdateEnabled: false,
       title: 'Atualizacao obrigatoria',
       message: 'Atualize para continuar',
-      storeUrl: 'https://play.google.com/store/apps/details?id=com.maisprime.vantagens',
+      storeUrl:
+        'https://play.google.com/store/apps/details?id=com.maisprime.vantagens',
       effectiveFrom: new Date(),
       effectiveUntil: null,
       isActive: true,
@@ -74,7 +75,10 @@ describe('AppVersionService', () => {
     expect(result.forceUpdate).toBe(false);
     expect(result.minSupportedVersion).toBe('1.1.8');
     expect(repositoryMock.logValidationDecision).toHaveBeenCalledWith(
-      expect.objectContaining({ blocked: false, reason: 'force_update_disabled' }),
+      expect.objectContaining({
+        blocked: false,
+        reason: 'force_update_disabled',
+      }),
     );
   });
 
@@ -89,7 +93,8 @@ describe('AppVersionService', () => {
       forceUpdateEnabled: true,
       title: 'Atualizacao obrigatoria',
       message: 'Atualize para continuar',
-      storeUrl: 'https://play.google.com/store/apps/details?id=com.maisprime.vantagens',
+      storeUrl:
+        'https://play.google.com/store/apps/details?id=com.maisprime.vantagens',
       effectiveFrom: new Date(),
       effectiveUntil: null,
       isActive: true,
@@ -109,7 +114,10 @@ describe('AppVersionService', () => {
     expect(result.forceUpdate).toBe(true);
     expect(result.title).toBe('Atualizacao obrigatoria');
     expect(repositoryMock.logValidationDecision).toHaveBeenCalledWith(
-      expect.objectContaining({ blocked: true, reason: 'app_version_below_minimum' }),
+      expect.objectContaining({
+        blocked: true,
+        reason: 'app_version_below_minimum',
+      }),
     );
   });
 
@@ -143,7 +151,10 @@ describe('AppVersionService', () => {
 
     expect(result.forceUpdate).toBe(true);
     expect(repositoryMock.logValidationDecision).toHaveBeenCalledWith(
-      expect.objectContaining({ blocked: true, reason: 'runtime_version_below_minimum' }),
+      expect.objectContaining({
+        blocked: true,
+        reason: 'runtime_version_below_minimum',
+      }),
     );
   });
 
@@ -177,7 +188,10 @@ describe('AppVersionService', () => {
 
     expect(result.forceUpdate).toBe(true);
     expect(repositoryMock.logValidationDecision).toHaveBeenCalledWith(
-      expect.objectContaining({ blocked: true, reason: 'version_code_below_minimum' }),
+      expect.objectContaining({
+        blocked: true,
+        reason: 'version_code_below_minimum',
+      }),
     );
   });
 
@@ -211,7 +225,10 @@ describe('AppVersionService', () => {
 
     expect(result.forceUpdate).toBe(true);
     expect(repositoryMock.logValidationDecision).toHaveBeenCalledWith(
-      expect.objectContaining({ blocked: true, reason: 'build_number_below_minimum' }),
+      expect.objectContaining({
+        blocked: true,
+        reason: 'build_number_below_minimum',
+      }),
     );
   });
 

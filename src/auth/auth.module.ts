@@ -15,12 +15,7 @@ import { PrimeiroLoginGuard } from 'src/auth/guards/primeiro-login.guard';
       signOptions: { expiresIn: '300d' },
     }),
   ],
-  providers: [
-    AuthService,
-    JwtStrategy,
-    LocalStrategy,
-    PrimeiroLoginGuard,
-  ],
+  providers: [AuthService, JwtStrategy, LocalStrategy, PrimeiroLoginGuard],
   controllers: [AuthController],
   exports: [AuthService, PrimeiroLoginGuard],
 })

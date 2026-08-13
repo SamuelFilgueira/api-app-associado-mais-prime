@@ -194,7 +194,8 @@ function build(): TenantConfig {
   const bases = parseBases(process.env.TENANT_BASES ?? DEFAULT_TENANT_BASES);
   const baseNames = bases.map((base) => base.name);
 
-  const configuredDefault = process.env.TENANT_DEFAULT_BASE?.trim().toUpperCase();
+  const configuredDefault =
+    process.env.TENANT_DEFAULT_BASE?.trim().toUpperCase();
 
   if (configuredDefault && !baseNames.includes(configuredDefault)) {
     throw new Error(
@@ -230,8 +231,7 @@ function build(): TenantConfig {
     appName: process.env.TENANT_APP_NAME?.trim() || `${name} App`,
     reportName: process.env.TENANT_REPORT_NAME?.trim() || name,
     logoPath: process.env.TENANT_LOGO_PATH?.trim() || 'assets/Logo.png',
-    mailPrevia:
-      process.env.MAIL_TO_PREVIA?.trim() || 'previa@maisprime.org.br',
+    mailPrevia: process.env.MAIL_TO_PREVIA?.trim() || 'previa@maisprime.org.br',
     mailCobranca:
       process.env.MAIL_TO_COBRANCA?.trim() || 'cobranca@maisprime.org.br',
     documentsBaseUrl:
@@ -330,10 +330,7 @@ export function isTenantBase(value: unknown): value is BaseOrigin {
  *
  * @throws se a base não pertencer a este deploy.
  */
-export function tenantEnvName(
-  base: BaseOrigin,
-  kind: TenantTokenKind,
-): string {
+export function tenantEnvName(base: BaseOrigin, kind: TenantTokenKind): string {
   const names = config().envNames[base];
 
   if (!names) {

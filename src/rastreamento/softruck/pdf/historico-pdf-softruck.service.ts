@@ -1,9 +1,16 @@
-import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  InternalServerErrorException,
+  Logger,
+} from '@nestjs/common';
 import * as fs from 'fs';
 import * as path from 'path';
 import puppeteer from 'puppeteer';
 import { TENANT } from 'src/config/tenant.config';
-import { HistoricoPdfDataDto, HistoricoSegmentoDto } from '../dto/historico-response.dto';
+import {
+  HistoricoPdfDataDto,
+  HistoricoSegmentoDto,
+} from '../dto/historico-response.dto';
 import { escapeHtml, formatarDuracao } from '../utils/formatters';
 
 function carregarLogoBase64(): string {
@@ -60,8 +67,11 @@ function formatarDataBR(isoDate: string): string {
   return `${dia}/${mes}/${ano}`;
 }
 
-function gerarGraficoDistribuicaoDias(segmentos: HistoricoSegmentoDto[]): string {
-  if (segmentos.length === 0) return '<p style="color:#6b7280;font-style:italic;font-size:11px;">Nenhum dado para exibir.</p>';
+function gerarGraficoDistribuicaoDias(
+  segmentos: HistoricoSegmentoDto[],
+): string {
+  if (segmentos.length === 0)
+    return '<p style="color:#6b7280;font-style:italic;font-size:11px;">Nenhum dado para exibir.</p>';
 
   // Group by acc (YYYYMMDD number → "YYYY-MM-DD")
   const porDia = new Map<string, number>();
@@ -74,7 +84,9 @@ function gerarGraficoDistribuicaoDias(segmentos: HistoricoSegmentoDto[]): string
     porDia.set(dayKey, (porDia.get(dayKey) ?? 0) + 1);
   }
 
-  const dias = Array.from(porDia.entries()).sort(([a], [b]) => a.localeCompare(b));
+  const dias = Array.from(porDia.entries()).sort(([a], [b]) =>
+    a.localeCompare(b),
+  );
   const maxCount = Math.max(...dias.map(([, c]) => c), 1);
 
   const barWidth = 36;
@@ -83,7 +95,10 @@ function gerarGraficoDistribuicaoDias(segmentos: HistoricoSegmentoDto[]): string
   const paddingLeft = 36;
   const paddingBottom = 42;
   const paddingTop = 20;
-  const svgWidth = Math.max(dias.length * (barWidth + gap) + paddingLeft + 24, 400);
+  const svgWidth = Math.max(
+    dias.length * (barWidth + gap) + paddingLeft + 24,
+    400,
+  );
   const svgHeight = maxBarH + paddingBottom + paddingTop;
 
   const bars = dias
@@ -102,13 +117,15 @@ function gerarGraficoDistribuicaoDias(segmentos: HistoricoSegmentoDto[]): string
     })
     .join('');
 
-  const yLines = [0, Math.ceil(maxCount / 2), maxCount].map((v) => {
-    const y = paddingTop + maxBarH - (v / maxCount) * maxBarH;
-    return `
+  const yLines = [0, Math.ceil(maxCount / 2), maxCount]
+    .map((v) => {
+      const y = paddingTop + maxBarH - (v / maxCount) * maxBarH;
+      return `
       <line x1="${paddingLeft}" y1="${y}" x2="${svgWidth - 10}" y2="${y}" stroke="#f3f4f6" stroke-width="1"/>
       <text x="${paddingLeft - 4}" y="${y + 3}" text-anchor="end" font-size="8" fill="#9ca3af" font-family="Arial">${v}</text>
     `;
-  }).join('');
+    })
+    .join('');
 
   return `
     <svg width="${svgWidth}" height="${svgHeight}" xmlns="http://www.w3.org/2000/svg" style="overflow:visible;">
@@ -186,15 +203,17 @@ function gerarHtmlRelatorio(dados: HistoricoPdfDataDto): string {
   const agora = new Date();
   const dataGeracao = formatarDataHora(agora.toISOString());
 
-  const linhasTabela = segmentos.length > 0
-    ? segmentos.slice(0, MAX_ROWS_PER_PAGE).map(gerarLinhaTabela).join('')
-    : `<tr><td colspan="8" style="text-align:center;color:#6b7280;font-style:italic;padding:20px;">
+  const linhasTabela =
+    segmentos.length > 0
+      ? segmentos.slice(0, MAX_ROWS_PER_PAGE).map(gerarLinhaTabela).join('')
+      : `<tr><td colspan="8" style="text-align:center;color:#6b7280;font-style:italic;padding:20px;">
          Nenhum segmento encontrado para o período informado.
        </td></tr>`;
 
-  const tabelaExtraPages = segmentos.length > MAX_ROWS_PER_PAGE
-    ? segmentos.slice(MAX_ROWS_PER_PAGE).map(gerarLinhaTabela).join('')
-    : '';
+  const tabelaExtraPages =
+    segmentos.length > MAX_ROWS_PER_PAGE
+      ? segmentos.slice(MAX_ROWS_PER_PAGE).map(gerarLinhaTabela).join('')
+      : '';
 
   const logoTag = LOGO_BASE64
     ? `<img src="data:image/png;base64,${LOGO_BASE64}" alt="Logo" style="height:44px;object-fit:contain;"/>`
@@ -478,17 +497,25 @@ function gerarHtmlRelatorio(dados: HistoricoPdfDataDto): string {
         </tbody>
       </table>
 
-      ${tabelaExtraPages ? `
+      ${
+        tabelaExtraPages
+          ? `
         <table style="margin-top:0;border-top:none;">
           <tbody>${tabelaExtraPages}</tbody>
         </table>
-      ` : ''}
+      `
+          : ''
+      }
 
-      ${segmentos.length > MAX_ROWS_PER_PAGE ? `
+      ${
+        segmentos.length > MAX_ROWS_PER_PAGE
+          ? `
         <p style="font-size:10px;color:#6b7280;margin-top:8px;font-style:italic;">
           Exibindo ${segmentos.length} segmento(s) no total.
         </p>
-      ` : ''}
+      `
+          : ''
+      }
 
       <div class="footer">
         Relatório de Rastreamento — ${escapeHtml(vehicle.plate)} — ${escapeHtml(formatarDataBR(period.dataInicial))} a ${escapeHtml(formatarDataBR(period.dataFinal))}

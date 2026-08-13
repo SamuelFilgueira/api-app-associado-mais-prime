@@ -65,7 +65,10 @@ export class HistoricoM7QueryDto {
   dataFinal: string;
 }
 
-@ValidatorConstraint({ name: 'dataFinalGteDataInicialM7Contestacao', async: false })
+@ValidatorConstraint({
+  name: 'dataFinalGteDataInicialM7Contestacao',
+  async: false,
+})
 export class DataFinalGteDataInicialM7ContestacaoConstraint
   implements ValidatorConstraintInterface
 {

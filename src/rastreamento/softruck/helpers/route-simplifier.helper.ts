@@ -52,8 +52,7 @@ export function simplifyRoutePoints(
 
   // Ordena por timestamp para garantir sequência temporal correta
   const sorted = [...features].sort(
-    (a, b) =>
-      (a.properties.point.act ?? 0) - (b.properties.point.act ?? 0),
+    (a, b) => (a.properties.point.act ?? 0) - (b.properties.point.act ?? 0),
   );
 
   const result: SoftruckGeomFeature[] = [sorted[0]];

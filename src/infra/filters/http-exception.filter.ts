@@ -23,7 +23,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const body =
       typeof exceptionResponse === 'string'
         ? { statusCode: status, message: exceptionResponse }
-        : (exceptionResponse as object);
+        : exceptionResponse;
 
     if (status >= HttpStatus.INTERNAL_SERVER_ERROR) {
       this.logger.error(

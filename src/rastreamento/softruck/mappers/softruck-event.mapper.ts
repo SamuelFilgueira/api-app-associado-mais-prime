@@ -74,7 +74,8 @@ export function parseEventType(
 
   // ── Shake alert (filtrado pelo sistema) ─────────────────────
   if (m === 'shake_alert') return SoftruckEventType.SHAKE_ALERT;
-  if (t === 'accelerometer' && m === 'shake_alert') return SoftruckEventType.SHAKE_ALERT;
+  if (t === 'accelerometer' && m === 'shake_alert')
+    return SoftruckEventType.SHAKE_ALERT;
 
   // ── Ignição ON ──────────────────────────────────────────────
   if (
@@ -271,8 +272,8 @@ export function mapGeomFeatureToEvento(
     kind: 'EVENT',
     tipo,
     descricao: getEventLabel(tipo),
-    categoria: getEventCategory(tipo) as SoftruckEventCategory,
-    severidade: getEventSeverity(tipo) as SoftruckEventSeverity,
+    categoria: getEventCategory(tipo),
+    severidade: getEventSeverity(tipo),
     timestamp,
     coordenadas: { lat, lng },
   };

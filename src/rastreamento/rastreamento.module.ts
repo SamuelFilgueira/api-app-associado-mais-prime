@@ -19,7 +19,10 @@ import { RastreamentoM7 } from 'src/rastreamento/m7/services/rastreamento-m7';
 import { LogicaRastreamentoService } from 'src/rastreamento/logica/services/rastreamento.logica';
 import { TrajetosController } from './logica/controllers/trajetos.controller';
 import { TrajetosService } from './logica/services/trajetos.service';
+import { LogicaAuthService } from './logica/services/logica-auth.service';
 import { TrajetoPdfLogicaService } from './logica/pdf/trajeto-pdf-logica.service';
+import { LogicaHistoricoService } from './logica/services/logica-historico.service';
+import { HistoricoProviderResolverService } from './services/historico-provider-resolver.service';
 
 @Module({
   imports: [NotificationsModule, SharedModule],
@@ -43,8 +46,11 @@ import { TrajetoPdfLogicaService } from './logica/pdf/trajeto-pdf-logica.service
     HistoricoPdfM7Service,
     M7ReverseGeocodeService,
     M7ViagensBuilderService,
+    LogicaAuthService,
     TrajetosService,
     TrajetoPdfLogicaService,
+    LogicaHistoricoService,
+    HistoricoProviderResolverService,
   ],
 })
 export class RastreamentoModule {}

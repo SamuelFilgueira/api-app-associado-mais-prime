@@ -303,7 +303,12 @@ export class NotificationsController {
     @UploadedFile() image: Express.Multer.File,
     @Request() req: any,
   ) {
-    return this.notificationsService.upsertPopup(undefined, dto, req.user.userId, image);
+    return this.notificationsService.upsertPopup(
+      undefined,
+      dto,
+      req.user.userId,
+      image,
+    );
   }
 
   @Put('popup/:id')
@@ -317,6 +322,11 @@ export class NotificationsController {
     @UploadedFile() image: Express.Multer.File,
     @Request() req: any,
   ) {
-    return this.notificationsService.upsertPopup(id, dto, req.user.userId, image);
+    return this.notificationsService.upsertPopup(
+      id,
+      dto,
+      req.user.userId,
+      image,
+    );
   }
 }

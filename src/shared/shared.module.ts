@@ -5,7 +5,7 @@ import { SgaAuthService } from './sga-auth.service';
 
 @Global()
 @Module({
-    providers: [TokenResolverService, BaseContextService, SgaAuthService],
-    exports: [TokenResolverService, BaseContextService, SgaAuthService],
+  providers: [TokenResolverService, BaseContextService, SgaAuthService],
+  exports: [TokenResolverService, BaseContextService, SgaAuthService],
 })
 export class SharedModule {}

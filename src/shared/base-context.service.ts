@@ -28,7 +28,7 @@ export class BaseContextService {
   ) {}
 
   getBaseOrigin(): BaseOrigin {
-    const baseOrigin = this.request.user?.baseOrigin as BaseOrigin | undefined;
+    const baseOrigin = this.request.user?.baseOrigin;
 
     if (!baseOrigin) {
       const userInfo = this.request.user

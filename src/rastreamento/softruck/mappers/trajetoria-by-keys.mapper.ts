@@ -80,10 +80,7 @@ export function calcularSumario(
     0,
   );
 
-  const duracaoTotal = segmentos.reduce(
-    (acc, s) => acc + s.duracaoSegundos,
-    0,
-  );
+  const duracaoTotal = segmentos.reduce((acc, s) => acc + s.duracaoSegundos, 0);
 
   const velocidadeMaxima = Math.max(
     ...segmentos.map((s) => s.velocidadeMaxima),
@@ -95,9 +92,7 @@ export function calcularSumario(
     0,
   );
   const velocidadeMedia =
-    distanciaTotal > 0
-      ? parseFloat((somaPeso / distanciaTotal).toFixed(1))
-      : 0;
+    distanciaTotal > 0 ? parseFloat((somaPeso / distanciaTotal).toFixed(1)) : 0;
 
   return {
     totalSegmentos: segmentos.length,

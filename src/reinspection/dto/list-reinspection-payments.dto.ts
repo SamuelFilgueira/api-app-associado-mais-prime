@@ -1,5 +1,11 @@
 import { Type } from 'class-transformer';
-import { IsBooleanString, IsInt, IsOptional, IsString, Min } from 'class-validator';
+import {
+  IsBooleanString,
+  IsInt,
+  IsOptional,
+  IsString,
+  Min,
+} from 'class-validator';
 
 export class ListReinspectionPaymentsDto {
   @IsOptional()

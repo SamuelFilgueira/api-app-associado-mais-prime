@@ -456,9 +456,7 @@ export class HistoricoM7Service {
     const porData = new Map<string, (typeof viagens)[number][]>();
     for (const viagem of viagens) {
       const dataBase = (viagem.saida || viagem.chegada || '').slice(0, 10);
-      const data = /^\d{4}-\d{2}-\d{2}$/.test(dataBase)
-        ? dataBase
-        : 'Sem data';
+      const data = /^\d{4}-\d{2}-\d{2}$/.test(dataBase) ? dataBase : 'Sem data';
       if (!porData.has(data)) {
         porData.set(data, []);
       }
@@ -478,8 +476,9 @@ export class HistoricoM7Service {
       .sort((a, b) => a.data.localeCompare(b.data));
 
     const distanciaTotalKm =
-      Math.round(viagens.reduce((acc, viagem) => acc + viagem.distanciaKm, 0) * 100) /
-      100;
+      Math.round(
+        viagens.reduce((acc, viagem) => acc + viagem.distanciaKm, 0) * 100,
+      ) / 100;
     const velocidadeMaxima = viagens.reduce(
       (max, viagem) => Math.max(max, viagem.velocidadeMaxima),
       0,

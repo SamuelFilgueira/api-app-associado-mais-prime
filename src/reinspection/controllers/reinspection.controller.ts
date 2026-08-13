@@ -191,7 +191,10 @@ export class ReinspectionController {
     @Query('userVehicleId', ParseIntPipe) userVehicleId: number,
     @Headers('x-debug-id') debugId?: string,
   ) {
-    return this.reinspectionService.finalizeByUserVehicleId(userVehicleId, debugId);
+    return this.reinspectionService.finalizeByUserVehicleId(
+      userVehicleId,
+      debugId,
+    );
   }
 
   /**
@@ -204,7 +207,10 @@ export class ReinspectionController {
     @Query('userVehicleId', ParseIntPipe) userVehicleId: number,
     @Headers('x-debug-id') debugId?: string,
   ) {
-    return this.reinspectionService.approveByUserVehicleId(userVehicleId, debugId);
+    return this.reinspectionService.approveByUserVehicleId(
+      userVehicleId,
+      debugId,
+    );
   }
 
   /**

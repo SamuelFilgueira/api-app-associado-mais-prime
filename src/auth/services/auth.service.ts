@@ -60,15 +60,12 @@ export class AuthService {
       },
     });
 
-
     if (!dbUser) {
       throw new Error('Usuário não encontrado ao gerar JWT');
     }
 
     if (!dbUser.baseOrigin) {
-      throw new InternalServerErrorException(
-        'Usuário sem baseOrigin definida',
-      );
+      throw new InternalServerErrorException('Usuário sem baseOrigin definida');
     }
 
     const payload = {
@@ -122,7 +119,9 @@ export class AuthService {
    * Gera uma senha aleatória, salva no banco (hash) e envia por e-mail ao usuário
    * @param cpf CPF do usuário
    */
-  async resetPassword(cpf: string): Promise<{ message: string; email: string }> {
+  async resetPassword(
+    cpf: string,
+  ): Promise<{ message: string; email: string }> {
     const user = await this.prisma.user.findUnique({ where: { cpf } });
 
     if (!user) {
@@ -147,6 +146,9 @@ export class AuthService {
 
     await this.mailService.sendPasswordReset(user.email, newPassword);
 
-    return { message: 'Nova senha enviada para o e-mail informado', email: user.email };
+    return {
+      message: 'Nova senha enviada para o e-mail informado',
+      email: user.email,
+    };
   }
 }

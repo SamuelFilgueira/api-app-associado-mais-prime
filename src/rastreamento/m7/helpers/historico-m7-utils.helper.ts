@@ -1,8 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import {
-  DiaM7ResumoDto,
-  ViagemM7Dto,
-} from '../dto/historico-m7-response.dto';
+import { DiaM7ResumoDto, ViagemM7Dto } from '../dto/historico-m7-response.dto';
 import {
   M7PontoHistoricoRaw,
   M7TrajetoRaw,
@@ -34,9 +31,7 @@ export function formatarEnderecoM7(endereco: string): string {
   return truncarEndereco(s);
 }
 
-export function isEnderecoValido(
-  endereco: string | null | undefined,
-): boolean {
+export function isEnderecoValido(endereco: string | null | undefined): boolean {
   const valor = (endereco ?? '').trim();
   return valor.length > 0 && valor !== '—';
 }
@@ -205,9 +200,7 @@ export function validarPeriodoMaximoContestacao(
   }
 }
 
-export function agruparViagensPorDia(
-  viagens: ViagemM7Dto[],
-): DiaM7ResumoDto[] {
+export function agruparViagensPorDia(viagens: ViagemM7Dto[]): DiaM7ResumoDto[] {
   const porData = new Map<string, DiaM7ResumoDto>();
   for (const viagem of viagens) {
     const data = viagem.saida.slice(0, 10);

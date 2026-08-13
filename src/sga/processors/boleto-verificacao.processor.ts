@@ -68,11 +68,16 @@ export class BoletoVerificacaoProcessor extends WorkerHost {
 
     if (response.status >= 400) {
       this.logger.warn(
-        debugLog(BoletoVerificacaoProcessor.name, 'Erro ao verificar boleto', debugId, {
-          nossoNumero: nosso_numero,
-          status: response.status,
-          body: response.data,
-        }),
+        debugLog(
+          BoletoVerificacaoProcessor.name,
+          'Erro ao verificar boleto',
+          debugId,
+          {
+            nossoNumero: nosso_numero,
+            status: response.status,
+            body: response.data,
+          },
+        ),
       );
       return;
     }
@@ -104,7 +109,10 @@ export class BoletoVerificacaoProcessor extends WorkerHost {
         }
 
         const numericKeyItems = Object.entries(record)
-          .filter(([key, value]) => /^\d+$/.test(key) && !!value && typeof value === 'object')
+          .filter(
+            ([key, value]) =>
+              /^\d+$/.test(key) && !!value && typeof value === 'object',
+          )
           .map(([, value]) => value as BoletoInfo);
 
         if (numericKeyItems.length > 0) {
@@ -128,8 +136,9 @@ export class BoletoVerificacaoProcessor extends WorkerHost {
 
     const boletos = normalizeArray(response.data);
     let boletoInfo =
-      boletos.find((item) => String(item?.nosso_numero) === String(nosso_numero)) ??
-      boletos[0];
+      boletos.find(
+        (item) => String(item?.nosso_numero) === String(nosso_numero),
+      ) ?? boletos[0];
 
     const codigoSituacaoRaw = boletoInfo?.codigo_situacao_boleto;
     let codigoSituacao =
@@ -151,7 +160,6 @@ export class BoletoVerificacaoProcessor extends WorkerHost {
         data_vencimento_original_final: formatDateBR(dataFinal),
       };
 
-
       const fallbackResponse = await this.sgaAuthService.executeRequestWithAuth(
         baseOrigin,
         {
@@ -163,8 +171,10 @@ export class BoletoVerificacaoProcessor extends WorkerHost {
         },
       );
 
-
-      if (fallbackResponse.status < 400 && Array.isArray(fallbackResponse.data)) {
+      if (
+        fallbackResponse.status < 400 &&
+        Array.isArray(fallbackResponse.data)
+      ) {
         const boletoFallback = fallbackResponse.data.find(
           (item: { nosso_numero?: number | string }) =>
             String(item?.nosso_numero) === String(nosso_numero),
@@ -175,18 +185,28 @@ export class BoletoVerificacaoProcessor extends WorkerHost {
           boletoInfo = boletoFallback as BoletoInfo;
         } else {
           this.logger.warn(
-            debugLog(BoletoVerificacaoProcessor.name, 'Fallback sem status para nosso_numero informado', debugId, {
-              nossoNumero: nosso_numero,
-              encontrados: fallbackResponse.data.length,
-            }),
+            debugLog(
+              BoletoVerificacaoProcessor.name,
+              'Fallback sem status para nosso_numero informado',
+              debugId,
+              {
+                nossoNumero: nosso_numero,
+                encontrados: fallbackResponse.data.length,
+              },
+            ),
           );
         }
       } else {
         this.logger.warn(
-          debugLog(BoletoVerificacaoProcessor.name, 'Fallback retornou erro', debugId, {
-            nossoNumero: nosso_numero,
-            status: fallbackResponse.status,
-          }),
+          debugLog(
+            BoletoVerificacaoProcessor.name,
+            'Fallback retornou erro',
+            debugId,
+            {
+              nossoNumero: nosso_numero,
+              status: fallbackResponse.status,
+            },
+          ),
         );
       }
     }
@@ -226,11 +246,19 @@ export class BoletoVerificacaoProcessor extends WorkerHost {
       // );
     } catch (persistError) {
       this.logger.error(
-        debugLog(BoletoVerificacaoProcessor.name, 'Falha ao persistir pagamento de revistoria (job)', debugId, {
-          userVehicleId,
-          nossoNumero: nosso_numero,
-          error: persistError instanceof Error ? persistError.message : String(persistError),
-        }),
+        debugLog(
+          BoletoVerificacaoProcessor.name,
+          'Falha ao persistir pagamento de revistoria (job)',
+          debugId,
+          {
+            userVehicleId,
+            nossoNumero: nosso_numero,
+            error:
+              persistError instanceof Error
+                ? persistError.message
+                : String(persistError),
+          },
+        ),
       );
     }
 
@@ -240,10 +268,15 @@ export class BoletoVerificacaoProcessor extends WorkerHost {
 
     // Boleto pago/liquidado — reativar veículo (situação 1)
     this.logger.log(
-      debugLog(BoletoVerificacaoProcessor.name, 'Boleto pago! Reativando veículo', debugId, {
-        nossoNumero: nosso_numero,
-        codigoVeiculo: codigo_veiculo,
-      }),
+      debugLog(
+        BoletoVerificacaoProcessor.name,
+        'Boleto pago! Reativando veículo',
+        debugId,
+        {
+          nossoNumero: nosso_numero,
+          codigoVeiculo: codigo_veiculo,
+        },
+      ),
     );
 
     // Enviar e-mail de boleto pago para a equipe
@@ -260,11 +293,19 @@ export class BoletoVerificacaoProcessor extends WorkerHost {
       );
     } catch (mailError) {
       this.logger.error(
-        debugLog(BoletoVerificacaoProcessor.name, 'Falha ao enviar e-mail de boleto pago', debugId, {
-          userVehicleId,
-          nossoNumero: nosso_numero,
-          error: mailError instanceof Error ? mailError.message : String(mailError),
-        }),
+        debugLog(
+          BoletoVerificacaoProcessor.name,
+          'Falha ao enviar e-mail de boleto pago',
+          debugId,
+          {
+            userVehicleId,
+            nossoNumero: nosso_numero,
+            error:
+              mailError instanceof Error
+                ? mailError.message
+                : String(mailError),
+          },
+        ),
       );
     }
 
@@ -276,10 +317,15 @@ export class BoletoVerificacaoProcessor extends WorkerHost {
     );
 
     this.logger.log(
-      debugLog(BoletoVerificacaoProcessor.name, 'Veículo reativado (situação 1)', debugId, {
-        codigoVeiculo: codigo_veiculo,
-        status: alterarResponse.status,
-      }),
+      debugLog(
+        BoletoVerificacaoProcessor.name,
+        'Veículo reativado (situação 1)',
+        debugId,
+        {
+          codigoVeiculo: codigo_veiculo,
+          status: alterarResponse.status,
+        },
+      ),
     );
 
     // Após confirmação de pagamento, reativar associado (situação 1)
@@ -295,19 +341,29 @@ export class BoletoVerificacaoProcessor extends WorkerHost {
 
       if (alterarAssociadoResponse.status >= 400) {
         this.logger.warn(
-          debugLog(BoletoVerificacaoProcessor.name, 'Falha ao reativar associado (situação 1)', debugId, {
-            codigoAssociado: codigo_associado,
-            status: alterarAssociadoResponse.status,
-            body: alterarAssociadoResponse.data,
-          }),
+          debugLog(
+            BoletoVerificacaoProcessor.name,
+            'Falha ao reativar associado (situação 1)',
+            debugId,
+            {
+              codigoAssociado: codigo_associado,
+              status: alterarAssociadoResponse.status,
+              body: alterarAssociadoResponse.data,
+            },
+          ),
         );
       }
     } else {
       this.logger.warn(
-        debugLog(BoletoVerificacaoProcessor.name, 'codigo_associado ausente no job; reativação de associado não executada', debugId, {
-          nossoNumero: nosso_numero,
-          userVehicleId,
-        }),
+        debugLog(
+          BoletoVerificacaoProcessor.name,
+          'codigo_associado ausente no job; reativação de associado não executada',
+          debugId,
+          {
+            nossoNumero: nosso_numero,
+            userVehicleId,
+          },
+        ),
       );
     }
 
@@ -354,22 +410,34 @@ export class BoletoVerificacaoProcessor extends WorkerHost {
             validateStatus: () => true,
           },
         );
-
       } catch (suriError) {
         this.logger.error(
-          debugLog(BoletoVerificacaoProcessor.name, 'Falha ao enviar notificação Suri (boleto pago)', debugId, {
-            nossoNumero: nosso_numero,
-            error: suriError instanceof Error ? suriError.message : String(suriError),
-          }),
+          debugLog(
+            BoletoVerificacaoProcessor.name,
+            'Falha ao enviar notificação Suri (boleto pago)',
+            debugId,
+            {
+              nossoNumero: nosso_numero,
+              error:
+                suriError instanceof Error
+                  ? suriError.message
+                  : String(suriError),
+            },
+          ),
         );
       }
     } else {
       this.logger.warn(
-        debugLog(BoletoVerificacaoProcessor.name, 'Notificação Suri (boleto pago) não enviada — nome ou telefone ausente', debugId, {
-          nossoNumero: nosso_numero,
-          temNome: !!nome,
-          temTelefone: !!telefone_celular,
-        }),
+        debugLog(
+          BoletoVerificacaoProcessor.name,
+          'Notificação Suri (boleto pago) não enviada — nome ou telefone ausente',
+          debugId,
+          {
+            nossoNumero: nosso_numero,
+            temNome: !!nome,
+            temTelefone: !!telefone_celular,
+          },
+        ),
       );
     }
   }

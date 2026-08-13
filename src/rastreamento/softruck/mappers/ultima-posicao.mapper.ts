@@ -5,7 +5,12 @@ import { formatarData, parseCoordinate } from '../utils/formatters';
 
 export function mapearUltimaPosicaoSoftruck(
   data: SoftruckTrackingResponse,
-  vehicleData: { id: string; plate: string; brandName: string; modelName: string },
+  vehicleData: {
+    id: string;
+    plate: string;
+    brandName: string;
+    modelName: string;
+  },
 ): UltimaPosicaoSoftruckResponse {
   const attributes = data.data.attributes;
   // console.debug(`Mapping Softruck tracking response: ${JSON.stringify(data)}`);

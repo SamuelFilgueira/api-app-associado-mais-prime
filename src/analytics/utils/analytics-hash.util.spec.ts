@@ -1,4 +1,8 @@
-import { hmacSha256, sha256, canonicalPayloadHash } from '../utils/analytics-hash.util';
+import {
+  hmacSha256,
+  sha256,
+  canonicalPayloadHash,
+} from '../utils/analytics-hash.util';
 
 describe('analytics-hash.util', () => {
   const SECRET = 'test-secret-1234567890';

@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { BaseOrigin } from 'src/shared/token-resolver.service';
 import { RastreamentoSoftruck } from 'src/rastreamento/softruck/services/rastreamento-softruck.service';
+import { HistoricoProviderResolverService } from 'src/rastreamento/services/historico-provider-resolver.service';
+import { LogicaHistoricoService } from 'src/rastreamento/logica/services/logica-historico.service';
 import {
   HistoricoPdfDataDto,
   HistoricoRotasResponseDto,
@@ -32,6 +34,8 @@ export class HistoricoSoftruckService {
     private readonly softruck: RastreamentoSoftruck,
     private readonly pdfService: HistoricoPdfSoftruckService,
     private readonly geomPipeline: GeomPipelineProcessor,
+    private readonly providerResolver: HistoricoProviderResolverService,
+    private readonly logicaHistorico: LogicaHistoricoService,
   ) {}
 
   // ============================================================
@@ -54,11 +58,12 @@ export class HistoricoSoftruckService {
     baseOrigin: BaseOrigin,
     publicKey: string,
   ): Promise<Buffer> {
-    const { vehicleData, deviceData } = await this.softruck.resolveVehicleAndDevice(
-      chassi,
-      baseOrigin,
-      publicKey,
-    );
+    const { vehicleData, deviceData } =
+      await this.softruck.resolveVehicleAndDevice(
+        chassi,
+        baseOrigin,
+        publicKey,
+      );
 
     const accs = gerarListaAcc(dataInicial, dataFinal);
 
@@ -104,7 +109,12 @@ export class HistoricoSoftruckService {
       totalDias,
     };
 
-    const dadosPdf: HistoricoPdfDataDto = { vehicle, period, summary, segmentos };
+    const dadosPdf: HistoricoPdfDataDto = {
+      vehicle,
+      period,
+      summary,
+      segmentos,
+    };
 
     return this.pdfService.gerarPdf(dadosPdf);
   }
@@ -129,11 +139,26 @@ export class HistoricoSoftruckService {
     baseOrigin: BaseOrigin,
     publicKey: string,
   ): Promise<HistoricoRotasResponseDto> {
-    const { vehicleData, deviceData } = await this.softruck.resolveVehicleAndDevice(
+    // Veículos da Lógica caem neste mesmo endpoint (o app publicado não
+    // diferencia provider): o resolver detecta e delega, mantendo o contrato
+    // de resposta Softruck. Caminho Softruck segue inalterado.
+    const resolucao = await this.providerResolver.resolve(
       chassi,
       baseOrigin,
       publicKey,
     );
+
+    if (resolucao.provider === 'logica') {
+      return this.logicaHistorico.obterRotas(
+        chassi,
+        resolucao.veiculo,
+        dataInicial,
+        dataFinal,
+        baseOrigin,
+      );
+    }
+
+    const { vehicleData, deviceData } = resolucao;
 
     const accs = gerarListaAcc(dataInicial, dataFinal);
 
@@ -193,7 +218,7 @@ export class HistoricoSoftruckService {
           return this.softruck.buscarGeomPorAcc(
             vehicleData.id,
             deviceData.deviceId,
-            enterpriseId!,
+            enterpriseId,
             acc,
             baseOrigin,
             publicKey,

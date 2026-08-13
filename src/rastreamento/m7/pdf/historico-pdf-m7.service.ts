@@ -1,4 +1,8 @@
-import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  InternalServerErrorException,
+  Logger,
+} from '@nestjs/common';
 import * as fs from 'fs';
 import * as path from 'path';
 import puppeteer from 'puppeteer';
@@ -86,7 +90,8 @@ function montarDescricaoTempo(v: ViagemM7Dto): string {
 }
 
 function gerarGraficoDistribuicaoDias(dias: DiaM7ResumoDto[]): string {
-  if (dias.length === 0) return '<p style="color:#6b7280;font-style:italic;font-size:11px;">Nenhum dado para exibir.</p>';
+  if (dias.length === 0)
+    return '<p style="color:#6b7280;font-style:italic;font-size:11px;">Nenhum dado para exibir.</p>';
 
   const maxViagens = Math.max(...dias.map((d) => d.viagens.length), 1);
   const barWidth = 36;
@@ -95,7 +100,10 @@ function gerarGraficoDistribuicaoDias(dias: DiaM7ResumoDto[]): string {
   const paddingLeft = 36;
   const paddingBottom = 42;
   const paddingTop = 20;
-  const svgWidth = Math.max(dias.length * (barWidth + gap) + paddingLeft + 24, 400);
+  const svgWidth = Math.max(
+    dias.length * (barWidth + gap) + paddingLeft + 24,
+    400,
+  );
   const svgHeight = maxBarH + paddingBottom + paddingTop;
 
   const bars = dias
@@ -115,13 +123,15 @@ function gerarGraficoDistribuicaoDias(dias: DiaM7ResumoDto[]): string {
     })
     .join('');
 
-  const yLines = [0, Math.ceil(maxViagens / 2), maxViagens].map((v) => {
-    const y = paddingTop + maxBarH - (v / maxViagens) * maxBarH;
-    return `
+  const yLines = [0, Math.ceil(maxViagens / 2), maxViagens]
+    .map((v) => {
+      const y = paddingTop + maxBarH - (v / maxViagens) * maxBarH;
+      return `
       <line x1="${paddingLeft}" y1="${y}" x2="${svgWidth - 10}" y2="${y}" stroke="#f3f4f6" stroke-width="1"/>
       <text x="${paddingLeft - 4}" y="${y + 3}" text-anchor="end" font-size="8" fill="#9ca3af" font-family="Arial">${v}</text>
     `;
-  }).join('');
+    })
+    .join('');
 
   return `
     <svg width="${svgWidth}" height="${svgHeight}" xmlns="http://www.w3.org/2000/svg" style="overflow:visible;">
@@ -487,19 +497,26 @@ function gerarHtmlRelatorio(dados: HistoricoM7PdfDataDto): string {
 // Contestação V2 — todos os pontos GPS com geocode (sem gráficos)
 // ---------------------------------------------------------------------------
 
-function formatarDataHoraContestacao(valor: string): { data: string; hora: string } {
+function formatarDataHoraContestacao(valor: string): {
+  data: string;
+  hora: string;
+} {
   if (!valor) return { data: '—', hora: '—' };
   try {
     const iso = valor.includes('T') ? valor : valor.replace(' ', 'T');
     const d = new Date(iso);
     if (isNaN(d.getTime())) return { data: valor, hora: '' };
     const data =
-      String(d.getDate()).padStart(2, '0') + '/' +
-      String(d.getMonth() + 1).padStart(2, '0') + '/' +
+      String(d.getDate()).padStart(2, '0') +
+      '/' +
+      String(d.getMonth() + 1).padStart(2, '0') +
+      '/' +
       String(d.getFullYear());
     const hora =
-      String(d.getHours()).padStart(2, '0') + ':' +
-      String(d.getMinutes()).padStart(2, '0') + ':' +
+      String(d.getHours()).padStart(2, '0') +
+      ':' +
+      String(d.getMinutes()).padStart(2, '0') +
+      ':' +
       String(d.getSeconds()).padStart(2, '0');
     return { data, hora };
   } catch {
@@ -507,7 +524,9 @@ function formatarDataHoraContestacao(valor: string): { data: string; hora: strin
   }
 }
 
-function gerarLinhasContestacaoV2(pontos: HistoricoM7ContestacaoPontoDto[]): string {
+function gerarLinhasContestacaoV2(
+  pontos: HistoricoM7ContestacaoPontoDto[],
+): string {
   if (pontos.length === 0) {
     return `<tr><td colspan="6" style="text-align:center;color:#6b7280;font-style:italic;padding:20px;">Nenhum ponto encontrado para o período informado.</td></tr>`;
   }
@@ -683,7 +702,9 @@ function gerarHtmlRelatorioContestacaoV2(
   `;
 }
 
-function gerarLinhasContestacao(pontos: HistoricoM7ContestacaoPontoDto[]): string {
+function gerarLinhasContestacao(
+  pontos: HistoricoM7ContestacaoPontoDto[],
+): string {
   if (pontos.length === 0) {
     return `<tr><td colspan="6" style="text-align:center;color:#6b7280;font-style:italic;padding:20px;">Nenhum ponto encontrado para o período informado.</td></tr>`;
   }
@@ -817,7 +838,9 @@ export class HistoricoPdfM7Service {
       this.logger.error(
         `Erro ao gerar PDF M7: ${error instanceof Error ? error.message : JSON.stringify(error)}`,
       );
-      throw new InternalServerErrorException('Erro ao gerar PDF de histórico M7');
+      throw new InternalServerErrorException(
+        'Erro ao gerar PDF de histórico M7',
+      );
     } finally {
       await browser.close();
     }

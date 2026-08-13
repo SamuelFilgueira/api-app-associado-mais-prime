@@ -1,9 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { BaseOrigin } from 'src/shared/token-resolver.service';
-import {
-  DiaM7ResumoDto,
-  ViagemM7Dto,
-} from '../dto/historico-m7-response.dto';
+import { DiaM7ResumoDto, ViagemM7Dto } from '../dto/historico-m7-response.dto';
 import {
   agruparViagensPorDia,
   formatarEnderecoM7,
@@ -145,8 +142,9 @@ export class M7ViagensBuilderService {
 
     const dias = agruparViagensPorDia(viagens);
     const distanciaTotalKm =
-      Math.round(viagens.reduce((acc, viagem) => acc + viagem.distanciaKm, 0) * 100) /
-      100;
+      Math.round(
+        viagens.reduce((acc, viagem) => acc + viagem.distanciaKm, 0) * 100,
+      ) / 100;
     const velocidadeMaxima = viagens.reduce<number>(
       (max, viagem) => Math.max(max, viagem.velocidadeMaxima),
       0,
@@ -222,7 +220,8 @@ export class M7ViagensBuilderService {
       };
     }
 
-    const isMoving = (ponto: Ponto) => ponto.velocidade > MOVING_SPEED_THRESHOLD;
+    const isMoving = (ponto: Ponto) =>
+      ponto.velocidade > MOVING_SPEED_THRESHOLD;
 
     const ignicaoSuavizada = pontos.map((ponto) => ponto.ignicao);
     let blipsIgnicaoCorrigidos = 0;
@@ -458,8 +457,9 @@ export class M7ViagensBuilderService {
 
     const dias = agruparViagensPorDia(viagens);
     const distanciaTotalKm =
-      Math.round(viagens.reduce((acc, viagem) => acc + viagem.distanciaKm, 0) * 100) /
-      100;
+      Math.round(
+        viagens.reduce((acc, viagem) => acc + viagem.distanciaKm, 0) * 100,
+      ) / 100;
     const velocidadeMaxima = viagens.reduce(
       (max, viagem) => Math.max(max, viagem.velocidadeMaxima),
       0,

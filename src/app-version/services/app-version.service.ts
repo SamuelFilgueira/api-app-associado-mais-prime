@@ -154,7 +154,10 @@ export class AppVersionService {
       }
     }
 
-    if (payload.platform === 'android' && policy.minSupportedVersionCode != null) {
+    if (
+      payload.platform === 'android' &&
+      policy.minSupportedVersionCode != null
+    ) {
       if (payload.versionCode == null) {
         return { blocked: true, reason: 'missing_version_code' };
       }
@@ -216,10 +219,12 @@ export class AppVersionService {
     return parsed;
   }
 
-  private buildAllowResponse(policy: {
-    minSupportedVersion: string;
-    minSupportedRuntimeVersion?: string | null;
-  } | null): ValidateAppVersionResponseDto {
+  private buildAllowResponse(
+    policy: {
+      minSupportedVersion: string;
+      minSupportedRuntimeVersion?: string | null;
+    } | null,
+  ): ValidateAppVersionResponseDto {
     return {
       forceUpdate: false,
       title: '',
@@ -233,7 +238,9 @@ export class AppVersionService {
     try {
       await this.policyRepository.logValidationDecision(input);
     } catch (error) {
-      this.logger.error(`Failed to write app version validation log: ${(error as Error).message}`);
+      this.logger.error(
+        `Failed to write app version validation log: ${(error as Error).message}`,
+      );
     }
   }
 }

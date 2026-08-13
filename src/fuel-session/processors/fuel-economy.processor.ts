@@ -53,7 +53,11 @@ export class FuelEconomyProcessor extends WorkerHost {
       this.logger.log(
         `[FUEL] ↩ job #${job.id} | FuelSession ${fuelSessionId} status=${session.status} — já processada, ignorando`,
       );
-      return { skipped: true, reason: 'already_processed', status: session.status };
+      return {
+        skipped: true,
+        reason: 'already_processed',
+        status: session.status,
+      };
     }
 
     // 3. Consultar API externa
@@ -65,7 +69,9 @@ export class FuelEconomyProcessor extends WorkerHost {
       this.logger.error(
         `[FUEL] ✖ job #${job.id} | Erros na API externa: ${JSON.stringify(response.errors)}`,
       );
-      throw new Error(`Erro na API externa de economia: ${JSON.stringify(response.errors)}`);
+      throw new Error(
+        `Erro na API externa de economia: ${JSON.stringify(response.errors)}`,
+      );
     }
 
     const novoValor = parseFloat(response.totalEconomizado);
@@ -74,7 +80,9 @@ export class FuelEconomyProcessor extends WorkerHost {
       this.logger.error(
         `[FUEL] ✖ job #${job.id} | totalEconomizado inválido recebido: "${response.totalEconomizado}"`,
       );
-      throw new Error(`Valor inválido retornado pela API externa: "${response.totalEconomizado}"`);
+      throw new Error(
+        `Valor inválido retornado pela API externa: "${response.totalEconomizado}"`,
+      );
     }
 
     const { valorAntes, userId } = session;
@@ -124,10 +132,7 @@ export class FuelEconomyProcessor extends WorkerHost {
   }
 
   @OnWorkerEvent('failed')
-  async onFailed(
-    job: Job<FuelEconomyJobData>,
-    error: Error,
-  ): Promise<void> {
+  async onFailed(job: Job<FuelEconomyJobData>, error: Error): Promise<void> {
     const maxAttempts = job.opts.attempts ?? 1;
     const isLastAttempt = job.attemptsMade >= maxAttempts;
 

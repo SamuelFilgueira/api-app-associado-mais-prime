@@ -65,9 +65,10 @@ export class SgaService {
       // Obs.: pode falhar se o CPF estiver armazenado com formatação diferente
       try {
         const user = await this.prisma.user.findFirst({ where: { cpf } });
-        if (user?.baseOrigin) baseOrigin = user.baseOrigin as BaseOrigin;
+        if (user?.baseOrigin) baseOrigin = user.baseOrigin;
       } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : 'erro desconhecido';
+        const message =
+          err instanceof Error ? err.message : 'erro desconhecido';
         this.logger.warn(
           `Falha ao resolver baseOrigin por cpf=${cpf}: ${message}`,
         );
@@ -92,7 +93,7 @@ export class SgaService {
         select: { user: { select: { baseOrigin: true } } },
       });
       if (userVehicle?.user?.baseOrigin) {
-        baseOrigin = userVehicle.user.baseOrigin as BaseOrigin;
+        baseOrigin = userVehicle.user.baseOrigin;
       }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'erro desconhecido';
@@ -371,12 +372,17 @@ export class SgaService {
 
     if (produtosResponse.status >= 400) {
       this.logger.error(
-        debugLog(SgaService.name, 'Erro ao buscar produtos do veículo', debugId, {
-          userVehicleId,
-          placa: plate,
-          status: produtosResponse.status,
-          body: produtosResponse.data,
-        }),
+        debugLog(
+          SgaService.name,
+          'Erro ao buscar produtos do veículo',
+          debugId,
+          {
+            userVehicleId,
+            placa: plate,
+            status: produtosResponse.status,
+            body: produtosResponse.data,
+          },
+        ),
       );
       throw new InternalServerErrorException(
         'Erro ao buscar produtos vinculados ao veículo',
@@ -471,18 +477,22 @@ export class SgaService {
       [key: string]: unknown;
     };
 
-    const normalizeBoletoResponse = (input: unknown): BoletoCadastradoItem[] => {
+    const normalizeBoletoResponse = (
+      input: unknown,
+    ): BoletoCadastradoItem[] => {
       if (!input) return [];
       if (Array.isArray(input)) {
         return input.filter(
-          (item): item is BoletoCadastradoItem => !!item && typeof item === 'object',
+          (item): item is BoletoCadastradoItem =>
+            !!item && typeof item === 'object',
         );
       }
       if (typeof input === 'object') {
         const record = input as Record<string, unknown>;
         if (Array.isArray(record.dados_boleto_inserido)) {
           return record.dados_boleto_inserido.filter(
-            (item): item is BoletoCadastradoItem => !!item && typeof item === 'object',
+            (item): item is BoletoCadastradoItem =>
+              !!item && typeof item === 'object',
           );
         }
         const numericKeyItems = Object.entries(record)
@@ -506,7 +516,8 @@ export class SgaService {
     }
 
     const nossoNumero =
-      boletoDados?.nosso_numero !== undefined && boletoDados.nosso_numero !== null
+      boletoDados?.nosso_numero !== undefined &&
+      boletoDados.nosso_numero !== null
         ? Number(boletoDados.nosso_numero)
         : undefined;
     const linhaDigitavel = boletoDados?.linha_digitavel;
@@ -553,11 +564,19 @@ export class SgaService {
       }
     } catch (paymentPersistError) {
       this.logger.error(
-        debugLog(SgaService.name, 'Falha ao persistir pagamento de revistoria (inicial)', debugId, {
-          userVehicleId,
-          nossoNumero: nossoNumero ?? 'N/A',
-          error: paymentPersistError instanceof Error ? paymentPersistError.message : String(paymentPersistError),
-        }),
+        debugLog(
+          SgaService.name,
+          'Falha ao persistir pagamento de revistoria (inicial)',
+          debugId,
+          {
+            userVehicleId,
+            nossoNumero: nossoNumero ?? 'N/A',
+            error:
+              paymentPersistError instanceof Error
+                ? paymentPersistError.message
+                : String(paymentPersistError),
+          },
+        ),
       );
     }
 
@@ -633,22 +652,34 @@ export class SgaService {
             validateStatus: () => true,
           },
         );
-
       } catch (suriError) {
         this.logger.error(
-          debugLog(SgaService.name, 'Falha ao enviar notificação Suri', debugId, {
-            userVehicleId,
-            error: suriError instanceof Error ? suriError.message : String(suriError),
-          }),
+          debugLog(
+            SgaService.name,
+            'Falha ao enviar notificação Suri',
+            debugId,
+            {
+              userVehicleId,
+              error:
+                suriError instanceof Error
+                  ? suriError.message
+                  : String(suriError),
+            },
+          ),
         );
       }
     } else {
       this.logger.warn(
-        debugLog(SgaService.name, 'link_boleto não encontrado na resposta do boleto', debugId, {
-          userVehicleId,
-          nossoNumero: nossoNumero ?? 'N/A',
-          rawData: boletoResponse.data,
-        }),
+        debugLog(
+          SgaService.name,
+          'link_boleto não encontrado na resposta do boleto',
+          debugId,
+          {
+            userVehicleId,
+            nossoNumero: nossoNumero ?? 'N/A',
+            rawData: boletoResponse.data,
+          },
+        ),
       );
     }
   }

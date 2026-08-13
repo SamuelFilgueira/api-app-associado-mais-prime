@@ -115,12 +115,17 @@ export class MailService {
       await this.transporter.sendMail(mailOptions);
     } catch (error) {
       this.logger.error(
-        debugLog(MailService.name, 'Falha ao enviar e-mail de revistoria', debugId, {
-          chassi,
-          plate: safePlate,
-          destino: TENANT.mailPrevia,
-          error: error instanceof Error ? error.message : String(error),
-        }),
+        debugLog(
+          MailService.name,
+          'Falha ao enviar e-mail de revistoria',
+          debugId,
+          {
+            chassi,
+            plate: safePlate,
+            destino: TENANT.mailPrevia,
+            error: error instanceof Error ? error.message : String(error),
+          },
+        ),
       );
       throw error;
     }
@@ -155,12 +160,17 @@ export class MailService {
       await this.transporter.sendMail(mailOptions);
     } catch (error) {
       this.logger.error(
-        debugLog(MailService.name, 'Falha ao enviar e-mail de revistoria aprovada', debugId, {
-          chassi,
-          plate: safePlate,
-          destino: TENANT.mailCobranca,
-          error: error instanceof Error ? error.message : String(error),
-        }),
+        debugLog(
+          MailService.name,
+          'Falha ao enviar e-mail de revistoria aprovada',
+          debugId,
+          {
+            chassi,
+            plate: safePlate,
+            destino: TENANT.mailCobranca,
+            error: error instanceof Error ? error.message : String(error),
+          },
+        ),
       );
       throw error;
     }
@@ -175,10 +185,7 @@ export class MailService {
 
     const mailOptions: nodemailer.SendMailOptions = {
       from: `"${TENANT.appName}" <${process.env.GMAIL_USER}>`,
-      to: [
-        TENANT.mailCobranca,
-        TENANT.mailPrevia
-      ],
+      to: [TENANT.mailCobranca, TENANT.mailPrevia],
       subject: `Boleto para placa ${safePlate} pago - Revistoria Aprovada`,
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 480px; margin: auto; padding: 24px; border: 1px solid #e0e0e0; border-radius: 8px;">
@@ -197,12 +204,17 @@ export class MailService {
       await this.transporter.sendMail(mailOptions);
     } catch (error) {
       this.logger.error(
-        debugLog(MailService.name, 'Falha ao enviar e-mail de boleto pago', debugId, {
-          chassi,
-          plate: safePlate,
-          destino: [TENANT.mailCobranca, TENANT.mailPrevia],
-          error: error instanceof Error ? error.message : String(error),
-        }),
+        debugLog(
+          MailService.name,
+          'Falha ao enviar e-mail de boleto pago',
+          debugId,
+          {
+            chassi,
+            plate: safePlate,
+            destino: [TENANT.mailCobranca, TENANT.mailPrevia],
+            error: error instanceof Error ? error.message : String(error),
+          },
+        ),
       );
       throw error;
     }
@@ -271,11 +283,16 @@ export class MailService {
       await this.transporter.sendMail(mailOptions);
     } catch (error) {
       this.logger.error(
-        debugLog(MailService.name, 'Falha ao enviar e-mail de foto recusada reenviada', debugId, {
-          chassi,
-          plate: safePlate,
-          error: error instanceof Error ? error.message : String(error),
-        }),
+        debugLog(
+          MailService.name,
+          'Falha ao enviar e-mail de foto recusada reenviada',
+          debugId,
+          {
+            chassi,
+            plate: safePlate,
+            error: error instanceof Error ? error.message : String(error),
+          },
+        ),
       );
       throw error;
     }
