@@ -532,6 +532,7 @@ enum AdminPanelRole {
   MARKETING
   COBRANCA
   ADMIN
+  RESET_PASSWORD
 }
 
 enum ReinspectionPhotoStatus {
