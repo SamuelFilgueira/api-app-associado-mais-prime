@@ -30,6 +30,8 @@ const WARN_IF_MISSING = [
   'sendTo',
   'x_clientemployee_email',
   'x_clientemployee_token',
+  // Rotina de notificações de boleto (opt-in explícito; demais envs têm default)
+  'BOLETO_NOTIFICACAO_ENABLED',
 ];
 
 /**

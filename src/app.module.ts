@@ -24,6 +24,7 @@ import { AdminPanelModule } from './admin-panel/admin-panel.module';
 import { FuelSessionModule } from './fuel-session/fuel-session.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { AppVersionModule } from './app-version/app-version.module';
+import { BoletoNotificacaoModule } from './boleto-notificacao/boleto-notificacao.module';
 
 @Module({
   imports: [
@@ -52,6 +53,7 @@ import { AppVersionModule } from './app-version/app-version.module';
     AdminPanelModule,
     AnalyticsModule,
     AppVersionModule,
+    BoletoNotificacaoModule,
   ],
   controllers: [AppController],
   providers: [AppService],

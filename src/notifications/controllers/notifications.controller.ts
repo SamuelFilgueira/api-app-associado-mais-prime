@@ -15,6 +15,7 @@ import {
   HttpCode,
   HttpStatus,
   ForbiddenException,
+  BadRequestException,
   Logger,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -32,6 +33,8 @@ import { AdminPanelRoles } from 'src/admin-panel/decorators/admin-panel-roles.de
 import { AdminPanelRole } from 'src/admin-panel/enums/admin-panel-role.enum';
 import { MarketingNotificationAuditService } from 'src/notifications/services/marketing-notification-audit.service';
 import { UpsertPopupDto } from 'src/notifications/dto/upsert-popup.dto';
+import { SendSituacaoCadastroNotificationDto } from 'src/notifications/dto/send-situacao-cadastro-notification.dto';
+import { SituacaoCadastroNotificationService } from 'src/notifications/services/situacao-cadastro-notification.service';
 
 @Controller('notifications')
 export class NotificationsController {
@@ -47,6 +50,7 @@ export class NotificationsController {
     private readonly notificationsService: NotificationsService,
     @InjectQueue(NOTIFICATION_QUEUE) private readonly notificationQueue: Queue,
     private readonly marketingNotificationAuditService: MarketingNotificationAuditService,
+    private readonly situacaoCadastroNotificationService: SituacaoCadastroNotificationService,
   ) {}
 
   /**
@@ -283,6 +287,88 @@ export class NotificationsController {
       );
 
       this.logger.error(`[MARKETING] ❌ Erro: ${error.message}`, error.stack);
+      throw error;
+    }
+  }
+
+  /**
+   * POST /notifications/admin/situacao-cadastro
+   * Envia notificacao push em massa para os CPFs de uma planilha Excel
+   * (mudanca de situacao no cadastro — ex.: Ativo -> Inadimplente).
+   * Acesso restrito a usuarios com role ADMIN.
+   */
+  @UseGuards(JwtAuthGuard, AdminRoleGuard, AdminPanelRoleGuard)
+  @AdminPanelRoles(AdminPanelRole.ADMIN)
+  @Post('admin/situacao-cadastro')
+  @UseInterceptors(
+    FileInterceptor('file', { limits: { fileSize: 5 * 1024 * 1024 } }),
+  )
+  @HttpCode(HttpStatus.OK)
+  async sendSituacaoCadastroNotification(
+    @Body() dto: SendSituacaoCadastroNotificationDto,
+    @UploadedFile() file: Express.Multer.File,
+    @Request() req: any,
+  ) {
+    if (!file) {
+      throw new BadRequestException(
+        'A planilha Excel (.xlsx) é obrigatória no campo "file"',
+      );
+    }
+
+    const isXlsx =
+      file.originalname?.toLowerCase().endsWith('.xlsx') ||
+      file.mimetype ===
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+    if (!isXlsx) {
+      throw new BadRequestException(
+        'Formato de arquivo não suportado. Envie uma planilha .xlsx',
+      );
+    }
+
+    // Corrige acentuação que chegou com encoding errado (latin1/cp1252)
+    const title = this.situacaoCadastroNotificationService.corrigirTextoUtf8(
+      dto.title,
+    );
+    const body = this.situacaoCadastroNotificationService.corrigirTextoUtf8(
+      dto.body,
+    );
+
+    const dataPayload =
+      this.situacaoCadastroNotificationService.parseDataPayload(dto.data);
+
+    const auditId =
+      await this.marketingNotificationAuditService.createRequestAudit(
+        req.user?.userId,
+        { title, body, data: dataPayload } as any,
+      );
+
+    try {
+      const result =
+        await this.situacaoCadastroNotificationService.enviarPorPlanilha(
+          file.buffer,
+          title,
+          body,
+          dataPayload,
+        );
+
+      await this.marketingNotificationAuditService.markSuccess(
+        auditId,
+        result.sentCount,
+        result.skippedCount,
+      );
+
+      return result;
+    } catch (error) {
+      await this.marketingNotificationAuditService.markFailure(
+        auditId,
+        error?.message || 'Erro desconhecido',
+      );
+
+      this.logger.error(
+        `[SITUACAO-CADASTRO] ❌ Erro: ${error.message}`,
+        error.stack,
+      );
       throw error;
     }
   }

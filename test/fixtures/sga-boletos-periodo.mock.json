@@ -1,0 +1,77 @@
+{
+  "mostrando ": 4,
+  "numero_paginas": 1,
+  "total_registros": "4",
+  "pagina_corrente": 1,
+  "boletos": [
+    {
+      "nosso_numero": 900001,
+      "linha_digitavel": "0000.00000 00000.000000 00000.000000 0 00000000000000",
+      "valor_boleto": "129.90",
+      "valor_pagamento": "0.00",
+      "codigo_tipo_boleto": "1",
+      "tipo_boleto": "MENSALIDADE",
+      "codigo_associado": 10001,
+      "nome_associado": "ASSOCIADO TESTE UM",
+      "cpf": "15654718738",
+      "email": "teste1@example.com",
+      "data_emissao": "01/03/2026",
+      "data_vencimento": "10/03/2026",
+      "data_vencimento_original": "10/03/2026",
+      "data_pagamento": "",
+      "codigo_situacao_boleto": "2",
+      "situacao_boleto": "ABERTO",
+      "codigo_banco": "1",
+      "mes_referente": "03/2026",
+      "veiculos": [
+        { "codigo_veiculo": 501, "placa": "ABC1D23", "codigo_regional": "1", "situacao_veiculo": "ATIVO" }
+      ]
+    },
+    {
+      "nosso_numero": 900002,
+      "valor_boleto": "89.90",
+      "codigo_associado": 10001,
+      "nome_associado": "ASSOCIADO TESTE UM",
+      "cpf": "529.982.247-25",
+      "data_vencimento": "10/03/2026",
+      "data_vencimento_original": "10/03/2026",
+      "codigo_situacao_boleto": 2,
+      "situacao_boleto": "ABERTO",
+      "mes_referente": "03/2026",
+      "veiculos": [
+        { "codigo_veiculo": 502, "placa": "XYZ9W87", "codigo_regional": "1", "situacao_veiculo": "ATIVO" }
+      ]
+    },
+    {
+      "nosso_numero": 900003,
+      "valor_boleto": "129.90",
+      "codigo_associado": 10002,
+      "nome_associado": "ASSOCIADO TESTE DOIS",
+      "cpf": "01234567890",
+      "data_vencimento": "15/03/2026",
+      "data_vencimento_original": "10/03/2026",
+      "codigo_situacao_boleto": "2",
+      "situacao_boleto": "ABERTO",
+      "mes_referente": "03/2026",
+      "veiculos": [
+        { "codigo_veiculo": 503, "placa": "QWE4R56", "codigo_regional": "2", "situacao_veiculo": "ATIVO" }
+      ]
+    },
+    {
+      "nosso_numero": 900004,
+      "valor_boleto": "129.90",
+      "codigo_associado": 10003,
+      "nome_associado": "ASSOCIADO PAGO",
+      "cpf": "11144477735",
+      "data_vencimento": "10/03/2026",
+      "data_vencimento_original": "10/03/2026",
+      "data_pagamento": "09/03/2026",
+      "codigo_situacao_boleto": "1",
+      "situacao_boleto": "BAIXADO",
+      "mes_referente": "03/2026",
+      "veiculos": [
+        { "codigo_veiculo": 504, "placa": "PAG0A00", "codigo_regional": "1", "situacao_veiculo": "ATIVO" }
+      ]
+    }
+  ]
+}

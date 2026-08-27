@@ -8,13 +8,7 @@ import { PrismaService } from 'src/database/prisma.service';
 import { BaseOrigin } from 'src/shared/token-resolver.service';
 import { TENANT } from 'src/config/tenant.config';
 import { SgaAuthService } from 'src/shared/sga-auth.service';
-
-function formatDateBR(date: Date) {
-  const dia = String(date.getDate()).padStart(2, '0');
-  const mes = String(date.getMonth() + 1).padStart(2, '0');
-  const ano = date.getFullYear();
-  return `${dia}/${mes}/${ano}`;
-}
+import { formatDateBR } from 'src/shared/date.util';
 
 type BoletoApiVehicle = {
   codigo_veiculo?: string | number;

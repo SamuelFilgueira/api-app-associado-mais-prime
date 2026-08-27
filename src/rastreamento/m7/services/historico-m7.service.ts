@@ -35,6 +35,7 @@ import { sanitizarPontosGps } from '../helpers/m7-gps-sanitizer.helper';
 import { HistoricoPdfM7Service } from '../pdf/historico-pdf-m7.service';
 import { M7ReverseGeocodeService } from './m7-reverse-geocode.service';
 import { M7ViagensBuilderService } from './m7-viagens-builder.service';
+import { RastreamentoM7 } from './rastreamento-m7';
 
 const M7_REQUEST_TIMEOUT = 50_000;
 
@@ -56,6 +57,7 @@ export class HistoricoM7Service {
     private readonly pdfService: HistoricoPdfM7Service,
     private readonly reverseGeocodeService: M7ReverseGeocodeService,
     private readonly viagensBuilderService: M7ViagensBuilderService,
+    private readonly rastreamentoM7: RastreamentoM7,
   ) {
     for (const base of TENANT.baseNames) {
       void this.renovarToken(base);
@@ -212,6 +214,42 @@ export class HistoricoM7Service {
       );
       throw new BadGatewayException('Falha ao consultar veículo na API M7');
     }
+  }
+
+  /**
+   * Monta `veiculoData` no mesmo formato de `consultarVeiculo`, porém a partir
+   * de `ultimaPosicaoM7`: `codigo` = `monitorado` (esperado pelo endpoint de
+   * trajetos) e `placa` = `identificador`. A API não retorna chassi, então é
+   * reaproveitado o chassi informado na requisição.
+   */
+  private async consultarVeiculoPorUltimaPosicao(
+    cnpj: string,
+    chassi: string,
+    baseOrigin: BaseOrigin,
+  ): Promise<M7ConsultaVeiculoResponse | null> {
+    const ultimaPosicao = await this.rastreamentoM7.ultimaPosicaoM7(
+      cnpj,
+      chassi,
+      baseOrigin,
+      false,
+    );
+
+    const monitorado = Number(ultimaPosicao?.monitorado);
+    if (!Number.isFinite(monitorado) || monitorado <= 0) {
+      this.logger.warn(
+        `[${baseOrigin}] ultimaPosicaoM7 sem 'monitorado' válido para chassi=${chassi}`,
+      );
+      return null;
+    }
+
+    return {
+      veiculo: {
+        codigo: monitorado,
+        placa: ultimaPosicao.identificador ?? '',
+        chassi,
+      },
+      cliente: { codigo: 0 },
+    };
   }
 
   private async buscarTrajetos(
@@ -590,7 +628,13 @@ export class HistoricoM7Service {
     dataFinal: string,
     baseOrigin: BaseOrigin,
   ): Promise<HistoricoM7ResumoResponseDto> {
-    const veiculoData = await this.consultarVeiculo(cnpj, chassi, baseOrigin);
+    // O endpoint /monitorado/{codigo}/trajetos espera o código do MONITORADO
+    // (retornado em ultima-posicao), e não o código do veículo de /veiculos/consulta.
+    const veiculoData = await this.consultarVeiculoPorUltimaPosicao(
+      cnpj,
+      chassi,
+      baseOrigin,
+    );
 
     if (!veiculoData?.veiculo?.codigo) {
       throw new NotFoundException('Veículo não encontrado na plataforma M7');
@@ -631,7 +675,13 @@ export class HistoricoM7Service {
     dataFinal: string,
     baseOrigin: BaseOrigin,
   ): Promise<HistoricoM7RotasResponseDto> {
-    const veiculoData = await this.consultarVeiculo(cnpj, chassi, baseOrigin);
+    // Mesma regra de obterResumo: o código do MONITORADO (ultima-posicao)
+    // é o identificador esperado pelos endpoints de histórico da M7.
+    const veiculoData = await this.consultarVeiculoPorUltimaPosicao(
+      cnpj,
+      chassi,
+      baseOrigin,
+    );
 
     if (!veiculoData?.veiculo?.codigo) {
       throw new NotFoundException('Veículo não encontrado na plataforma M7');

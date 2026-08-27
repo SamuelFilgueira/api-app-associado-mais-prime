@@ -8,31 +8,31 @@ datasource db {
 }
 
 model user {
-  id                            Int             @id @default(autoincrement())
+  id                            Int            @id @default(autoincrement())
   name                          String
-  cpf                           String          @unique(map: "User_cpf_key")
+  cpf                           String         @unique(map: "User_cpf_key")
   email                         String
   passwordHash                  String
-  isActive                      Boolean         @default(true)
-  createdAt                     DateTime        @default(now())
-  updatedAt                     DateTime        @updatedAt
+  isActive                      Boolean        @default(true)
+  createdAt                     DateTime       @default(now())
+  updatedAt                     DateTime       @updatedAt
   latitude                      Float?
   longitude                     Float?
-  primeiroLogin                 Boolean         @default(false)
+  primeiroLogin                 Boolean        @default(false)
   profilePhotoUrl               String?
   address                       String?
   cep                           String?
   plate                         String?
-  acceptsMarketingNotifications Boolean         @default(true)
-  notificacaoIgnicao            Boolean         @default(false)
-  role                          UserRole        @default(USER)
-  ancoraAtiva                   Boolean         @default(false)
-  expoPushToken                 String?         @db.VarChar(255)
+  acceptsMarketingNotifications Boolean        @default(true)
+  notificacaoIgnicao            Boolean        @default(false)
+  role                          UserRole       @default(USER)
+  ancoraAtiva                   Boolean        @default(false)
+  expoPushToken                 String?        @db.VarChar(255)
   // Base de origem (tenant). Deixou de ser enum para que cada empresa do
   // grupo defina suas bases via TENANT_BASES, sem migration de schema.
   // Validação dos valores aceitos: src/config/tenant.config.ts
-  baseOrigin                    String?         @db.VarChar(50)
-  totalEconomizado              Float           @default(0)
+  baseOrigin                    String?        @db.VarChar(50)
+  totalEconomizado              Float          @default(0)
   notifications                 Notification[]
   userVehicles                  UserVehicle[]
   fuelSessions                  FuelSession[]
@@ -68,13 +68,13 @@ model workshop {
 }
 
 model AdminPanelUser {
-  id        Int            @id @default(autoincrement())
-  name      String         @db.VarChar(150)
-  password  String         @db.VarChar(255)
-  email     String         @unique(map: "AdminPanelUser_email_key") @db.VarChar(150)
-  role      AdminPanelRole
-  createdAt DateTime       @default(now())
-  updatedAt DateTime       @updatedAt
+  id                             Int                             @id @default(autoincrement())
+  name                           String                          @db.VarChar(150)
+  password                       String                          @db.VarChar(255)
+  email                          String                          @unique(map: "AdminPanelUser_email_key") @db.VarChar(150)
+  role                           AdminPanelRole
+  createdAt                      DateTime                        @default(now())
+  updatedAt                      DateTime                        @updatedAt
   marketingNotificationAuditLogs MarketingNotificationAuditLog[]
 
   @@index([role], map: "AdminPanelUser_role_idx")
@@ -329,6 +329,70 @@ model ReinspectionPayment {
   @@index([userVehicleId], map: "ReinspectionPayment_userVehicleId_idx")
 }
 
+/// Execução da rotina diária de notificações de boleto (uma linha por
+/// tenant × tipo de mensagem × data-alvo). Concentra as métricas de cobertura.
+model BoletoNotificacaoExecucao {
+  id                     Int                             @id @default(autoincrement())
+  tenant                 String                          @db.VarChar(50)
+  tipoMensagem           BoletoNotificacaoTipo
+  dataReferencia         DateTime                        @db.Date
+  dataAlvo               DateTime                        @db.Date
+  status                 BoletoNotificacaoExecucaoStatus @default(EM_ANDAMENTO)
+  origem                 String                          @default("AGENDADA") @db.VarChar(20)
+  dryRun                 Boolean                         @default(false)
+  totalRegistrosSga      Int                             @default(0)
+  totalPaginasSga        Int                             @default(0)
+  totalBoletosElegiveis  Int                             @default(0)
+  totalAssociados        Int                             @default(0)
+  totalSemUsuario        Int                             @default(0)
+  totalSemToken          Int                             @default(0)
+  totalIdempotentes      Int                             @default(0)
+  totalDuplicadosUsuario Int                             @default(0)
+  totalEnfileirados      Int                             @default(0)
+  totalEnviados          Int                             @default(0)
+  totalEntregues         Int                             @default(0)
+  totalFalhas            Int                             @default(0)
+  totalTokensInvalidos   Int                             @default(0)
+  coberturaElegiveis     Float?
+  coberturaEntrega       Float?
+  receiptsVerificadosEm  DateTime?
+  erro                   String?                         @db.Text
+  iniciadoEm             DateTime                        @default(now())
+  finalizadoEm           DateTime?
+  logs                   BoletoNotificacaoLog[]
+
+  @@index([tenant, dataAlvo, tipoMensagem], map: "BoletoNotificacaoExecucao_tenant_dataAlvo_tipo_idx")
+  @@index([iniciadoEm], map: "BoletoNotificacaoExecucao_iniciadoEm_idx")
+}
+
+/// Log de cada push da rotina de boletos. A chave única garante idempotência
+/// e agrega N boletos do mesmo associado/vencimento em um único disparo.
+model BoletoNotificacaoLog {
+  id                     Int                       @id @default(autoincrement())
+  execucaoId             Int
+  tenant                 String                    @db.VarChar(50)
+  codigoAssociado        Int
+  cpf                    String                    @db.VarChar(11)
+  userId                 Int?
+  nossoNumero            String?                   @db.VarChar(50)
+  quantidadeBoletos      Int                       @default(1)
+  dataVencimentoOriginal DateTime                  @db.Date
+  tipoMensagem           BoletoNotificacaoTipo
+  expoPushToken          String?                   @db.VarChar(255)
+  statusEnvio            BoletoNotificacaoStatus   @default(ENFILEIRADO)
+  expoTicketId           String?                   @db.VarChar(100)
+  expoErro               String?                   @db.VarChar(255)
+  mensagemTitulo         String                    @db.VarChar(255)
+  mensagemEnviada        String                    @db.Text
+  criadoEm               DateTime                  @default(now())
+  atualizadoEm           DateTime                  @updatedAt
+  execucao               BoletoNotificacaoExecucao @relation(fields: [execucaoId], references: [id], onDelete: Cascade, map: "BoletoNotificacaoLog_execucaoId_fkey")
+
+  @@unique([tenant, codigoAssociado, dataVencimentoOriginal, tipoMensagem], map: "BoletoNotificacaoLog_idempotencia_key")
+  @@index([execucaoId, statusEnvio], map: "BoletoNotificacaoLog_execucaoId_statusEnvio_idx")
+  @@index([userId], map: "BoletoNotificacaoLog_userId_idx")
+}
+
 model ReinspectionPhoto {
   id              Int                        @id @default(autoincrement())
   reinspectionId  Int
@@ -360,7 +424,6 @@ model ReinspectionTemplatePhoto {
   @@unique([vehicleType, ordem], map: "ReinspectionTemplatePhoto_vehicleType_ordem_key")
   @@index([vehicleType], map: "ReinspectionTemplatePhoto_vehicleType_idx")
 }
-
 
 model SliderInfo {
   id          Int      @id @default(autoincrement())
@@ -539,4 +602,24 @@ enum ReinspectionPhotoStatus {
   PENDENTE
   APROVADA
   REPROVADA
+}
+
+enum BoletoNotificacaoTipo {
+  D0
+  D5
+  D6
+}
+
+enum BoletoNotificacaoStatus {
+  ENFILEIRADO
+  ENVIADO
+  ENTREGUE
+  FALHA
+}
+
+enum BoletoNotificacaoExecucaoStatus {
+  EM_ANDAMENTO
+  CONCLUIDA
+  PULADA
+  FALHA
 }
