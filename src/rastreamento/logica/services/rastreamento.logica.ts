@@ -1,3 +1,4 @@
+import { buildLogicaUrl, isLogicaTokenInvalidResponse, LOGICA_REQUEST_TIMEOUT } from 'src/rastreamento/logica/constants/logica.constants';
 import {
   Injectable,
   InternalServerErrorException,
@@ -13,7 +14,6 @@ import {
 import { LogicaAuthService } from 'src/rastreamento/logica/services/logica-auth.service';
 
 /** Timeout padrão para chamadas HTTP à API Lógica Soluções (em ms) */
-const LOGICA_REQUEST_TIMEOUT = 15_000;
 
 export interface UltimaPosicaoLogicaResponse {
   oIgnicao: boolean;
@@ -204,38 +204,14 @@ export class LogicaRastreamentoService implements IRastreamentoProvider {
   }
 
   private buildUrl(path: string): string {
-    const baseUrl = process.env.LOGICA_API_BASE_URL;
-
-    if (!baseUrl) {
-      throw new InternalServerErrorException(
-        'LOGICA_API_BASE_URL não definida nas variáveis de ambiente',
-      );
-    }
-
-    const normalized = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
-    return `${normalized}/${path.replace(/^\//, '')}`;
+    return buildLogicaUrl(path);
   }
 
   private isTokenInvalidResponse(data: unknown): boolean {
-    if (!data || typeof data !== 'object') return false;
-
-    const value = data as Record<string, unknown>;
-    const logado = value.logado;
-    const erro = value.erro;
-    const mensagem =
-      typeof value.mensagem === 'string' ? value.mensagem.toLowerCase() : '';
-
-    if (logado === false || erro === true) return true;
-    if (
-      mensagem.includes('token') &&
-      (mensagem.includes('inv') || mensagem.includes('expir'))
-    ) {
-      return true;
-    }
-
-    return false;
+    return isLogicaTokenInvalidResponse(data);
   }
 
+  // TODO(dedupe/B11): há 3 parsers de data BR->timestamp com fallbacks divergentes (0 aqui; throw em rastreamento.service; MAX_SAFE_INTEGER em trajetos.service) — unificar muda comportamento de ordenação/erro.
   private parseDateToTimestamp(dateValue: string): number {
     const dateTrimmed = dateValue?.trim() ?? '';
     const parsedNative = Date.parse(dateTrimmed.replace(' ', 'T'));

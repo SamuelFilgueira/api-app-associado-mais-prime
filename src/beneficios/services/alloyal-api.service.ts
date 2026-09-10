@@ -589,21 +589,36 @@ export class AlloyalApiService {
    * @param cpf CPF do usuário (apenas números, sem caracteres especiais)
    * @returns Lista de usuários encontrados ou array vazio
    */
+
+  /**
+   * Credenciais de employee (integração administrativa Alloyal) — leitura e
+   * validação antes triplicadas em searchUserByCpf/createUser/updateUser.
+   */
+  private getClientEmployeeCredentials(): {
+    clientEmployeeEmail: string;
+    clientEmployeeToken: string;
+  } {
+    const clientEmployeeEmail = process.env.x_clientemployee_email;
+    const clientEmployeeToken = process.env.x_clientemployee_token;
+
+    if (!clientEmployeeEmail || !clientEmployeeToken) {
+      this.logger.error(
+        'x_clientemployee_email ou x_clientemployee_token não configurados',
+      );
+      throw new Error(
+        'Missing x_clientemployee_email or x_clientemployee_token',
+      );
+    }
+
+    return { clientEmployeeEmail, clientEmployeeToken };
+  }
+
   async searchUserByCpf(cpf: string): Promise<AlloyalUserDto[]> {
     try {
-      const clientEmployeeEmail = process.env.x_clientemployee_email;
-      const clientEmployeeToken = process.env.x_clientemployee_token;
       const { baseOrigin, businessCnpj } =
-        this.resolveAlloyalCredentials('searchUserByCpf');
-
-      if (!clientEmployeeEmail || !clientEmployeeToken) {
-        this.logger.error(
-          'x_clientemployee_email ou x_clientemployee_token não configurados',
-        );
-        throw new Error(
-          'Missing x_clientemployee_email or x_clientemployee_token',
-        );
-      }
+        this.resolveAlloyalCredentials('');
+      const { clientEmployeeEmail, clientEmployeeToken } =
+        this.getClientEmployeeCredentials();
 
       // Remove caracteres especiais do CPF (apenas números)
       const cleanCpf = cpf.replace(/\D/g, '');
@@ -990,19 +1005,10 @@ export class AlloyalApiService {
    */
   async createUser(dto: AlloyalCreateUserRequestDto): Promise<AlloyalUserDto> {
     try {
-      const clientEmployeeEmail = process.env.x_clientemployee_email;
-      const clientEmployeeToken = process.env.x_clientemployee_token;
       const { baseOrigin, businessCnpj } =
-        this.resolveAlloyalCredentials('createUser');
-
-      if (!clientEmployeeEmail || !clientEmployeeToken) {
-        this.logger.error(
-          'x_clientemployee_email ou x_clientemployee_token não configurados',
-        );
-        throw new Error(
-          'Missing x_clientemployee_email or x_clientemployee_token',
-        );
-      }
+        this.resolveAlloyalCredentials('');
+      const { clientEmployeeEmail, clientEmployeeToken } =
+        this.getClientEmployeeCredentials();
 
       const apiBaseOrigin = this.getAlloyalBaseUrlOrigin(baseOrigin);
 
@@ -1067,19 +1073,10 @@ export class AlloyalApiService {
     dto: AlloyalUpdateUserRequestDto,
   ): Promise<AlloyalUserDto> {
     try {
-      const clientEmployeeEmail = process.env.x_clientemployee_email;
-      const clientEmployeeToken = process.env.x_clientemployee_token;
       const { baseOrigin, businessCnpj } =
-        this.resolveAlloyalCredentials('updateUser');
-
-      if (!clientEmployeeEmail || !clientEmployeeToken) {
-        this.logger.error(
-          'x_clientemployee_email ou x_clientemployee_token não configurados',
-        );
-        throw new Error(
-          'Missing x_clientemployee_email or x_clientemployee_token',
-        );
-      }
+        this.resolveAlloyalCredentials('');
+      const { clientEmployeeEmail, clientEmployeeToken } =
+        this.getClientEmployeeCredentials();
 
       const apiBaseOrigin = this.getAlloyalBaseUrlOrigin(baseOrigin);
       const cleanCpf = cpf.replace(/\D/g, '');

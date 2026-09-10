@@ -27,6 +27,7 @@ import { NotificationsService } from 'src/notifications/services/notifications.s
 import { HistoricoSoftruckService } from 'src/rastreamento/softruck/services/historico-softruck.service';
 import { HistoricoRotasResponseDto } from 'src/rastreamento/softruck/dto/historico-response.dto';
 import { M7ReverseGeocodeService } from 'src/rastreamento/m7/services/m7-reverse-geocode.service';
+import { RastreamentoBaseContext } from 'src/rastreamento/providers/rastreamento-provider.interface';
 import axios from 'axios';
 
 type RastreamentoUnificadoResponse =
@@ -43,13 +44,6 @@ interface RastreamentoCandidato {
   dataOriginal: string;
   timestamp: number;
   origem: 'm7' | 'logica' | 'softruck';
-}
-
-interface RastreamentoBaseContext {
-  baseOrigin: BaseOrigin;
-  logicaToken: string;
-  logicaTokenKey: string;
-  softruckPublicKey: string;
 }
 
 interface WebhookDados {
@@ -695,6 +689,7 @@ export class RastreamentoService {
     }
   }
 
+  // TODO(dedupe/B11): ver comentário em rastreamento.logica.ts — 3 parsers divergentes; não unificar sem decisão.
   private parseDateToTimestamp(dateValue: string | null | undefined): number {
     if (typeof dateValue !== 'string' || !dateValue.trim()) {
       throw new Error('Data de rastreamento ausente ou inválida');

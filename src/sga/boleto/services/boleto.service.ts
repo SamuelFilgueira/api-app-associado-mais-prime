@@ -1,3 +1,4 @@
+import { SGA_BASE_URL } from 'src/integrations/hinova/hinova.constants';
 import {
   Injectable,
   Logger,
@@ -7,8 +8,8 @@ import axios from 'axios';
 import { PrismaService } from 'src/database/prisma.service';
 import { BaseOrigin } from 'src/shared/token-resolver.service';
 import { TENANT } from 'src/config/tenant.config';
-import { SgaAuthService } from 'src/shared/sga-auth.service';
-import { formatDateBR } from 'src/shared/date.util';
+import { SgaAuthService } from 'src/integrations/hinova/sga-auth.service';
+import { janelaVencimentoBoleto } from 'src/sga/helpers/janela-boleto.helper';
 
 type BoletoApiVehicle = {
   codigo_veiculo?: string | number;
@@ -203,13 +204,7 @@ export class BoletoService {
       return [];
     }
 
-    const now = new Date();
-    const dataInicial = new Date(now);
-    dataInicial.setDate(now.getDate() - 45);
-    const dataFinal = new Date(now);
-    dataFinal.setDate(dataFinal.getDate() + 45);
-    const dataInicialStr = formatDateBR(dataInicial);
-    const dataFinalStr = formatDateBR(dataFinal);
+    const { dataInicialStr, dataFinalStr } = janelaVencimentoBoleto();
     const body = {
       codigo_veiculo,
       //codigo_situacao_boleto: '2',
@@ -221,7 +216,7 @@ export class BoletoService {
       const response =
         await this.sgaAuthService.executeRequestWithAuth<unknown>(baseOrigin, {
           method: 'POST',
-          url: 'https://api.hinova.com.br/api/sga/v2/listar/boleto-associado-veiculo',
+          url: `${SGA_BASE_URL}/listar/boleto-associado-veiculo`,
           data: body,
           headers: {
             'Content-Type': 'application/json',

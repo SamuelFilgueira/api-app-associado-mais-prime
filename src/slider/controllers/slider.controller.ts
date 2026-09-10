@@ -13,14 +13,14 @@ import {
   UseInterceptors,
   Patch,
 } from '@nestjs/common';
-import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
+import { JwtAuthGuard } from 'src/infra/guards/jwt-auth.guard';
 import { SliderService } from 'src/slider/services/slider.service';
 import { CreateSliderDto } from 'src/slider/dto/create-slider.dto';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { UpdateSliderDto } from 'src/slider/dto/update-slider.dto';
-import { AdminPanelRoleGuard } from 'src/admin-panel/guards/admin-panel-role.guard';
-import { AdminPanelRoles } from 'src/admin-panel/decorators/admin-panel-roles.decorator';
-import { AdminPanelRole } from 'src/admin-panel/enums/admin-panel-role.enum';
+import { AdminPanelRoleGuard } from 'src/infra/guards/admin-panel-role.guard';
+import { AdminPanelRoles } from 'src/infra/decorators/admin-panel-roles.decorator';
+import { AdminPanelRole } from 'src/infra/enums/admin-panel-role.enum';
 
 @UseGuards(JwtAuthGuard)
 @Controller('slider')

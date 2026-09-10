@@ -1,3 +1,5 @@
+import { formatarDataBR } from 'src/shared/date.util';
+import { escapeHtml } from 'src/shared/html.util';
 import {
   Injectable,
   InternalServerErrorException,
@@ -29,22 +31,7 @@ function carregarLogoBase64(): string {
 
 const LOGO_BASE64 = carregarLogoBase64();
 
-function escapeHtml(value: string): string {
-  return String(value)
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;');
-}
-
-function formatarDataBR(isoDate: string): string {
-  if (!isoDate) return isoDate;
-  const [ano, mes, dia] = isoDate.split('-');
-  if (!ano || !mes || !dia) return isoDate;
-  return `${dia}/${mes}/${ano}`;
-}
-
+// TODO(dedupe/B11): diverge das versões de m7/softruck (esta emite HH:mm:ss e aceita entrada BR) — unificar exige decisão sobre o formato exibido nos PDFs.
 function formatarDataHora(valor: string): string {
   if (!valor) return 'N/D';
 

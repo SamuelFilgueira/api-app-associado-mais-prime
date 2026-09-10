@@ -1,3 +1,4 @@
+import { jwtSecret } from 'src/auth/config/auth.config';
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
@@ -11,7 +12,7 @@ import { PrimeiroLoginGuard } from 'src/auth/guards/primeiro-login.guard';
   imports: [
     PassportModule,
     JwtModule.register({
-      secret: process.env.JWT_SECRET || 'minha_chave_secreta',
+      secret: jwtSecret(),
       signOptions: { expiresIn: '300d' },
     }),
   ],

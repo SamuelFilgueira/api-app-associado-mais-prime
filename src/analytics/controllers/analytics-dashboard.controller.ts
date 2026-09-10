@@ -1,6 +1,6 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
-import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
-import { AdminRoleGuard } from 'src/auth/guards/admin-role.guard';
+import { JwtAuthGuard } from 'src/infra/guards/jwt-auth.guard';
+import { AdminRoleGuard } from 'src/infra/guards/admin-role.guard';
 import { AnalyticsService } from 'src/analytics/services/analytics.service';
 import { AnalyticsDashboardQueryDto } from 'src/analytics/dto/analytics-dashboard-query.dto';
 

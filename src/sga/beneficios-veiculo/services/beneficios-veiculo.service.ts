@@ -1,3 +1,4 @@
+import { SGA_BASE_URL } from 'src/integrations/hinova/hinova.constants';
 import {
   BadRequestException,
   Injectable,
@@ -5,7 +6,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import axios from 'axios';
-import { SgaAuthService } from 'src/shared/sga-auth.service';
+import { SgaAuthService } from 'src/integrations/hinova/sga-auth.service';
 import { BaseOrigin } from 'src/shared/token-resolver.service';
 
 export interface Produto {
@@ -51,7 +52,7 @@ export class BeneficiosVeiculoService {
       throw new BadRequestException('codigoVeiculo é obrigatório');
     }
 
-    const baseUrl = `https://api.hinova.com.br/api/sga/v2/produto-vinculado-veiculo/listar/${normalizedCodigoVeiculo}`;
+    const baseUrl = `${SGA_BASE_URL}/produto-vinculado-veiculo/listar/${normalizedCodigoVeiculo}`;
 
     try {
       const response =

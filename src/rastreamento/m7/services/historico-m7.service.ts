@@ -1,3 +1,4 @@
+import { m7ApiBaseUrl } from 'src/rastreamento/m7/constants/m7.constants';
 import {
   BadGatewayException,
   Injectable,
@@ -7,11 +8,6 @@ import {
 } from '@nestjs/common';
 import axios from 'axios';
 import { BaseOrigin } from 'src/shared/token-resolver.service';
-import {
-  mapTenantBases,
-  TENANT,
-  tenantEnvName,
-} from 'src/config/tenant.config';
 import {
   M7ConsultaVeiculoResponse,
   M7HistoricoApiResponse,
@@ -39,146 +35,27 @@ import { RastreamentoM7 } from './rastreamento-m7';
 
 const M7_REQUEST_TIMEOUT = 50_000;
 
-type TokenState = {
-  token: string | null;
-  tokenExpires: number | null;
-  tokenRenewalPromise: Promise<void> | null;
-};
-
 @Injectable()
 export class HistoricoM7Service {
   private readonly logger = new Logger(HistoricoM7Service.name);
-
-  private readonly tokenState: Record<BaseOrigin, TokenState> = mapTenantBases(
-    () => ({ token: null, tokenExpires: null, tokenRenewalPromise: null }),
-  );
 
   constructor(
     private readonly pdfService: HistoricoPdfM7Service,
     private readonly reverseGeocodeService: M7ReverseGeocodeService,
     private readonly viagensBuilderService: M7ViagensBuilderService,
     private readonly rastreamentoM7: RastreamentoM7,
-  ) {
-    for (const base of TENANT.baseNames) {
-      void this.renovarToken(base);
-    }
-
-    setInterval(() => {
-      for (const base of TENANT.baseNames) {
-        this.renovarToken(base).catch(() => {});
-      }
-    }, 1_800_000).unref();
-  }
+  ) {}
 
   // ---------------------------------------------------------------------------
-  // Token management
+  // Token: delegado ao RastreamentoM7 (cache único por base — antes havia
+  // um segundo login/timer duplicado aqui, com estado divergente)
   // ---------------------------------------------------------------------------
 
-  async renovarToken(baseOrigin: BaseOrigin = TENANT.defaultBase) {
-    const state = this.tokenState[baseOrigin];
-
-    if (state.tokenRenewalPromise) {
-      await state.tokenRenewalPromise;
-      return { token: state.token, expires_in: state.tokenExpires };
-    }
-
-    state.tokenRenewalPromise = this.executeRenovarToken(baseOrigin);
-
-    try {
-      await state.tokenRenewalPromise;
-      return { token: state.token, expires_in: state.tokenExpires };
-    } finally {
-      state.tokenRenewalPromise = null;
-    }
-  }
-
-  private async executeRenovarToken(baseOrigin: BaseOrigin): Promise<void> {
-    const apiM7Token = process.env[tenantEnvName(baseOrigin, 'm7Token')];
-    const codigo = process.env[tenantEnvName(baseOrigin, 'm7Codigo')];
-
-    try {
-      const response = await axios.post(
-        `${process.env.M7_API_BASE_URL}login`,
-        { codigo, api_m7_token: apiM7Token },
-        { timeout: M7_REQUEST_TIMEOUT },
-      );
-
-      if (response.data?.sucesso) {
-        this.tokenState[baseOrigin].token = response.data.token;
-        this.tokenState[baseOrigin].tokenExpires = response.data.expires_in;
-        return;
-      }
-
-      this.logger.error(
-        `[${baseOrigin}] Falha ao renovar token - sucesso=false`,
-      );
-      throw new InternalServerErrorException('Falha ao renovar token');
-    } catch (error) {
-      if (error instanceof InternalServerErrorException) throw error;
-      this.logger.error(
-        `[${baseOrigin}] Erro ao renovar token: ${error instanceof Error ? error.message : 'Erro desconhecido'}`,
-      );
-      throw new InternalServerErrorException('Erro ao renovar token');
-    }
-  }
-
-  private isTokenError(response: {
-    status: number;
-    data: Record<string, unknown> | null;
-  }): boolean {
-    return (
-      response.status === 401 ||
-      (response.data !== null &&
-        typeof response.data === 'object' &&
-        typeof response.data.mensagem === 'string' &&
-        response.data.mensagem.toLowerCase().includes('token'))
-    );
-  }
-
-  private async executarComReautenticacao<T>(
+  private executarComReautenticacao<T>(
     baseOrigin: BaseOrigin,
     request: (token: string) => Promise<{ status: number; data: T }>,
   ): Promise<T> {
-    const state = this.tokenState[baseOrigin];
-
-    if (!state.token) {
-      this.logger.error(`[${baseOrigin}] Token não disponível`);
-      throw new InternalServerErrorException('Token não disponível');
-    }
-
-    try {
-      const response = await request(state.token);
-      return response.data;
-    } catch (error) {
-      if (
-        axios.isAxiosError(error) &&
-        (error.response?.status === 401 ||
-          this.isTokenError({
-            status: error.response?.status ?? 0,
-            data: (error.response?.data as Record<string, unknown>) ?? null,
-          }))
-      ) {
-        this.logger.warn(`[${baseOrigin}] Token expirado/inválido, renovando`);
-        await this.renovarToken(baseOrigin);
-
-        if (!state.token) {
-          throw new InternalServerErrorException(
-            'Token não disponível após renovação',
-          );
-        }
-
-        const retry = await request(state.token);
-        return retry.data;
-      }
-
-      if (axios.isAxiosError(error)) {
-        this.logger.error(
-          `[${baseOrigin}] Erro HTTP ${error.response?.status ?? 'sem resposta'}`,
-        );
-      }
-
-      throw error;
-    }
+    return this.rastreamentoM7.executarComReautenticacao(baseOrigin, request);
   }
 
   // ---------------------------------------------------------------------------
@@ -190,7 +67,7 @@ export class HistoricoM7Service {
     chassi: string,
     baseOrigin: BaseOrigin,
   ): Promise<M7ConsultaVeiculoResponse> {
-    const url = `${process.env.M7_API_BASE_URL}api/veiculos/consulta`;
+    const url = `${m7ApiBaseUrl()}api/veiculos/consulta`;
     try {
       const data = await this.executarComReautenticacao(baseOrigin, (token) =>
         axios.post(
@@ -266,7 +143,7 @@ export class HistoricoM7Service {
       ? shiftIsoDate(dataFinal, 1)
       : dataFinal;
 
-    const endpoint = `${process.env.M7_API_BASE_URL}api/monitorado/${codigoVeiculo}/trajetos?data_inicio=${toDateTimeParam(dataInicial)}&data_fim=${toDateTimeParam(dataFinalConsulta)}`;
+    const endpoint = `${m7ApiBaseUrl()}api/monitorado/${codigoVeiculo}/trajetos?data_inicio=${toDateTimeParam(dataInicial)}&data_fim=${toDateTimeParam(dataFinalConsulta)}`;
 
     try {
       const data = await this.executarComReautenticacao(baseOrigin, (token) =>
@@ -328,7 +205,7 @@ export class HistoricoM7Service {
       ? shiftIsoDate(dataFinal, 1)
       : dataFinal;
 
-    const endpoint = `${process.env.M7_API_BASE_URL}api/historico/${dataInicial}/${dataFinalConsulta}/${codigoVeiculo}`;
+    const endpoint = `${m7ApiBaseUrl()}api/historico/${dataInicial}/${dataFinalConsulta}/${codigoVeiculo}`;
 
     try {
       const data = await this.executarComReautenticacao(baseOrigin, (token) =>

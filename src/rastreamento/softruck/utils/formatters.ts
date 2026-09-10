@@ -48,14 +48,7 @@ export function parseCoordinate(value: number | string): number {
 }
 
 /** Escapa conteúdo textual para evitar quebra de HTML no relatório. */
-export function escapeHtml(value: string): string {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;');
-}
+export { escapeHtml } from 'src/shared/html.util';
 
 /**
  * Formata timestamp da Softruck, que pode ser Unix em segundos

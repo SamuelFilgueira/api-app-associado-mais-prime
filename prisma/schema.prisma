@@ -232,12 +232,99 @@ model AnalyticsSummaryReceipt {
   payloadHash          String   @db.VarChar(64)
   createdAt            DateTime @default(now())
   analyticsUserId      Int?
+  /// Quantidade de eventos de jornada aceitos neste summary (0 quando o
+  /// recurso está desligado ou o app não enviou `journey`).
+  journeyEventsCount   Int      @default(0)
 
   @@index([appVersion], map: "AnalyticsSummaryReceipt_appVersion_idx")
+  @@index([analyticsUserId, receivedAt], map: "AnalyticsSummaryReceipt_user_receivedAt_idx")
+  @@index([installHash, receivedAt], map: "AnalyticsSummaryReceipt_install_receivedAt_idx")
   @@index([payloadHash], map: "AnalyticsSummaryReceipt_payloadHash_idx")
   @@index([periodStart], map: "AnalyticsSummaryReceipt_periodStart_idx")
   @@index([platform], map: "AnalyticsSummaryReceipt_platform_idx")
   @@index([receivedAt], map: "AnalyticsSummaryReceipt_receivedAt_idx")
+}
+
+/// ─── Jornada do usuário (ANALYTICS_JOURNEY_ENABLED=true) ───────────────────
+/// Um aparelho (instalação do app) conhecido. installHash é o mesmo HMAC usado
+/// nas tabelas agregadas, então tudo cruza sem expor o UUID bruto do app.
+/// Modelo/SO vêm do bloco opcional `device` do summary (expo-device).
+model AnalyticsDevice {
+  id              Int      @id @default(autoincrement())
+  installHash     String   @unique(map: "AnalyticsDevice_installHash_key") @db.VarChar(64)
+  platform        String   @db.VarChar(10)
+  brand           String?  @db.VarChar(40)
+  model           String?  @db.VarChar(80)
+  modelId         String?  @db.VarChar(40)
+  osName          String?  @db.VarChar(20)
+  osVersion       String?  @db.VarChar(20)
+  deviceType      String?  @db.VarChar(20)
+  timezone        String?  @db.VarChar(60)
+  appVersion      String   @db.VarChar(20)
+  runtimeVersion  String?  @db.VarChar(20)
+  lastSessionHash String?  @db.VarChar(64)
+  lastUserId      Int?
+  lastIp          String?  @db.VarChar(45)
+  summariesCount  Int      @default(0)
+  firstSeenAt     DateTime @default(now())
+  lastSeenAt      DateTime @default(now())
+
+  @@index([lastUserId], map: "AnalyticsDevice_lastUserId_idx")
+  @@index([lastSeenAt], map: "AnalyticsDevice_lastSeenAt_idx")
+}
+
+/// Vínculo conta ↔ aparelho. Uma linha por (userId, installHash). Responde
+/// "em quantos celulares a conta está logada": vínculos com lastSeenAt recente
+/// e sem logout posterior.
+model AnalyticsUserDevice {
+  id              Int       @id @default(autoincrement())
+  userId          Int
+  installHash     String    @db.VarChar(64)
+  platform        String    @db.VarChar(10)
+  lastAppVersion  String    @db.VarChar(20)
+  lastSessionHash String?   @db.VarChar(64)
+  summariesCount  Int       @default(0)
+  firstSeenAt     DateTime  @default(now())
+  lastSeenAt      DateTime  @default(now())
+  lastLoginAt     DateTime?
+  lastLogoutAt    DateTime?
+
+  @@unique([userId, installHash], map: "AnalyticsUserDevice_user_install_key")
+  @@index([installHash], map: "AnalyticsUserDevice_installHash_idx")
+  @@index([userId, lastSeenAt], map: "AnalyticsUserDevice_user_lastSeenAt_idx")
+}
+
+enum AnalyticsJourneyEventType {
+  SCREEN
+  ACTION
+  FORM
+}
+
+/// Evento individual da jornada (tela/ação/formulário) com horário informado
+/// pelo app. Continua chegando em lote, dentro do mesmo summary — não há
+/// request por evento. Retenção: ANALYTICS_JOURNEY_TTL_DAYS.
+model AnalyticsJourneyEvent {
+  id          BigInt                    @id @default(autoincrement())
+  occurredAt  DateTime
+  receivedAt  DateTime                  @default(now())
+  receiptId   Int?
+  userId      Int?
+  installHash String                    @db.VarChar(64)
+  sessionHash String                    @db.VarChar(64)
+  platform    String                    @db.VarChar(10)
+  appVersion  String                    @db.VarChar(20)
+  seq         Int                       @default(0)
+  eventType   AnalyticsJourneyEventType
+  name        String                    @db.VarChar(80)
+  screen      String?                   @db.VarChar(80)
+  outcome     String?                   @db.VarChar(20)
+  durationMs  Int?
+
+  @@index([userId, occurredAt], map: "AnalyticsJourneyEvent_user_occurredAt_idx")
+  @@index([installHash, occurredAt], map: "AnalyticsJourneyEvent_install_occurredAt_idx")
+  @@index([sessionHash], map: "AnalyticsJourneyEvent_sessionHash_idx")
+  @@index([occurredAt], map: "AnalyticsJourneyEvent_occurredAt_idx")
+  @@index([name, occurredAt], map: "AnalyticsJourneyEvent_name_occurredAt_idx")
 }
 
 model Document {

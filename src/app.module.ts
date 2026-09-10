@@ -25,6 +25,7 @@ import { FuelSessionModule } from './fuel-session/fuel-session.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { AppVersionModule } from './app-version/app-version.module';
 import { BoletoNotificacaoModule } from './boleto-notificacao/boleto-notificacao.module';
+import { ExpoUpdatesModule } from './expo-updates/expo-updates.module';
 
 @Module({
   imports: [
@@ -54,6 +55,7 @@ import { BoletoNotificacaoModule } from './boleto-notificacao/boleto-notificacao
     AnalyticsModule,
     AppVersionModule,
     BoletoNotificacaoModule,
+    ExpoUpdatesModule,
   ],
   controllers: [AppController],
   providers: [AppService],

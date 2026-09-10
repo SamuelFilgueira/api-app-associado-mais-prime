@@ -16,16 +16,16 @@ import {
 } from '@nestjs/common';
 import { OficinaService } from 'src/oficina/services/oficina.service';
 import { CreateWorkshopDto } from 'src/oficina/dto/create-workshop.dto';
-import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
+import { JwtAuthGuard } from 'src/infra/guards/jwt-auth.guard';
 import { UpdateWorkshopDto } from 'src/oficina/dto/update-workshop.dto';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
-import { AdminRoleGuard } from 'src/auth/guards/admin-role.guard';
-import { AdminPanelRoleGuard } from 'src/admin-panel/guards/admin-panel-role.guard';
-import { AdminPanelRoles } from 'src/admin-panel/decorators/admin-panel-roles.decorator';
+import { AdminRoleGuard } from 'src/infra/guards/admin-role.guard';
+import { AdminPanelRoleGuard } from 'src/infra/guards/admin-panel-role.guard';
+import { AdminPanelRoles } from 'src/infra/decorators/admin-panel-roles.decorator';
 import {
   AdminPanelRole,
   ALL_ADMIN_PANEL_ROLES,
-} from 'src/admin-panel/enums/admin-panel-role.enum';
+} from 'src/infra/enums/admin-panel-role.enum';
 
 @UseGuards(JwtAuthGuard)
 @Controller('oficina')

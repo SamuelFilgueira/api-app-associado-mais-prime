@@ -108,6 +108,18 @@ export function toUtcDateOnly(date: Date): Date {
   );
 }
 
+/**
+ * Converte data ISO "yyyy-mm-dd" para "dd/mm/yyyy" (relatórios PDF).
+ * Entrada vazia ou fora do formato é retornada como veio.
+ * Não confundir com `formatDateBR`, que recebe um `Date`.
+ */
+export function formatarDataBR(isoDate: string): string {
+  if (!isoDate) return isoDate;
+  const [ano, mes, dia] = isoDate.split('-');
+  if (!ano || !mes || !dia) return isoDate;
+  return `${dia}/${mes}/${ano}`;
+}
+
 /** Formata como yyyy-mm-dd (para logs e chaves). */
 export function formatDateISO(date: Date): string {
   const dia = String(date.getDate()).padStart(2, '0');

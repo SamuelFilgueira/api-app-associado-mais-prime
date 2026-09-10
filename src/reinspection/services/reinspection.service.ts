@@ -1,3 +1,4 @@
+import { SGA_BASE_URL } from 'src/integrations/hinova/hinova.constants';
 import {
   BadRequestException,
   Injectable,
@@ -21,7 +22,7 @@ import { UpsertTemplatePhotoDto } from 'src/reinspection/dto/upsert-template-pho
 import { MailService } from 'src/infra/mail/mail.service';
 import { BaseOrigin } from 'src/shared/token-resolver.service';
 import { TENANT } from 'src/config/tenant.config';
-import { SgaAuthService } from 'src/shared/sga-auth.service';
+import { SgaAuthService } from 'src/integrations/hinova/sga-auth.service';
 import { SgaService } from 'src/sga/services/sga.service';
 import { debugLog } from 'src/shared/debug-log.util';
 
@@ -781,7 +782,7 @@ export class ReinspectionService {
       payload.codigo_veiculo = reinspection.codigoVeiculo;
     }
 
-    const hinovaUrl = `https://api.hinova.com.br/api/sga/v2/veiculo/foto/cadastrar`;
+    const hinovaUrl = `${SGA_BASE_URL}/veiculo/foto/cadastrar`;
     const baseOrigin =
       reinspection.userVehicle?.user?.baseOrigin ?? TENANT.defaultBase;
 

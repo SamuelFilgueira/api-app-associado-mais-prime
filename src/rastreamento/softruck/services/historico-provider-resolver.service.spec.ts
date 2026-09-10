@@ -1,5 +1,5 @@
 import { InternalServerErrorException } from '@nestjs/common';
-import { HistoricoProviderResolverService } from 'src/rastreamento/services/historico-provider-resolver.service';
+import { HistoricoProviderResolverService } from 'src/rastreamento/softruck/services/historico-provider-resolver.service';
 import {
   RastreamentoSoftruck,
   SoftruckVehicleNotFoundException,

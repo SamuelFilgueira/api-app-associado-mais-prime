@@ -1,11 +1,12 @@
+import { SGA_BASE_URL } from './hinova.constants';
 import { Injectable, Logger } from '@nestjs/common';
 import axios, { AxiosRequestConfig, AxiosResponse } from 'axios';
 import {
   BaseOrigin,
   SgaAuthCredentials,
   TokenResolverService,
-} from './token-resolver.service';
-import { baseTag } from './log.util';
+} from 'src/shared/token-resolver.service';
+import { baseTag } from 'src/shared/log.util';
 
 interface SgaAuthResponse {
   mensagem: string;
@@ -96,7 +97,7 @@ export class SgaAuthService {
       this.tokenResolver.resolveSgaAuthCredentials(baseOrigin);
 
     const response = await axios.post<SgaAuthResponse>(
-      'https://api.hinova.com.br/api/sga/v2/usuario/autenticar',
+      `${SGA_BASE_URL}/usuario/autenticar`,
       {
         usuario: credentials.user,
         senha: credentials.password,

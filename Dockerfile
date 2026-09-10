@@ -45,8 +45,8 @@ RUN npx prisma generate
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/assets ./assets
 
-# Cria diretório de uploads
-RUN mkdir -p uploads/profile-photos uploads/workshop-photos
+# Cria diretórios de uploads e de releases OTA (expo-updates)
+RUN mkdir -p uploads/profile-photos uploads/workshop-photos updates
 
 EXPOSE 3001
 

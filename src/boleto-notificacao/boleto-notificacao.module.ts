@@ -1,7 +1,9 @@
 import { Module } from '@nestjs/common';
+import { HinovaModule } from 'src/integrations/hinova/hinova.module';
 import { BoletoNotificacaoConfigService } from 'src/boleto-notificacao/config/boleto-notificacao.config';
 import { SgaBoletoPeriodoClient } from 'src/boleto-notificacao/services/sga-boleto-periodo.client';
 import { BoletoNotificacaoService } from 'src/boleto-notificacao/services/boleto-notificacao.service';
+import { BoletoNotificacaoConsultaService } from 'src/boleto-notificacao/services/boleto-notificacao-consulta.service';
 import { BoletoNotificacaoReceiptsService } from 'src/boleto-notificacao/services/boleto-notificacao-receipts.service';
 import { BoletoNotificacaoSchedulerService } from 'src/boleto-notificacao/services/boleto-notificacao-scheduler.service';
 import { BoletoNotificacaoProcessor } from 'src/boleto-notificacao/processors/boleto-notificacao.processor';
@@ -12,15 +14,16 @@ import { BoletoNotificacaoAdminController } from 'src/boleto-notificacao/control
  * Depende dos módulos globais DatabaseModule, QueueModule e SharedModule.
  */
 @Module({
+  imports: [HinovaModule],
   controllers: [BoletoNotificacaoAdminController],
   providers: [
     BoletoNotificacaoConfigService,
     SgaBoletoPeriodoClient,
     BoletoNotificacaoService,
+    BoletoNotificacaoConsultaService,
     BoletoNotificacaoReceiptsService,
     BoletoNotificacaoSchedulerService,
     BoletoNotificacaoProcessor,
   ],
-  exports: [BoletoNotificacaoService],
 })
 export class BoletoNotificacaoModule {}

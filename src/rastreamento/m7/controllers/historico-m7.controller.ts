@@ -8,7 +8,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
-import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
+import { JwtAuthGuard } from 'src/infra/guards/jwt-auth.guard';
 import { JwtUser } from 'src/auth/interfaces/jwt-user.interface';
 import { BaseContextService } from 'src/shared/base-context.service';
 import {

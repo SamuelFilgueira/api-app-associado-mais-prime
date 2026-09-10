@@ -6,6 +6,5 @@ import { AppVersionPolicyRepository } from 'src/app-version/repositories/app-ver
 @Module({
   controllers: [AppVersionController],
   providers: [AppVersionService, AppVersionPolicyRepository],
-  exports: [AppVersionService],
 })
 export class AppVersionModule {}

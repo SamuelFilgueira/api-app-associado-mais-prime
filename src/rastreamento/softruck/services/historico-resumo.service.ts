@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { BaseOrigin } from 'src/shared/token-resolver.service';
 import { RastreamentoSoftruck } from 'src/rastreamento/softruck/services/rastreamento-softruck.service';
-import { HistoricoProviderResolverService } from 'src/rastreamento/services/historico-provider-resolver.service';
+import { HistoricoProviderResolverService } from 'src/rastreamento/softruck/services/historico-provider-resolver.service';
 import { LogicaHistoricoService } from 'src/rastreamento/logica/services/logica-historico.service';
 import {
   DiaResumoDto,

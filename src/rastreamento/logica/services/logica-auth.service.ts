@@ -1,3 +1,4 @@
+import { buildLogicaUrl, LOGICA_REQUEST_TIMEOUT } from 'src/rastreamento/logica/constants/logica.constants';
 import {
   Injectable,
   InternalServerErrorException,
@@ -6,7 +7,6 @@ import {
 import axios from 'axios';
 import { maskSecret } from 'src/shared/log.util';
 
-const LOGICA_REQUEST_TIMEOUT = 15_000;
 
 /**
  * Backoff entre tentativas de login no /autentica. A Lógica recusa logins em
@@ -187,15 +187,6 @@ export class LogicaAuthService {
   }
 
   private buildUrl(path: string): string {
-    const baseUrl = process.env.LOGICA_API_BASE_URL;
-
-    if (!baseUrl) {
-      throw new InternalServerErrorException(
-        'LOGICA_API_BASE_URL não definida nas variáveis de ambiente',
-      );
-    }
-
-    const normalized = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
-    return `${normalized}/${path.replace(/^\//, '')}`;
+    return buildLogicaUrl(path);
   }
 }

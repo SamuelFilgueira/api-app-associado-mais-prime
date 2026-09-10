@@ -72,4 +72,7 @@ export const MAX_SCREENS = 30;
 export const MAX_ACTIONS = 40;
 export const MAX_FORMS = 5;
 export const MAX_PERIOD_MS = 60 * 60 * 1000; // 1 hora
-export const MAX_PAYLOAD_BYTES = 32 * 1024; // 32 KB
+// 64 KB: o bloco opcional `journey` (até MAX_JOURNEY_EVENTS eventos) cabe
+// junto dos agregados sem obrigar o app a fazer flush extra. Payloads antigos
+// (~2 KB) continuam aceitos — limite só ficou mais permissivo.
+export const MAX_PAYLOAD_BYTES = 64 * 1024; // 64 KB

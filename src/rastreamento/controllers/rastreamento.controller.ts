@@ -19,7 +19,7 @@ import {
   BaseOrigin,
   TokenResolverService,
 } from 'src/shared/token-resolver.service';
-import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
+import { JwtAuthGuard } from 'src/infra/guards/jwt-auth.guard';
 import { HistoricoQueryDto } from 'src/rastreamento/softruck/dto/historico-query.dto';
 
 interface RastreamentoRequestContext {

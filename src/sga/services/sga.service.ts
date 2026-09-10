@@ -1,3 +1,4 @@
+import { SGA_BASE_URL } from 'src/integrations/hinova/hinova.constants';
 import {
   BadRequestException,
   Injectable,
@@ -8,10 +9,11 @@ import {
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import axios from 'axios';
+import { SuriNotificacaoService } from 'src/sga/services/suri-notificacao.service';
 import { PrismaService } from 'src/database/prisma.service';
 import { BaseOrigin } from 'src/shared/token-resolver.service';
 import { TENANT } from 'src/config/tenant.config';
-import { SgaAuthService } from 'src/shared/sga-auth.service';
+import { SgaAuthService } from 'src/integrations/hinova/sga-auth.service';
 import { debugLog } from 'src/shared/debug-log.util';
 import { BOLETO_VERIFICACAO_QUEUE } from 'src/queue/queue.module';
 
@@ -32,6 +34,7 @@ export class SgaService {
   constructor(
     private prisma: PrismaService,
     private sgaAuthService: SgaAuthService,
+    private readonly suriNotificacaoService: SuriNotificacaoService,
     @InjectQueue(BOLETO_VERIFICACAO_QUEUE as string)
     private readonly boletoVerificacaoQueue: Queue,
   ) {}
@@ -56,7 +59,7 @@ export class SgaService {
     cpf: string,
     baseOriginOverride?: BaseOrigin,
   ) {
-    const url = `https://api.hinova.com.br/api/sga/v2/associado/buscar/${cpf}`;
+    const url = `${SGA_BASE_URL}/associado/buscar/${cpf}`;
 
     let baseOrigin: BaseOrigin = baseOriginOverride ?? TENANT.defaultBase;
 
@@ -83,7 +86,7 @@ export class SgaService {
   }
 
   private async fetchSgaVeiculo(chassi: string) {
-    const url = `https://api.hinova.com.br/api/sga/v2/veiculo/buscar/${chassi}`;
+    const url = `${SGA_BASE_URL}/veiculo/buscar/${chassi}`;
 
     // try to determine baseOrigin from vehicle owner
     let baseOrigin: BaseOrigin = TENANT.defaultBase;
@@ -276,7 +279,7 @@ export class SgaService {
     placa: string,
     baseOrigin: BaseOrigin,
   ) {
-    const url = `https://api.hinova.com.br/api/sga/v2/produto-vinculado-veiculo/listar/${placa}`;
+    const url = `${SGA_BASE_URL}/produto-vinculado-veiculo/listar/${placa}`;
 
     return this.sgaAuthService.executeRequestWithAuth(baseOrigin, {
       method: 'GET',
@@ -290,7 +293,7 @@ export class SgaService {
     codigoVeiculo: string,
     baseOrigin: BaseOrigin,
   ) {
-    const url = `https://api.hinova.com.br/api/sga/v2/veiculo/alterar-situacao-para/${codigoSituacao}/${codigoVeiculo}`;
+    const url = `${SGA_BASE_URL}/veiculo/alterar-situacao-para/${codigoSituacao}/${codigoVeiculo}`;
 
     const response = await this.sgaAuthService.executeRequestWithAuth(
       baseOrigin,
@@ -422,7 +425,7 @@ export class SgaService {
     const vencimento = `${String(tomorrow.getDate()).padStart(2, '0')}/${String(tomorrow.getMonth() + 1).padStart(2, '0')}/${tomorrow.getFullYear()}`;
 
     // 6. Cadastrar boleto
-    const boletoUrl = `https://api.hinova.com.br/api/sga/v2/boleto/cadastrar`;
+    const boletoUrl = `${SGA_BASE_URL}/boleto/cadastrar`;
     const boletoPayload = {
       codigo_associado,
       codigo_regional,
@@ -477,6 +480,9 @@ export class SgaService {
       [key: string]: unknown;
     };
 
+    // TODO(dedupe/B11): quase-cópia do normalizeArray de boleto-verificacao.processor.ts,
+    // que evoluiu (trata string JSON e tem fallback [record]) enquanto esta não.
+    // Unificar muda o parsing de respostas atípicas da Hinova — exige decisão.
     const normalizeBoletoResponse = (
       input: unknown,
     ): BoletoCadastradoItem[] => {
@@ -616,42 +622,12 @@ export class SgaService {
     // 11. Enviar notificação via Suri com o link do boleto
     if (linkBoleto) {
       try {
-        const primeiroNome = (nome ?? '').trim().split(/\s+/)[0] ?? '';
-        const primeiroNomeFormatado = primeiroNome
-          ? `${primeiroNome.charAt(0).toUpperCase()}${primeiroNome.slice(1).toLowerCase()}`
-          : '';
-        const phoneNormalized =
-          '55' + (telefone_celular ?? '').replace(/\D/g, '');
-
-        await axios.post(
-          process.env.suri_baseUrl!,
-          {
-            user: {
-              name: nome ?? '',
-              phone: phoneNormalized,
-              email: null,
-              gender: 0,
-              channelId: process.env.channelId,
-              channelType: 1,
-              defaultDepartmentId: null,
-            },
-            message: {
-              templateId: process.env.suri_template_id,
-              BodyParameters: [primeiroNomeFormatado, linkBoleto],
-            },
-            responseAction: {
-              type: 1,
-              sendTo: process.env.sendTo,
-            },
-          },
-          {
-            headers: {
-              Authorization: `Bearer ${process.env.token_suri}`,
-              'Content-Type': 'application/json',
-            },
-            validateStatus: () => true,
-          },
-        );
+        await this.suriNotificacaoService.enviarTemplate({
+          nome: nome ?? '',
+          telefoneCelular: telefone_celular ?? '',
+          templateId: process.env.suri_template_id,
+          parametrosExtras: [linkBoleto],
+        });
       } catch (suriError) {
         this.logger.error(
           debugLog(

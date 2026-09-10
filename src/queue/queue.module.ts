@@ -18,6 +18,18 @@ export const BOLETO_NOTIFICACAO_QUEUE = 'boleto-notificacao';
  * Em Docker, REDIS_HOST deve apontar para o nome do serviço do container Redis
  * (ex.: "redis"), nunca "localhost".
  */
+/**
+ * Retenção padrão de jobs no Redis (aprovada como pendência B9):
+ * antes, 4 das 6 filas acumulavam jobs concluídos/falhos para sempre.
+ * Opções passadas no `queue.add(...)` de cada call-site continuam prevalecendo.
+ * Nenhum default de attempts/backoff aqui — mudaria o retry de quem não
+ * configura (pendência B1).
+ */
+const DEFAULT_JOB_RETENTION = {
+  removeOnComplete: { age: 3600, count: 500 },
+  removeOnFail: { age: 86_400 },
+};
+
 @Global()
 @Module({
   imports: [
@@ -26,6 +38,7 @@ export const BOLETO_NOTIFICACAO_QUEUE = 'boleto-notificacao';
         host: process.env.REDIS_HOST || 'localhost',
         port: Number(process.env.REDIS_PORT) || 6379,
       },
+      defaultJobOptions: DEFAULT_JOB_RETENTION,
     }),
 
     // Registra as filas que serão injetadas pela aplicação

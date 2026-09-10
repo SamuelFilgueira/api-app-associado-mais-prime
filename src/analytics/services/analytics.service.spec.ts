@@ -216,7 +216,7 @@ describe('AnalyticsService', () => {
       ).rejects.toBeInstanceOf(UnprocessableEntityException);
     });
 
-    it('lança 422 se payload excede 32KB', async () => {
+    it('lança 422 se payload excede o tamanho máximo (64KB)', async () => {
       const bigScreen = Array.from({ length: 10000 }, (_, i) => ({
         screen: `screen_home_${i}`,
         view_count: 1,
@@ -314,6 +314,83 @@ describe('AnalyticsService', () => {
       const jobData = mockQueue.add.mock.calls[0][1];
       const screen = jobData.sanitizedPayload.screens[0];
       expect(screen.total_time_ms).toBe(3_600_000);
+    });
+
+    // ─── Jornada (ANALYTICS_JOURNEY_ENABLED) ───
+    const JOURNEY_PAYLOAD = {
+      ...VALID_PAYLOAD,
+      device: {
+        brand: 'Samsung',
+        model: 'SM-A155M',
+        os_name: 'Android',
+        os_version: '14',
+      },
+      journey: [
+        {
+          t: '2024-01-01T00:05:00Z',
+          type: 'screen',
+          event: 'screen_home',
+          duration_ms: 3000,
+        },
+        {
+          t: '2024-01-01T00:06:00Z',
+          type: 'action',
+          event: 'auth_login_success',
+        },
+        { t: '2024-01-01T00:07:00Z', type: 'screen', event: 'screen_invalida' },
+      ],
+    };
+
+    it('ignora device/journey quando ANALYTICS_JOURNEY_ENABLED está false (contrato antigo intacto)', async () => {
+      process.env.ANALYTICS_JOURNEY_ENABLED = 'false';
+      await service.ingest(JOURNEY_PAYLOAD, '127.0.0.1', false);
+      const jobData = mockQueue.add.mock.calls[0][1];
+      expect(jobData.journey).toBeUndefined();
+      expect(jobData.discardedItemsCount).toBe(0);
+    });
+
+    it('enfileira device e eventos aceitos quando a flag está true', async () => {
+      process.env.ANALYTICS_JOURNEY_ENABLED = 'true';
+      await service.ingest(JOURNEY_PAYLOAD, '10.0.0.5', false);
+      const jobData = mockQueue.add.mock.calls[0][1];
+      expect(jobData.journey.device.model).toBe('SM-A155M');
+      expect(jobData.journey.clientIp).toBe('10.0.0.5');
+      expect(jobData.journey.events.map((e) => e.event)).toEqual([
+        'screen_home',
+        'auth_login_success',
+      ]);
+      // tela fora da allowlist conta como descarte no recibo
+      expect(jobData.discardedItemsCount).toBe(1);
+      // sanitizedPayload (base do payloadHash) não muda com a jornada
+      expect(jobData.sanitizedPayload.journey).toBeUndefined();
+      process.env.ANALYTICS_JOURNEY_ENABLED = 'false';
+    });
+
+    it('payload sem device/journey continua válido com a flag ligada', async () => {
+      process.env.ANALYTICS_JOURNEY_ENABLED = 'true';
+      const result = await service.ingest(VALID_PAYLOAD, '127.0.0.1', false);
+      expect(result).toEqual({ message: 'accepted' });
+      const jobData = mockQueue.add.mock.calls[0][1];
+      expect(jobData.journey).toEqual({
+        device: null,
+        events: [],
+        clientIp: '127.0.0.1',
+      });
+      process.env.ANALYTICS_JOURNEY_ENABLED = 'false';
+    });
+
+    it('lança 422 se journey usa chave proibida (name)', async () => {
+      process.env.ANALYTICS_JOURNEY_ENABLED = 'true';
+      const payload = {
+        ...VALID_PAYLOAD,
+        journey: [
+          { t: '2024-01-01T00:05:00Z', type: 'screen', name: 'screen_home' },
+        ],
+      };
+      await expect(
+        service.ingest(payload, '127.0.0.1', false),
+      ).rejects.toBeInstanceOf(UnprocessableEntityException);
+      process.env.ANALYTICS_JOURNEY_ENABLED = 'false';
     });
 
     it('lança 429 quando rate limit de IP é atingido', async () => {

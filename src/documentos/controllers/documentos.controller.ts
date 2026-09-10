@@ -14,15 +14,15 @@ import {
 import { DocumentosService } from 'src/documentos/services/documentos.service';
 import { CreateDocumentDto } from 'src/documentos/dto/create-document.dto';
 import { UpdateDocumentDto } from 'src/documentos/dto/update-document.dto';
-import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
-import { AdminRoleGuard } from 'src/auth/guards/admin-role.guard';
+import { JwtAuthGuard } from 'src/infra/guards/jwt-auth.guard';
+import { AdminRoleGuard } from 'src/infra/guards/admin-role.guard';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { AdminPanelRoleGuard } from 'src/admin-panel/guards/admin-panel-role.guard';
-import { AdminPanelRoles } from 'src/admin-panel/decorators/admin-panel-roles.decorator';
+import { AdminPanelRoleGuard } from 'src/infra/guards/admin-panel-role.guard';
+import { AdminPanelRoles } from 'src/infra/decorators/admin-panel-roles.decorator';
 import {
   AdminPanelRole,
   ALL_ADMIN_PANEL_ROLES,
-} from 'src/admin-panel/enums/admin-panel-role.enum';
+} from 'src/infra/enums/admin-panel-role.enum';
 
 @UseGuards(JwtAuthGuard)
 @Controller('documentos')

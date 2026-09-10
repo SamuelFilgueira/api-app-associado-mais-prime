@@ -1,14 +1,15 @@
+import { SGA_BASE_URL } from 'src/integrations/hinova/hinova.constants';
 import { Processor, WorkerHost, InjectQueue } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import { Job, Queue } from 'bullmq';
-import axios from 'axios';
+import { SuriNotificacaoService } from 'src/sga/services/suri-notificacao.service';
 import { BOLETO_VERIFICACAO_QUEUE } from 'src/queue/queue.module';
-import { SgaAuthService } from 'src/shared/sga-auth.service';
+import { SgaAuthService } from 'src/integrations/hinova/sga-auth.service';
 import { BaseOrigin } from 'src/shared/token-resolver.service';
 import { PrismaService } from 'src/database/prisma.service';
 import { MailService } from 'src/infra/mail/mail.service';
 import { debugLog } from 'src/shared/debug-log.util';
-import { formatDateBR } from 'src/shared/date.util';
+import { janelaVencimentoBoleto } from 'src/sga/helpers/janela-boleto.helper';
 
 interface BoletoVerificacaoJobData {
   userVehicleId: number;
@@ -29,6 +30,7 @@ export class BoletoVerificacaoProcessor extends WorkerHost {
     private readonly sgaAuthService: SgaAuthService,
     private readonly prisma: PrismaService,
     private readonly mailService: MailService,
+    private readonly suriNotificacaoService: SuriNotificacaoService,
     @InjectQueue(BOLETO_VERIFICACAO_QUEUE as string)
     private readonly queue: Queue,
   ) {
@@ -47,7 +49,7 @@ export class BoletoVerificacaoProcessor extends WorkerHost {
       debugId,
     } = job.data;
 
-    const url = `https://api.hinova.com.br/api/sga/v2/processa-pdf/boleto`;
+    const url = `${SGA_BASE_URL}/processa-pdf/boleto`;
 
     const response = await this.sgaAuthService.executeRequestWithAuth(
       baseOrigin,
@@ -142,23 +144,19 @@ export class BoletoVerificacaoProcessor extends WorkerHost {
 
     // Fallback: quando processa-pdf retorna vazio/N/A, consultar boletos por veículo
     if (!codigoSituacao) {
-      const now = new Date();
-      const dataInicial = new Date(now);
-      dataInicial.setDate(now.getDate() - 45);
-      const dataFinal = new Date(now);
-      dataFinal.setDate(dataFinal.getDate() + 45);
+      const { dataInicialStr, dataFinalStr } = janelaVencimentoBoleto();
 
       const fallbackBody = {
         codigo_veiculo: Number(codigo_veiculo),
-        data_vencimento_original_inicial: formatDateBR(dataInicial),
-        data_vencimento_original_final: formatDateBR(dataFinal),
+        data_vencimento_original_inicial: dataInicialStr,
+        data_vencimento_original_final: dataFinalStr,
       };
 
       const fallbackResponse = await this.sgaAuthService.executeRequestWithAuth(
         baseOrigin,
         {
           method: 'POST',
-          url: 'https://api.hinova.com.br/api/sga/v2/listar/boleto-associado-veiculo',
+          url: `${SGA_BASE_URL}/listar/boleto-associado-veiculo`,
           data: fallbackBody,
           headers: { 'Content-Type': 'application/json' },
           validateStatus: () => true,
@@ -303,7 +301,7 @@ export class BoletoVerificacaoProcessor extends WorkerHost {
       );
     }
 
-    const alterarUrl = `https://api.hinova.com.br/api/sga/v2/veiculo/alterar-situacao-para/1/${codigo_veiculo}`;
+    const alterarUrl = `${SGA_BASE_URL}/veiculo/alterar-situacao-para/1/${codigo_veiculo}`;
 
     const alterarResponse = await this.sgaAuthService.executeRequestWithAuth(
       baseOrigin,
@@ -324,7 +322,7 @@ export class BoletoVerificacaoProcessor extends WorkerHost {
 
     // Após confirmação de pagamento, reativar associado (situação 1)
     if (codigo_associado) {
-      const alterarAssociadoUrl = `https://api.hinova.com.br/api/sga/v2/associado/alterar-situacao-para/1/${codigo_associado}`;
+      const alterarAssociadoUrl = `${SGA_BASE_URL}/associado/alterar-situacao-para/1/${codigo_associado}`;
 
       const alterarAssociadoResponse =
         await this.sgaAuthService.executeRequestWithAuth(baseOrigin, {
@@ -368,42 +366,12 @@ export class BoletoVerificacaoProcessor extends WorkerHost {
 
     // Notificar usuário via Suri que o boleto foi pago
     if (nome && telefone_celular) {
-      const primeiroNome = nome.trim().split(/\s+/)[0] ?? '';
-      const primeiroNomeFormatado = primeiroNome
-        ? `${primeiroNome.charAt(0).toUpperCase()}${primeiroNome.slice(1).toLowerCase()}`
-        : '';
-      const phoneNormalized = '55' + telefone_celular.replace(/\D/g, '');
-
       try {
-        await axios.post(
-          process.env.suri_baseUrl!,
-          {
-            user: {
-              name: nome,
-              phone: phoneNormalized,
-              email: null,
-              gender: 0,
-              channelId: process.env.channelId,
-              channelType: 1,
-              defaultDepartmentId: null,
-            },
-            message: {
-              templateId: process.env.suri_template_id_boleto_pago,
-              BodyParameters: [primeiroNomeFormatado],
-            },
-            responseAction: {
-              type: 1,
-              sendTo: process.env.sendTo,
-            },
-          },
-          {
-            headers: {
-              Authorization: `Bearer ${process.env.token_suri}`,
-              'Content-Type': 'application/json',
-            },
-            validateStatus: () => true,
-          },
-        );
+        await this.suriNotificacaoService.enviarTemplate({
+          nome,
+          telefoneCelular: telefone_celular,
+          templateId: process.env.suri_template_id_boleto_pago,
+        });
       } catch (suriError) {
         this.logger.error(
           debugLog(

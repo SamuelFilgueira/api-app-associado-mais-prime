@@ -38,7 +38,7 @@ import {
   AlloyalLoginResponseDto,
 } from 'src/beneficios/dto/alloyal-login.dto';
 import { AlloyalSessionHeaders } from 'src/beneficios/services/alloyal-api.service';
-import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
+import { JwtAuthGuard } from 'src/infra/guards/jwt-auth.guard';
 
 /**
  * Controller responsável por expor endpoints da API Alloyal de benefícios

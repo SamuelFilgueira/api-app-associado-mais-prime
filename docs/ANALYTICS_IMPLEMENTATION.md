@@ -6,6 +6,11 @@
 
 ---
 
+> **Extensão (2026-08-27):** aparelhos logados por conta, modelo/SO e linha do
+> tempo de telas com horário — campos opcionais `device`/`journey` no mesmo
+> summary, ligados por `ANALYTICS_JOURNEY_ENABLED`. Ver
+> [`ANALYTICS_JORNADA_USUARIO.md`](./ANALYTICS_JORNADA_USUARIO.md).
+
 ## Sumário
 
 1. [Decisões Arquiteturais](#1-decisões-arquiteturais)

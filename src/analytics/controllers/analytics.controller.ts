@@ -1,3 +1,4 @@
+import { jwtSecret } from 'src/auth/config/auth.config';
 import {
   Controller,
   HttpCode,
@@ -109,7 +110,7 @@ export class AnalyticsController {
       // audience não é especificado intencionalmente — tokens mobile são assinados
       // com audience:'mobile-app' mas a verificação de analytics não requer esse claim.
       const payload = this.jwtService.verify<Record<string, unknown>>(token, {
-        secret: process.env.JWT_SECRET || 'minha_chave_secreta',
+        secret: jwtSecret(),
         ignoreExpiration: false,
       });
 

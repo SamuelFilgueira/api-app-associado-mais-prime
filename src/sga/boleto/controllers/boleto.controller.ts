@@ -1,6 +1,6 @@
 import { Body, Controller, Logger, Post, Req, UseGuards } from '@nestjs/common';
 import type { Request } from 'express';
-import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
+import { JwtAuthGuard } from 'src/infra/guards/jwt-auth.guard';
 import { JwtUser } from 'src/auth/interfaces/jwt-user.interface';
 import { BoletoService } from 'src/sga/boleto/services/boleto.service';
 

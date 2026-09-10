@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import * as fs from 'fs';
 import * as path from 'path';
-import { SgaAuthService } from 'src/shared/sga-auth.service';
+import { SgaAuthService } from 'src/integrations/hinova/sga-auth.service';
 import { BaseOrigin } from 'src/shared/token-resolver.service';
 import { baseTag } from 'src/shared/log.util';
 import {

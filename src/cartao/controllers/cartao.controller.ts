@@ -1,5 +1,5 @@
 import { Controller, Get, Logger, UseGuards, Req, Query } from '@nestjs/common';
-import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
+import { JwtAuthGuard } from 'src/infra/guards/jwt-auth.guard';
 import { CartaoService } from 'src/cartao/services/cartao.service';
 import { BaseOrigin } from 'src/infra/decorators/base-origin.decorator';
 import type { BaseOrigin as BaseOriginType } from 'src/config/tenant.config';

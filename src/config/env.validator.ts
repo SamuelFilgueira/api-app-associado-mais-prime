@@ -32,7 +32,42 @@ const WARN_IF_MISSING = [
   'x_clientemployee_token',
   // Rotina de notificações de boleto (opt-in explícito; demais envs têm default)
   'BOLETO_NOTIFICACAO_ENABLED',
+  // E-mail transacional via Amazon SES (mail.service.ts usa `!` nessas envs:
+  // sem elas o app sobe e o envio falha só em runtime, dentro de catch)
+  'MAIL_FROM',
+  'AWS_REGION',
+  'AWS_ACCESS_KEY_ID',
+  'AWS_SECRET_ACCESS_KEY',
+  // Geração de PDFs (Puppeteer) — obrigatório no Docker (Chromium do sistema)
+  'PUPPETEER_EXECUTABLE_PATH',
+  // ClubGas (clubgas.client.ts) — sem ela o client monta URL inválida
+  'CLUBGAS_BASE_URL',
 ];
+
+/**
+ * Envs OPCIONAIS conhecidas — documentação viva; não geram warning.
+ * Ao adicionar uma env nova, classifique-a aqui, em WARN_IF_MISSING ou
+ * em REQUIRED_BASE (regra do CLAUDE.md).
+ *
+ * - APP_URL: base pública para links de upload (file-upload.service, tenant.config)
+ * - PORT / REDIS_PORT / APP_TIMEZONE: infra com default
+ * - PRISMA_CONNECTION_LIMIT / PRISMA_POOL_TIMEOUT: pool MySQL (prisma.service)
+ * - CEPABERTO_TOKEN / CEPABERTO_API_TOKEN: geocodificação de oficinas
+ *   (oficina.service aceita os dois nomes; sem token, oficina fica sem coordenadas)
+ * - ENABLE_TEST_ENDPOINTS: habilita rotas de teste (auth.controller)
+ * - M7_NOMINATIM_DB / M7_NOMINATIM_TABLE / M7_NOMINATIM_ENABLED /
+ *   M7_REV_GEOCODE_CACHE_PROVIDERS / M7_REV_GEOCODE_CACHE_RADIUS_KEYS /
+ *   M7_REV_GEOCODE_LEGACY_CACHE_FALLBACK: reverse geocode M7 (defaults no service)
+ * - SOFTRUCK_REV_GEOCODE_TIMEOUT_MS: timeout do reverse geocode Softruck
+ * - ANALYTICS_JOURNEY_ENABLED / ANALYTICS_LINK_USER_ENABLED /
+ *   ANALYTICS_RATE_LIMIT_ENABLED / ANALYTICS_JOURNEY_TTL_DAYS: flags do analytics
+ * - BOLETO_NOTIFICACAO_*: demais knobs da rotina de boletos (defaults validados
+ *   em boleto-notificacao.config.ts)
+ * - EXPO_UPDATES_DIR / EXPO_UPDATES_PUBLIC_URL / EXPO_UPDATES_PRIVATE_KEY_PATH /
+ *   EXPO_UPDATES_PRIVATE_KEY_BASE64 / EXPO_UPDATES_KEY_ID /
+ *   EXPO_UPDATES_UPLOAD_LIMIT_MB: servidor OTA self-hosted (expo-updates.config.ts
+ *   loga warning no boot se a chave de code signing estiver ausente)
+ */
 
 /**
  * Monta a lista de envs obrigatórias das integrações, por base configurada.

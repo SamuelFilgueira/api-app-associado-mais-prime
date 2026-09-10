@@ -9,10 +9,10 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
-import { AdminPanelRole } from 'src/admin-panel/enums/admin-panel-role.enum';
-import { AdminPanelRoleGuard } from 'src/admin-panel/guards/admin-panel-role.guard';
-import { AdminPanelRoles } from 'src/admin-panel/decorators/admin-panel-roles.decorator';
+import { JwtAuthGuard } from 'src/infra/guards/jwt-auth.guard';
+import { AdminPanelRole } from 'src/infra/enums/admin-panel-role.enum';
+import { AdminPanelRoleGuard } from 'src/infra/guards/admin-panel-role.guard';
+import { AdminPanelRoles } from 'src/infra/decorators/admin-panel-roles.decorator';
 import { ListReinspectionPaymentsDto } from 'src/reinspection/dto/list-reinspection-payments.dto';
 import { ReinspectionPaymentsAdminService } from 'src/reinspection/services/reinspection-payments-admin.service';
 

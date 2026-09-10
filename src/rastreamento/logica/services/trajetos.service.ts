@@ -1,3 +1,4 @@
+import { buildLogicaUrl, isLogicaTokenInvalidResponse, LOGICA_POSICAO_TIMEOUT, LOGICA_POSICAO_URL, LOGICA_REQUEST_TIMEOUT, LOGICA_TRAJETO_URL } from 'src/rastreamento/logica/constants/logica.constants';
 import {
   Injectable,
   InternalServerErrorException,
@@ -14,13 +15,6 @@ import {
 import { TrajetoPdfLogicaService } from '../pdf/trajeto-pdf-logica.service';
 import { LogicaAuthService } from './logica-auth.service';
 
-const LOGICA_REQUEST_TIMEOUT = 15_000;
-const LOGICA_TRAJETO_URL =
-  'https://monitoramento.logicasolucoes.com.br/mobile/trajeto';
-const LOGICA_POSICAO_URL =
-  'https://monitoramento.logicasolucoes.com.br/mobile/posicao';
-/** O /mobile/posicao devolve o dia inteiro (~2 MB) — timeout maior */
-const LOGICA_POSICAO_TIMEOUT = 30_000;
 
 interface LogicaListaItemPayload {
   id?: number | string;
@@ -46,6 +40,7 @@ interface LogicaListaResponsePayload {
 
 // Converte data no formato BR "dd/MM/yyyy HH:mm:ss" em timestamp ordenável.
 // Datas inválidas vão para o fim da linha do tempo.
+// TODO(dedupe/B11): ver comentário em rastreamento.logica.ts — 3 parsers divergentes; não unificar sem decisão.
 export function parseDataBrParaTimestamp(data: string): number {
   const match = String(data ?? '')
     .trim()
@@ -425,36 +420,11 @@ export class TrajetosService {
   }
 
   private buildUrl(path: string): string {
-    const baseUrl = process.env.LOGICA_API_BASE_URL;
-
-    if (!baseUrl) {
-      throw new InternalServerErrorException(
-        'LOGICA_API_BASE_URL não definida nas variáveis de ambiente',
-      );
-    }
-
-    const normalized = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
-    return `${normalized}/${path.replace(/^\//, '')}`;
+    return buildLogicaUrl(path);
   }
 
   private isTokenInvalidResponse(data: unknown): boolean {
-    if (!data || typeof data !== 'object') return false;
-
-    const value = data as Record<string, unknown>;
-    const logado = value.logado;
-    const erro = value.erro;
-    const mensagem =
-      typeof value.mensagem === 'string' ? value.mensagem.toLowerCase() : '';
-
-    if (logado === false || erro === true) return true;
-    if (
-      mensagem.includes('token') &&
-      (mensagem.includes('inv') || mensagem.includes('expir'))
-    ) {
-      return true;
-    }
-
-    return false;
+    return isLogicaTokenInvalidResponse(data);
   }
 
   private formatarDataIsoParaBr(data: string): string {

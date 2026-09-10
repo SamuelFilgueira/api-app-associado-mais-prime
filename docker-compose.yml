@@ -31,6 +31,8 @@ services:
     volumes:
       - uploads-data:/app/uploads
       - webhook-data:/app/webhook/payloads
+      # Releases OTA (expo-updates) — persistem entre rebuilds
+      - updates-data:/app/updates
     depends_on:
       redis:
         condition: service_healthy
@@ -38,3 +40,4 @@ volumes:
   redis-data:
   uploads-data:
   webhook-data:
+  updates-data:

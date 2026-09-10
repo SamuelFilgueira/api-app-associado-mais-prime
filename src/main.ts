@@ -3,6 +3,7 @@ process.env.TZ = 'America/Sao_Paulo';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import helmet from 'helmet';
+import compression from 'compression';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { join } from 'path';
@@ -37,6 +38,10 @@ async function bootstrap() {
   });
 
   app.use(helmet());
+  // Gzip nas respostas: o app consome listas JSON grandes (postos, oficinas,
+  // benefícios, boletos) por rede móvel. Só comprime acima de 1kb e apenas
+  // content-types marcados como compressíveis — PDF/XLSX passam intactos.
+  app.use(compression());
   // Permite payloads maiores para suportar 7+ fotos em base64 por requisição
   app.use(json({ limit: '20mb' }));
   app.use(urlencoded({ extended: true, limit: '20mb' }));

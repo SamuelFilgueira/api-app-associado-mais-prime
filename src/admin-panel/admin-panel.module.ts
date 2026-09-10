@@ -1,3 +1,4 @@
+import { jwtSecret } from 'src/auth/config/auth.config';
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { AdminPanelUsersController } from 'src/admin-panel/controllers/admin-panel-users.controller';
@@ -7,12 +8,11 @@ import { AdminPanelAuthController } from 'src/admin-panel/controllers/admin-pane
 @Module({
   imports: [
     JwtModule.register({
-      secret: process.env.JWT_SECRET || 'minha_chave_secreta',
+      secret: jwtSecret(),
       signOptions: { expiresIn: '1d' },
     }),
   ],
   controllers: [AdminPanelUsersController, AdminPanelAuthController],
   providers: [AdminPanelUsersService],
-  exports: [AdminPanelUsersService],
 })
 export class AdminPanelModule {}

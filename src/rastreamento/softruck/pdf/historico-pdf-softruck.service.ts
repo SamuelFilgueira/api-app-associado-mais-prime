@@ -1,3 +1,4 @@
+import { formatarDataBR } from 'src/shared/date.util';
 import {
   Injectable,
   InternalServerErrorException,
@@ -43,6 +44,7 @@ function formatarVelocidade(kmh: number): string {
 }
 
 /** Formata data ISO ou string de data para exibição dd/MM/yyyy HH:mm */
+// TODO(dedupe/B11): diverge da versão da Lógica (esta emite HH:mm, sem segundos) — unificar exige decisão sobre o formato exibido nos PDFs.
 function formatarDataHora(valor: string): string {
   if (!valor) return 'N/D';
   try {
@@ -60,13 +62,6 @@ function formatarDataHora(valor: string): string {
 }
 
 /** Formata data ISO YYYY-MM-DD para dd/MM/yyyy */
-function formatarDataBR(isoDate: string): string {
-  if (!isoDate) return isoDate;
-  const [ano, mes, dia] = isoDate.split('-');
-  if (!ano || !mes || !dia) return isoDate;
-  return `${dia}/${mes}/${ano}`;
-}
-
 function gerarGraficoDistribuicaoDias(
   segmentos: HistoricoSegmentoDto[],
 ): string {

@@ -1,3 +1,4 @@
+import { SGA_BASE_URL } from 'src/integrations/hinova/hinova.constants';
 import * as bcrypt from 'bcrypt';
 import {
   BadRequestException,
@@ -14,7 +15,7 @@ import { PrismaService } from 'src/database/prisma.service';
 import { UpdateAssociadoDto } from 'src/associado/dto/update-associado.dto';
 import { BaseOrigin } from 'src/shared/token-resolver.service';
 import { TENANT } from 'src/config/tenant.config';
-import { SgaAuthService } from 'src/shared/sga-auth.service';
+import { SgaAuthService } from 'src/integrations/hinova/sga-auth.service';
 
 @Injectable()
 export class AssociadoService {
@@ -100,7 +101,7 @@ export class AssociadoService {
 
     const baseOrigin = await this.detectBaseOrigin(cpf);
 
-    const url = `https://api.hinova.com.br/api/sga/v2/associado/buscar/${cpf}`;
+    const url = `${SGA_BASE_URL}/associado/buscar/${cpf}`;
 
     let response;
     try {
@@ -185,7 +186,7 @@ export class AssociadoService {
   }
 
   private async detectBaseOrigin(cpf: string): Promise<BaseOrigin> {
-    const url = `https://api.hinova.com.br/api/sga/v2/associado/buscar/${cpf}`;
+    const url = `${SGA_BASE_URL}/associado/buscar/${cpf}`;
 
     // Check cache in DB first
     try {
@@ -233,7 +234,7 @@ export class AssociadoService {
     }
 
     const baseOrigin = await this.detectBaseOrigin(cpf);
-    const url = `https://api.hinova.com.br/api/sga/v2/buscar/situacao-associado/${cpf}`;
+    const url = `${SGA_BASE_URL}/buscar/situacao-associado/${cpf}`;
 
     let response;
     try {

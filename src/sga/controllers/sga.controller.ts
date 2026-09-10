@@ -8,7 +8,7 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
-import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
+import { JwtAuthGuard } from 'src/infra/guards/jwt-auth.guard';
 import { SgaService } from 'src/sga/services/sga.service';
 import { SetRevistoriaDto } from 'src/sga/dto/set-revistoria.dto';
 

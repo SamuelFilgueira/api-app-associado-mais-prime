@@ -40,16 +40,18 @@ Toda a API atende duas bases: `MAIS_PRIME` e `MAIS_PRIME_RS`. A base vem no **JW
 
 - `src/shared/token-resolver.service.ts` — resolve `BaseOrigin` → **nomes de variáveis de ambiente** (SGA, Lógica, Softruck, M7, Clubgas, Alloyal) via `src/config/tenant.config.ts`. Ao adicionar qualquer integração nova, é obrigatório preencher a entrada nas **duas** bases.
 - `src/shared/base-context.service.ts` — `@Injectable({ scope: Scope.REQUEST })`, lê `request.user.baseOrigin` e resolve os tokens. Serviços que dependem dele herdam o escopo REQUEST.
-- `src/shared/sga-auth.service.ts` — autenticação na Hinova/SGA com cache de `token_usuario` por base, dedupe de requisições em voo e reautenticação automática em 401 (`executeWithAuth` / `executeRequestWithAuth`).
+- `src/integrations/hinova/sga-auth.service.ts` — autenticação na Hinova/SGA com cache de `token_usuario` por base, dedupe de requisições em voo e reautenticação automática em 401 (`executeWithAuth` / `executeRequestWithAuth`). Provido pelo `HinovaModule` (não global): todo módulo que fala com o SGA declara `imports: [HinovaModule]`. A base URL (`SGA_BASE_URL`) vive em `src/integrations/hinova/hinova.constants.ts`.
 - `maskSecret` / `baseTag` vivem em `src/shared/log.util.ts`; nunca logar valores de token.
 
-`SharedModule` é `@Global()` e é importado explicitamente no `AppModule`.
+`SharedModule` é `@Global()`, importado explicitamente no `AppModule`, e contém **só o que é agnóstico de vendor** (tenancy e utils). Autenticação/URL de vendor fica em `src/integrations/<vendor>`.
 
 ### Estrutura padrão por módulo
 
 Cada módulo de domínio segue a mesma organização de pastas: `controllers/`, `services/`, `dto/` e, quando aplicável, `guards/`, `processors/`, `strategies/`, `interfaces/`, `repositories/`, `enums/`, `decorators/`. O `*.module.ts` fica na raiz do módulo. O `AppModule` contém **apenas imports de módulos** — nunca declarar controllers/providers de feature nele.
 
-Transversais: `src/database/` (PrismaService — instância única global), `src/infra/` (mail/, storage/ com `FileUploadService`, decorators/, filters/, interceptors/, health/), `src/integrations/` (um client HTTP por vendor externo; `clubgas/` é o modelo — resolve token por base internamente, controllers não fazem resolução de credencial), `src/shared/` (tenancy + SGA auth + log utils), `src/queue/`.
+Transversais: `src/database/` (PrismaService — instância única global), `src/infra/` (mail/, storage/ com `FileUploadService`, guards/ transversais, decorators/, filters/, interceptors/, health/), `src/integrations/` (um módulo por vendor externo, **não global**, exportando seu client: `clubgas/` é o modelo — resolve token por base internamente, controllers não fazem resolução de credencial; `hinova/` provê `SgaAuthService` + `SGA_BASE_URL`), `src/shared/` (tenancy + utils agnósticos de vendor), `src/queue/`.
+
+Regra de dependência: `controller → service → { repository | client | fila } → { prisma | axios | redis }`; domínio consome domínio **só por módulo exportado**; guard transversal mora em `infra/guards`; URL/auth de vendor mora em `integrations/<vendor>`; `process.env` novo só em `config/`; nenhuma linha nova dentro de god service. Detalhes e checklist de PR em `docs/ARQUITETURA_ALVO_2026-09.md`.
 
 ### Módulos globais
 
@@ -61,13 +63,15 @@ Nomes exportados de `src/queue/queue.module.ts`: `WEBHOOK_QUEUE`, `NOTIFICATION_
 
 ### Rastreamento (`src/rastreamento`)
 
-Três provedores externos: **M7**, **Lógica Soluções** e **Softruck**, cada um com subpasta própria (`m7/`, `logica/`, `softruck/`) organizada em `controllers/ services/ dto/ helpers/ mappers/ pdf/`. Os clients ficam em `m7/services/rastreamento-m7.ts`, `logica/services/rastreamento.logica.ts` e `softruck/services/rastreamento-softruck.service.ts`; a orquestração fica em `services/rastreamento.service.ts`. `RastreamentoService.rastreamento()` consulta os provedores em paralelo com `Promise.allSettled` e escolhe a posição mais recente.
+Três provedores externos: **M7**, **Lógica Soluções** e **Softruck**, cada um em **submódulo Nest próprio** (`m7/m7.module.ts`, `logica/logica.module.ts`, `softruck/softruck.module.ts`) com `exports` explícitos, importados pelo `RastreamentoModule` (que fica só com o orquestrador e o `WebhookProcessor`). `SoftruckModule` importa `M7Module` (reverse geocode) e `LogicaModule` (fallback de histórico via `HistoricoProviderResolverService`, em `softruck/services/`). Cada subpasta segue `controllers/ services/ dto/ helpers/ mappers/ pdf/`. Os clients ficam em `m7/services/rastreamento-m7.ts`, `logica/services/rastreamento.logica.ts` e `softruck/services/rastreamento-softruck.service.ts`; a orquestração fica em `services/rastreamento.service.ts`. `RastreamentoService.rastreamento()` consulta os provedores em paralelo com `Promise.allSettled` e escolhe a posição mais recente.
 
-- Novo provedor: implementar `IRastreamentoProvider` (`providers/rastreamento-provider.interface.ts`) e registrar em `rastreamento.module.ts`.
+- Novo provedor: criar submódulo próprio (modelo `m7.module.ts`), implementar `IRastreamentoProvider` (`providers/rastreamento-provider.interface.ts`), exportar o service e importar o submódulo em `rastreamento.module.ts`.
 - `RastreamentoM7` e `LogicaRastreamentoService` são injetados pelo Nest — não instanciar com `new`.
 - Relatórios PDF de histórico/trajetos usam Puppeteer (no Docker, Chromium do sistema via `PUPPETEER_EXECUTABLE_PATH`).
 
 ### Autenticação e autorização
+
+Guards transversais ficam em `src/infra/guards/` (`JwtAuthGuard`, `AdminRoleGuard`, `AdminPanelRoleGuard`, `AdminTokenGuard`); guards de um único fluxo ficam no módulo dono (`auth/guards/local-auth`, `auth/guards/primeiro-login`, `rastreamento/guards/m7`, `analytics/guards/optional-jwt-auth`). Guards sem dependências não precisam ser declarados como providers.
 
 - `JwtAuthGuard` / `LocalAuthGuard` (Passport) — usuários do app.
 - `PrimeiroLoginGuard` — bloqueia rotas enquanto `user.primeiroLogin === true` (exceto a troca de senha).
@@ -78,7 +82,7 @@ Três provedores externos: **M7**, **Lógica Soluções** e **Softruck**, cada u
 
 ### Domínios
 
-`sga` (Hinova: associados, veículos, boletos), `beneficios` (Alloyal — clube de vantagens), `postos`/`economia`/`fuel-session` (Clubgas — combustível e economia acumulada), `reinspection` (revistoria com fotos e pagamentos), `documentos`, `oficina`, `slider`, `notifications` (Expo Push + histórico persistido + popup), `admin-panel`, `analytics`, `app-version` (gate de versão mínima via semver).
+`sga` (Hinova: associados, veículos, boletos), `beneficios` (Alloyal — clube de vantagens), `postos`/`economia`/`fuel-session` (Clubgas — combustível e economia acumulada), `reinspection` (revistoria com fotos e pagamentos), `documentos`, `oficina`, `slider`, `notifications` (Expo Push + histórico persistido + popup), `admin-panel`, `analytics`, `app-version` (gate de versão mínima via semver), `expo-updates` (servidor OTA self-hosted — Expo Updates Protocol; releases em `updates/<runtimeVersion>/<release>/`, publicação via `scripts/publicar-update.mjs`, docs em `docs/EXPO_UPDATES_OTA.md`).
 
 `analytics` tem regras próprias: allowlists de telas/ações/formulários (`constants/`), scanner de chaves proibidas, hash HMAC/SHA-256 de identificadores e rate limit em Redis — respeitar essas barreiras ao adicionar eventos.
 
@@ -95,4 +99,4 @@ Três provedores externos: **M7**, **Lógica Soluções** e **Softruck**, cada u
 - `prisma/schema.prisma`: modelos antigos em minúsculo (`user`, `workshop`), novos em PascalCase. Migrations ficam versionadas em `prisma/migrations/`.
 - Uploads gravam em `uploads/<subdir>/` (`FileUploadService`, com `sharp` para imagens) e são expostos como `/uploads/...`.
 - `noImplicitAny` está desligado e várias regras `no-unsafe-*` do ESLint estão off — não assumir tipagem estrita.
-- Documentação detalhada por feature em `docs/` (notificações, analytics, histórico de trajetórias, app-version gate, arquitetura).
+- Documentação detalhada por feature em `docs/` (notificações, analytics, histórico de trajetórias, app-version gate). Arquitetura vigente, regras de dependência e checklist de PR: `docs/ARQUITETURA_ALVO_2026-09.md`.

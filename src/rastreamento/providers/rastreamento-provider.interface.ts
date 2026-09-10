@@ -22,5 +22,3 @@ export interface IRastreamentoProvider {
     baseContext: RastreamentoBaseContext;
   }): Promise<RastreamentoCandidatoResult>;
 }
-
-export const RASTREAMENTO_PROVIDERS = Symbol('RASTREAMENTO_PROVIDERS');

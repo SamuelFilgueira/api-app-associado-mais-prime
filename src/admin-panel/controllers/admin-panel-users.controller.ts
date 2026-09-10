@@ -11,8 +11,8 @@ import {
   Post,
   UseGuards,
 } from '@nestjs/common';
-import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
-import { AdminRoleGuard } from 'src/auth/guards/admin-role.guard';
+import { JwtAuthGuard } from 'src/infra/guards/jwt-auth.guard';
+import { AdminRoleGuard } from 'src/infra/guards/admin-role.guard';
 import { AdminPanelUsersService } from 'src/admin-panel/services/admin-panel-users.service';
 import { CreateAdminPanelUserDto } from 'src/admin-panel/dto/create-admin-panel-user.dto';
 import { UpdateAdminPanelUserDto } from 'src/admin-panel/dto/update-admin-panel-user.dto';

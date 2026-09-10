@@ -11,7 +11,7 @@ import {
 import { AuthService } from 'src/auth/services/auth.service';
 import { LocalAuthGuard } from 'src/auth/guards/local-auth.guard';
 import { RegisterDto } from 'src/auth/dto/register.dto';
-import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
+import { JwtAuthGuard } from 'src/infra/guards/jwt-auth.guard';
 import { LoginDto } from 'src/auth/dto/login.dto';
 import { MailService } from 'src/infra/mail/mail.service';
 

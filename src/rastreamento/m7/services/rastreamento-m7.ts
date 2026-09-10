@@ -1,3 +1,4 @@
+import { m7ApiBaseUrl } from 'src/rastreamento/m7/constants/m7.constants';
 import {
   BadRequestException,
   Injectable,
@@ -183,7 +184,7 @@ export class RastreamentoM7
 
     try {
       const response = await axios.post(
-        `${process.env.M7_API_BASE_URL}login`,
+        `${m7ApiBaseUrl()}login`,
         { codigo, api_m7_token: apiM7Token },
         { timeout: M7_REQUEST_TIMEOUT },
       );
@@ -227,8 +228,11 @@ export class RastreamentoM7
   /**
    * Wrapper genérico: executa o request fornecido e, em caso de token
    * inválido ou expirado, renova e repete a chamada uma única vez.
+   *
+   * Público por ser o único gerenciador do token M7 — `HistoricoM7Service`
+   * reutiliza este cache em vez de manter um segundo login paralelo.
    */
-  private async executarComReautenticacao<T>(
+  async executarComReautenticacao<T>(
     baseOrigin: BaseOrigin,
     request: (token: string) => Promise<{ status: number; data: T }>,
   ): Promise<T> {
@@ -300,7 +304,7 @@ export class RastreamentoM7
     try {
       const data = await this.executarComReautenticacao(baseOrigin, (token) =>
         axios.post(
-          `${process.env.M7_API_BASE_URL}api/veiculos/ultima-posicao`,
+          `${m7ApiBaseUrl()}api/veiculos/ultima-posicao`,
           { cnpj, chassi },
           {
             headers: { Authorization: `Bearer ${token}` },
@@ -332,7 +336,7 @@ export class RastreamentoM7
   ): Promise<EventoPadraoM7Response> {
     try {
       const data = await this.executarComReautenticacao(baseOrigin, (token) =>
-        axios.get(`${process.env.M7_API_BASE_URL}api/veiculos/evento-padrao`, {
+        axios.get(`${m7ApiBaseUrl()}api/veiculos/evento-padrao`, {
           params: { cnpj, chassi, scope: 'cliente' },
           headers: { Authorization: `Bearer ${token}` },
           timeout: M7_REQUEST_TIMEOUT,
@@ -380,7 +384,7 @@ export class RastreamentoM7
       Envio_mult: true,
     };
     const data = await this.executarComReautenticacao(baseOrigin, (token) =>
-      axios.post(`${process.env.M7_API_BASE_URL}api/veiculos/ancora`, payload, {
+      axios.post(`${m7ApiBaseUrl()}api/veiculos/ancora`, payload, {
         headers: { Authorization: `Bearer ${token}` },
         timeout: M7_REQUEST_TIMEOUT,
       }),

@@ -14,9 +14,8 @@ import {
 } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
-import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
-import { AdminRoleGuard } from 'src/auth/guards/admin-role.guard';
-import { PrismaService } from 'src/database/prisma.service';
+import { JwtAuthGuard } from 'src/infra/guards/jwt-auth.guard';
+import { AdminRoleGuard } from 'src/infra/guards/admin-role.guard';
 import { BOLETO_NOTIFICACAO_QUEUE } from 'src/queue/queue.module';
 import { parseDateBR } from 'src/shared/date.util';
 import { BoletoNotificacaoConfigService } from 'src/boleto-notificacao/config/boleto-notificacao.config';
@@ -28,6 +27,7 @@ import {
   BoletoNotificacaoService,
   JOB_EXECUTAR_ROTINA,
 } from 'src/boleto-notificacao/services/boleto-notificacao.service';
+import { BoletoNotificacaoConsultaService } from 'src/boleto-notificacao/services/boleto-notificacao-consulta.service';
 import { BoletoNotificacaoReceiptsService } from 'src/boleto-notificacao/services/boleto-notificacao-receipts.service';
 import { BoletoNotificacaoSchedulerService } from 'src/boleto-notificacao/services/boleto-notificacao-scheduler.service';
 import { ExecutarRotinaDto } from 'src/boleto-notificacao/dto/executar-rotina.dto';
@@ -40,7 +40,7 @@ import { ExecutarRotinaDto } from 'src/boleto-notificacao/dto/executar-rotina.dt
 @UseGuards(JwtAuthGuard, AdminRoleGuard)
 export class BoletoNotificacaoAdminController {
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly consultaService: BoletoNotificacaoConsultaService,
     private readonly configService: BoletoNotificacaoConfigService,
     private readonly notificacaoService: BoletoNotificacaoService,
     private readonly receiptsService: BoletoNotificacaoReceiptsService,
@@ -122,29 +122,18 @@ export class BoletoNotificacaoAdminController {
     @Query('limit') limit?: string,
     @Query('tenant') tenant?: string,
   ) {
-    const take = Math.min(Math.max(Number(limit) || 30, 1), 200);
-    const execucoes = await this.prisma.boletoNotificacaoExecucao.findMany({
-      where: tenant ? { tenant } : undefined,
-      orderBy: { iniciadoEm: 'desc' },
-      take,
-    });
+    const execucoes = await this.consultaService.listarExecucoes(tenant, limit);
     return { total: execucoes.length, execucoes };
   }
 
   /** Detalhe de uma execução + resumo de logs por status. */
   @Get('execucoes/:id')
   async detalheExecucao(@Param('id', ParseIntPipe) id: number) {
-    const execucao = await this.prisma.boletoNotificacaoExecucao.findUnique({
-      where: { id },
-    });
+    const execucao = await this.consultaService.buscarExecucao(id);
     if (!execucao)
       throw new NotFoundException(`Execução #${id} não encontrada`);
 
-    const porStatus = await this.prisma.boletoNotificacaoLog.groupBy({
-      by: ['statusEnvio'],
-      where: { execucaoId: id },
-      _count: { _all: true },
-    });
+    const porStatus = await this.consultaService.contarLogsPorStatus(id);
 
     return {
       execucao,
@@ -161,15 +150,7 @@ export class BoletoNotificacaoAdminController {
     @Query('status') status?: string,
     @Query('limit') limit?: string,
   ) {
-    const take = Math.min(Math.max(Number(limit) || 100, 1), 1000);
-    const logs = await this.prisma.boletoNotificacaoLog.findMany({
-      where: {
-        execucaoId: id,
-        ...(status ? { statusEnvio: status as any } : {}),
-      },
-      orderBy: { id: 'asc' },
-      take,
-    });
+    const logs = await this.consultaService.listarLogs(id, status, limit);
     return {
       total: logs.length,
       logs: logs.map((log) => ({

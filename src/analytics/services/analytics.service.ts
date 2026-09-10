@@ -32,6 +32,10 @@ import {
 } from 'src/analytics/utils/analytics-sanitizer.util';
 import { ANALYTICS_QUEUE } from 'src/queue/queue.module';
 import { ANALYTICS_REDIS } from 'src/analytics/providers/analytics-redis.provider';
+import {
+  sanitizeDeviceInfo,
+  sanitizeJourney,
+} from 'src/analytics/utils/analytics-journey.util';
 
 const RATE_LIMIT_IP_WINDOW_SEC = 60;
 const RATE_LIMIT_IP_MAX = 10;
@@ -206,13 +210,23 @@ export class AnalyticsService {
         ),
       }));
 
+    // 8b. Jornada (opcional). Só entra quando ANALYTICS_JOURNEY_ENABLED=true;
+    // com a flag desligada os blocos `device`/`journey` são ignorados por
+    // completo (não são persistidos nem contam como descarte).
+    const journeyEnabled = isTruthyEnv(process.env.ANALYTICS_JOURNEY_ENABLED);
+    const device = journeyEnabled ? sanitizeDeviceInfo(dto.device) : null;
+    const journey = journeyEnabled
+      ? sanitizeJourney(dto.journey, periodStart, periodEnd)
+      : { accepted: [], discarded: 0 };
+
     const discardedItemsCount =
       dto.screens.length -
       acceptedScreens.length +
       dto.actions.length -
       acceptedActions.length +
       (dto.forms?.length ?? 0) -
-      acceptedForms.length;
+      acceptedForms.length +
+      journey.discarded;
 
     // 9. Gerar payloadHash do payload sanitizado (para idempotência)
     const sanitizedPayload = {
@@ -250,6 +264,15 @@ export class AnalyticsService {
           acceptedActionsCount: acceptedActions.length,
           acceptedFormsCount: acceptedForms.length,
           analyticsUserId,
+          // Jornada: só presente quando a flag está ligada. clientIp é gravado
+          // no aparelho para cruzar com logs do nginx (precisa de X-Forwarded-For).
+          journey: journeyEnabled
+            ? {
+                device,
+                events: journey.accepted,
+                clientIp: clientIp === 'unknown' ? null : clientIp,
+              }
+            : undefined,
         },
         {
           attempts: 3,

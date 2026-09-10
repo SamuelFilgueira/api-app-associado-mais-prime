@@ -7,8 +7,8 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { UserRole } from '@prisma/client';
-import { ADMIN_PANEL_ROLES_KEY } from 'src/admin-panel/decorators/admin-panel-roles.decorator';
-import { AdminPanelRole } from 'src/admin-panel/enums/admin-panel-role.enum';
+import { ADMIN_PANEL_ROLES_KEY } from 'src/infra/decorators/admin-panel-roles.decorator';
+import { AdminPanelRole } from 'src/infra/enums/admin-panel-role.enum';
 
 @Injectable()
 export class AdminPanelRoleGuard implements CanActivate {

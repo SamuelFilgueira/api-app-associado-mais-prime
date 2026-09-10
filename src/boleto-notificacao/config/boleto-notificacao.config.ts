@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { TENANT } from 'src/config/tenant.config';
+import { SGA_BASE_URL } from 'src/integrations/hinova/hinova.constants';
 
 export type TipoMensagem = 'D0' | 'D5' | 'D6';
 export const TIPOS_MENSAGEM: TipoMensagem[] = ['D0', 'D5', 'D6'];
@@ -54,7 +55,7 @@ const DEFAULT_MENSAGENS: Record<TipoMensagem, MensagemConfig> = {
   },
 };
 
-export const SGA_BASE_URL_PADRAO = 'https://api.hinova.com.br/api/sga/v2';
+export const SGA_BASE_URL_PADRAO = SGA_BASE_URL;
 
 function parseBoolean(value: string | undefined, fallback: boolean): boolean {
   if (value === undefined || value.trim() === '') return fallback;

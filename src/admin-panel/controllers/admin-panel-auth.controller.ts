@@ -8,8 +8,8 @@ import {
   Request,
   UseGuards,
 } from '@nestjs/common';
-import { JwtAuthGuard } from 'src/auth/guards/jwt-auth.guard';
-import { AdminRoleGuard } from 'src/auth/guards/admin-role.guard';
+import { JwtAuthGuard } from 'src/infra/guards/jwt-auth.guard';
+import { AdminRoleGuard } from 'src/infra/guards/admin-role.guard';
 import { AdminPanelUsersService } from 'src/admin-panel/services/admin-panel-users.service';
 import { AdminPanelLoginDto } from 'src/admin-panel/dto/admin-panel-login.dto';
 import { ChangeAdminPanelPasswordDto } from 'src/admin-panel/dto/change-admin-panel-password.dto';
