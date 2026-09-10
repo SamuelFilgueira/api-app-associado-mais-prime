@@ -1,52 +1,12 @@
-import { addDays, daysInMonth, startOfDay } from 'src/shared/date.util';
+import { addDays, startOfDay } from 'src/shared/date.util';
 
-export interface CicloCobrancaParams {
-  diasVencimento: number[];
-  fallbackMesCurto: number;
-}
-
-/**
- * Conjunto efetivo de dias de gatilho para um mês.
- *
- * Regra: dias configurados que existem no mês entram normalmente; para cada
- * dia configurado que NÃO existe (ex.: 30 em fevereiro), o dia de fallback
- * (default 28) entra no lugar — desde que ele próprio exista no mês.
- */
-export function diasEfetivosDoMes(
-  ano: number,
-  mes: number,
-  params: CicloCobrancaParams,
-): number[] {
-  const ultimoDia = daysInMonth(ano, mes);
-  const efetivos = new Set<number>();
-
-  for (const dia of params.diasVencimento) {
-    if (dia <= ultimoDia) {
-      efetivos.add(dia);
-    } else if (params.fallbackMesCurto <= ultimoDia) {
-      efetivos.add(params.fallbackMesCurto);
-    }
-  }
-
-  return Array.from(efetivos).sort((a, b) => a - b);
-}
-
-/** Indica se a data é um dia de gatilho (considerando a exceção de meses curtos). */
-export function isDataGatilho(
-  data: Date,
-  params: CicloCobrancaParams,
-): boolean {
-  const efetivos = diasEfetivosDoMes(
-    data.getFullYear(),
-    data.getMonth() + 1,
-    params,
-  );
-  return efetivos.includes(data.getDate());
-}
+// Régua v2 (10/09/2026): não há mais "dias fixos de gatilho" — a âncora é o
+// vencimento EFETIVO (data_vencimento do SGA, já prorrogado para dia útil),
+// e cada etapa é consultada todos os dias.
 
 /**
- * Data-alvo de um momento do ciclo: data de referência menos o offset em
- * dias corridos (D0 = hoje, D+5 = hoje − 5, D+6 = hoje − 6).
+ * Data-alvo de uma etapa pós-vencimento: data de referência menos o offset em
+ * dias corridos (D0 = hoje, D+1 = hoje − 1, ..., D+20 = hoje − 20).
  */
 export function calcularDataAlvo(dataReferencia: Date, offset: number): Date {
   return addDays(startOfDay(dataReferencia), -offset);
@@ -75,12 +35,70 @@ export function mascararCpf(cpf: string | null | undefined): string {
   return `${cpf.slice(0, 3)}******${cpf.slice(-2)}`;
 }
 
-/** Substitui placeholders {vencimento} e {quantidade} no texto da mensagem. */
+/** Valores disponíveis para os tokens da régua. */
+export interface TokensMensagem {
+  /** Primeiro nome do associado. */
+  nome: string;
+  /** Placa do veículo (primeiro veículo do boleto). */
+  placa: string;
+  /** Competência por extenso (ex.: "Setembro"), derivada de mes_referente. */
+  mes: string;
+  /** Vencimento efetivo em DD/MM. */
+  data: string;
+  /** Vencimento efetivo em dd/mm/yyyy (compatibilidade). */
+  vencimento: string;
+  /** Quantidade de boletos do associado nesse vencimento. */
+  quantidade: number;
+}
+
+/**
+ * Substitui os tokens da régua no texto da mensagem:
+ * {nome}, {placa}, {mes}, {data}, {vencimento}, {quantidade}.
+ */
 export function renderizarMensagem(
   template: string,
-  valores: { vencimento: string; quantidade: number },
+  valores: TokensMensagem,
 ): string {
   return template
+    .replace(/\{nome\}/g, valores.nome)
+    .replace(/\{placa\}/g, valores.placa)
+    .replace(/\{mes\}/g, valores.mes)
+    .replace(/\{data\}/g, valores.data)
     .replace(/\{vencimento\}/g, valores.vencimento)
     .replace(/\{quantidade\}/g, String(valores.quantidade));
+}
+
+/** Primeiro nome com capitalização simples (KAIO SILVA → Kaio). */
+export function primeiroNome(nomeCompleto: string | null | undefined): string {
+  const primeiro = (nomeCompleto ?? '').trim().split(/\s+/)[0] ?? '';
+  if (!primeiro) return 'Associado';
+  return (
+    primeiro.charAt(0).toLocaleUpperCase('pt-BR') +
+    primeiro.slice(1).toLocaleLowerCase('pt-BR')
+  );
+}
+
+const MESES_PT = [
+  'Janeiro',
+  'Fevereiro',
+  'Março',
+  'Abril',
+  'Maio',
+  'Junho',
+  'Julho',
+  'Agosto',
+  'Setembro',
+  'Outubro',
+  'Novembro',
+  'Dezembro',
+];
+
+/** Converte mes_referente ("09/2026") na competência por extenso ("Setembro"). */
+export function mesPorExtenso(mesReferente: string | null | undefined): string {
+  const match = (mesReferente ?? '').trim().match(/^(\d{1,2})\/\d{4}$/);
+  const numero = match ? Number(match[1]) : NaN;
+  if (!Number.isInteger(numero) || numero < 1 || numero > 12) {
+    return mesReferente?.trim() || 'este mês';
+  }
+  return MESES_PT[numero - 1];
 }

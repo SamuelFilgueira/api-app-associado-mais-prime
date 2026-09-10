@@ -1,7 +1,8 @@
 /** Corpo enviado a POST /listar/boleto-associado/periodo. */
 export interface SgaBoletoPeriodoRequest {
-  data_vencimento_original_inicial: string;
-  data_vencimento_original_final: string;
+  /** Régua v2: filtra pelo vencimento EFETIVO (o SGA já prorroga fds/feriado). */
+  data_vencimento_inicial: string;
+  data_vencimento_final: string;
   codigo_situacao_boleto: number;
   quantidade_por_pagina: number;
   inicio_paginacao: number;
@@ -25,6 +26,8 @@ export interface SgaBoletoPeriodo {
   dataVencimento: string;
   dataVencimentoOriginal: string;
   codigoSituacaoBoleto: string;
+  codigoTipoBoleto: string;
+  tipoBoleto: string;
   situacaoBoleto: string;
   valorBoleto: string;
   mesReferente: string;

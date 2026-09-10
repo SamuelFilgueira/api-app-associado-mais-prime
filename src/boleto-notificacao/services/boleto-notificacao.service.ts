@@ -7,9 +7,9 @@ import { PrismaService } from 'src/database/prisma.service';
 import { BOLETO_NOTIFICACAO_QUEUE } from 'src/queue/queue.module';
 import { baseTag } from 'src/shared/log.util';
 import {
+  addDays,
   formatDateBR,
   formatDateISO,
-  isSameLocalDate,
   parseDateSga,
   startOfDay,
   toUtcDateOnly,
@@ -21,10 +21,12 @@ import {
 } from 'src/boleto-notificacao/config/boleto-notificacao.config';
 import {
   calcularDataAlvo,
-  isDataGatilho,
   mascararCpf,
+  mesPorExtenso,
   normalizarCpf,
+  primeiroNome,
   renderizarMensagem,
+  TokensMensagem,
 } from 'src/boleto-notificacao/helpers/ciclo-cobranca.helper';
 import { SgaBoletoPeriodoClient } from 'src/boleto-notificacao/services/sga-boleto-periodo.client';
 import { SgaBoletoPeriodo } from 'src/boleto-notificacao/interfaces/sga-boleto-periodo.interface';
@@ -75,13 +77,25 @@ export interface ResultadoMomento {
     userId: number;
     quantidadeBoletos: number;
     nossoNumero: string;
+    vencimento: string;
+    titulo: string;
+    corpo: string;
   }>;
 }
 
 interface GrupoAssociado {
   codigoAssociado: number;
   cpf: string;
+  /** Vencimento efetivo dos boletos do grupo (chave da idempotência). */
+  vencimento: Date;
   boletos: SgaBoletoPeriodo[];
+}
+
+/** Janela de vencimento efetivo consultada por uma etapa da régua. */
+interface JanelaEtapa {
+  inicio: Date;
+  fim: Date;
+  descricao: string;
 }
 
 interface Destinatario extends GrupoAssociado {
@@ -110,8 +124,10 @@ function metricasVazias(): MetricasMomento {
 }
 
 /**
- * Rotina diária de notificações push do ciclo de cobrança (D0 / D+5 / D+6),
- * ancorada em `data_vencimento_original` e alimentada pelo endpoint
+ * Régua diária de notificações push do ciclo de cobrança
+ * (D-5 / D0 / D+1 / D+5 / D+6 / D+20 — documento do gestor, v. 10/09/2026),
+ * ancorada no vencimento EFETIVO (`data_vencimento`, que o SGA já prorroga
+ * para o próximo dia útil em fds/feriado) e alimentada pelo endpoint
  * POST /listar/boleto-associado/periodo do SGA.
  */
 @Injectable()
@@ -170,19 +186,42 @@ export class BoletoNotificacaoService {
     return resultados;
   }
 
-  /** Datas-alvo e gatilhos de uma data de referência (apoio a testes/admin). */
+  /** Janelas de vencimento consultadas por etapa (apoio a testes/admin). */
   simularDatas(dataReferencia: Date) {
     const config = this.configService.get();
     const referencia = startOfDay(dataReferencia);
     return TIPOS_MENSAGEM.map((tipo) => {
-      const dataAlvo = calcularDataAlvo(referencia, config.offsets[tipo]);
+      const janela = this.janelaDaEtapa(referencia, tipo);
       return {
         tipo,
         offset: config.offsets[tipo],
-        dataAlvo: formatDateBR(dataAlvo),
-        gatilho: isDataGatilho(dataAlvo, config),
+        dataAlvo: janela.descricao,
+        // Régua v2: toda etapa é consultada todos os dias (o vencimento
+        // efetivo pode cair em qualquer dia útil)
+        gatilho: true,
       };
     });
+  }
+
+  /**
+   * Janela de vencimento efetivo da etapa. Etapas pós-vencimento são de dia
+   * único (hoje − offset); a DM5 cobre D-5..D-1, o que também implementa a
+   * regra "boleto gerado depois de D-5 dispara quando aparecer, até D-1" —
+   * a idempotência garante um único envio por associado × vencimento.
+   */
+  private janelaDaEtapa(referencia: Date, tipo: TipoMensagem): JanelaEtapa {
+    const offsets = this.configService.get().offsets;
+    if (tipo === 'DM5') {
+      const inicio = addDays(referencia, 1);
+      const fim = addDays(referencia, offsets.DM5);
+      return {
+        inicio,
+        fim,
+        descricao: `${formatDateBR(inicio)} a ${formatDateBR(fim)}`,
+      };
+    }
+    const alvo = calcularDataAlvo(referencia, offsets[tipo]);
+    return { inicio: alvo, fim: alvo, descricao: formatDateBR(alvo) };
   }
 
   /**
@@ -196,8 +235,7 @@ export class BoletoNotificacaoService {
     origem: 'AGENDADA' | 'MANUAL',
   ): Promise<ResultadoMomento> {
     const config = this.configService.get();
-    const dataAlvo = calcularDataAlvo(dataReferencia, config.offsets[tipo]);
-    const gatilho = isDataGatilho(dataAlvo, config);
+    const janela = this.janelaDaEtapa(dataReferencia, tipo);
     const tag = `[BOLETO-NOTIF]${baseTag(tenant)}[${tipo}]`;
     const metricas = metricasVazias();
 
@@ -205,35 +243,13 @@ export class BoletoNotificacaoService {
       tenant,
       tipo,
       dataReferencia: formatDateBR(dataReferencia),
-      dataAlvo: formatDateBR(dataAlvo),
-      gatilho,
+      dataAlvo: janela.descricao,
+      gatilho: true,
       dryRun,
       execucaoId: null,
-      status: 'PULADA',
+      status: 'CONCLUIDA',
       metricas,
     };
-
-    if (!gatilho) {
-      this.logger.log(
-        `${tag} data-alvo ${base.dataAlvo} não é dia de gatilho — momento pulado`,
-      );
-      if (!dryRun) {
-        const execucao = await this.prisma.boletoNotificacaoExecucao.create({
-          data: {
-            tenant,
-            tipoMensagem: tipo,
-            dataReferencia: toUtcDateOnly(dataReferencia),
-            dataAlvo: toUtcDateOnly(dataAlvo),
-            status: 'PULADA',
-            origem,
-            finalizadoEm: new Date(),
-          },
-          select: { id: true },
-        });
-        base.execucaoId = execucao.id;
-      }
-      return base;
-    }
 
     const execucaoId = dryRun
       ? null
@@ -243,7 +259,7 @@ export class BoletoNotificacaoService {
               tenant,
               tipoMensagem: tipo,
               dataReferencia: toUtcDateOnly(dataReferencia),
-              dataAlvo: toUtcDateOnly(dataAlvo),
+              dataAlvo: toUtcDateOnly(janela.fim),
               status: 'EM_ANDAMENTO',
               origem,
               dryRun: false,
@@ -254,47 +270,71 @@ export class BoletoNotificacaoService {
     base.execucaoId = execucaoId;
 
     try {
-      // 1. Consulta paginada ao SGA (ABERTO, vencimento original = data-alvo)
-      const consulta = await this.sgaClient.listarAbertosPorVencimentoOriginal(
+      // 1. Consulta paginada ao SGA (ABERTO, vencimento efetivo dentro da janela)
+      const consulta = await this.sgaClient.listarAbertosPorVencimento(
         tenant,
-        dataAlvo,
+        janela.inicio,
+        janela.fim,
       );
       base.origemDados = consulta.origem;
       metricas.totalRegistrosSga =
         consulta.totalRegistros || consulta.boletos.length;
       metricas.totalPaginasSga = consulta.paginasConsultadas;
 
-      // 2. Filtro defensivo local (o SGA já filtra; isto protege contra divergências)
+      // 2. Filtro defensivo local (o SGA já filtra situação/data; aqui também
+      //    entram os filtros da régua: tipo de boleto e, em D+6/D+20, contrato suspenso)
+      const filtroTipos = config.codigosTipoBoleto;
+      const filtroSuspenso =
+        tipo === 'D6' || tipo === 'D20'
+          ? config.situacoesContratoSuspenso.map((s) => s.toUpperCase())
+          : [];
       const elegiveis = consulta.boletos.filter((b) => {
         // O SGA responde datas em yyyy-mm-dd (doc diz dd/mm/yyyy) — parser aceita ambos
-        const vencimento = parseDateSga(b.dataVencimentoOriginal);
+        const vencimento = parseDateSga(b.dataVencimento);
         const situacaoOk = b.codigoSituacaoBoleto === SituacaoBoletoSga.ABERTO;
-        const dataOk = !!vencimento && isSameLocalDate(vencimento, dataAlvo);
-        return situacaoOk && dataOk;
+        const dataOk =
+          !!vencimento &&
+          vencimento >= janela.inicio &&
+          vencimento <= janela.fim;
+        const tipoOk =
+          filtroTipos.length === 0 || filtroTipos.includes(b.codigoTipoBoleto);
+        const suspensoOk =
+          filtroSuspenso.length === 0 ||
+          b.veiculos.some((v) =>
+            filtroSuspenso.includes(
+              String(v.situacao_veiculo ?? '')
+                .trim()
+                .toUpperCase(),
+            ),
+          );
+        return situacaoOk && dataOk && tipoOk && suspensoOk;
       });
       if (elegiveis.length !== consulta.boletos.length) {
         this.logger.warn(
-          `${tag} ${consulta.boletos.length - elegiveis.length} boleto(s) retornado(s) pelo SGA fora do filtro (situação/data) foram descartados`,
+          `${tag} ${consulta.boletos.length - elegiveis.length} boleto(s) fora dos filtros da etapa (situação/data/tipo/suspenso) foram descartados`,
         );
       }
       metricas.totalBoletosElegiveis = elegiveis.length;
 
-      // 3. Agrupa por associado (1 push por associado × tipo × vencimento)
-      const grupos = new Map<number, GrupoAssociado>();
+      // 3. Agrupa por associado × vencimento efetivo (1 push por grupo)
+      const grupos = new Map<string, GrupoAssociado>();
       let semIdentificacao = 0;
       for (const boleto of elegiveis) {
         const cpf = normalizarCpf(boleto.cpf);
-        if (boleto.codigoAssociado === null || !cpf) {
+        const vencimento = parseDateSga(boleto.dataVencimento);
+        if (boleto.codigoAssociado === null || !cpf || !vencimento) {
           semIdentificacao++;
           continue;
         }
-        const grupo = grupos.get(boleto.codigoAssociado);
+        const chave = `${boleto.codigoAssociado}:${formatDateISO(vencimento)}`;
+        const grupo = grupos.get(chave);
         if (grupo) {
           grupo.boletos.push(boleto);
         } else {
-          grupos.set(boleto.codigoAssociado, {
+          grupos.set(chave, {
             codigoAssociado: boleto.codigoAssociado,
             cpf,
+            vencimento,
             boletos: [boleto],
           });
         }
@@ -309,7 +349,7 @@ export class BoletoNotificacaoService {
 
       if (grupos.size === 0) {
         this.logger.log(
-          `${tag} nenhum boleto ABERTO com vencimento original em ${base.dataAlvo}`,
+          `${tag} nenhum boleto ABERTO com vencimento efetivo em ${base.dataAlvo}`,
         );
         return await this.finalizar(base, execucaoId, metricas, dryRun);
       }
@@ -338,24 +378,39 @@ export class BoletoNotificacaoService {
       }
 
       // 5. Idempotência: já existe log para (tenant, associado, vencimento, tipo)?
+      const listaGrupos = Array.from(grupos.values());
       const existentes = await this.prisma.boletoNotificacaoLog.findMany({
         where: {
           tenant,
           tipoMensagem: tipo,
-          dataVencimentoOriginal: toUtcDateOnly(dataAlvo),
-          codigoAssociado: { in: Array.from(grupos.keys()) },
+          dataVencimentoOriginal: {
+            in: Array.from(
+              new Set(
+                listaGrupos.map((g) => toUtcDateOnly(g.vencimento).getTime()),
+              ),
+            ).map((t) => new Date(t)),
+          },
+          codigoAssociado: {
+            in: Array.from(new Set(listaGrupos.map((g) => g.codigoAssociado))),
+          },
         },
-        select: { codigoAssociado: true },
+        select: { codigoAssociado: true, dataVencimentoOriginal: true },
       });
-      const jaNotificados = new Set(existentes.map((e) => e.codigoAssociado));
+      const jaNotificados = new Set(
+        existentes.map(
+          (e) =>
+            `${e.codigoAssociado}:${e.dataVencimentoOriginal.toISOString().slice(0, 10)}`,
+        ),
+      );
 
       // 6. Classificação dos grupos
       const mensagem = config.mensagens[tipo];
       const destinatarios: Destinatario[] = [];
-      const usuariosNoLote = new Set<number>();
+      const usuariosNoLote = new Set<string>();
 
       for (const grupo of grupos.values()) {
-        if (jaNotificados.has(grupo.codigoAssociado)) {
+        const chaveGrupo = `${grupo.codigoAssociado}:${formatDateISO(grupo.vencimento)}`;
+        if (jaNotificados.has(chaveGrupo)) {
           metricas.totalIdempotentes++;
           continue;
         }
@@ -371,14 +426,24 @@ export class BoletoNotificacaoService {
           metricas.totalSemToken++;
           continue;
         }
-        if (usuariosNoLote.has(usuario.id)) {
+        const chaveUsuario = `${usuario.id}:${formatDateISO(grupo.vencimento)}`;
+        if (usuariosNoLote.has(chaveUsuario)) {
           metricas.totalDuplicadosUsuario++;
           continue;
         }
-        usuariosNoLote.add(usuario.id);
+        usuariosNoLote.add(chaveUsuario);
 
-        const valores = {
-          vencimento: base.dataAlvo,
+        // Tokens da régua, extraídos do primeiro boleto do grupo
+        const primeiroBoleto = grupo.boletos[0];
+        const vencimentoBR = formatDateBR(grupo.vencimento);
+        const valores: TokensMensagem = {
+          nome: primeiroNome(primeiroBoleto?.nomeAssociado),
+          placa:
+            String(primeiroBoleto?.veiculos?.[0]?.placa ?? '').trim() ||
+            'seu veículo',
+          mes: mesPorExtenso(primeiroBoleto?.mesReferente),
+          data: vencimentoBR.slice(0, 5),
+          vencimento: vencimentoBR,
           quantidade: grupo.boletos.length,
         };
         destinatarios.push({
@@ -409,6 +474,9 @@ export class BoletoNotificacaoService {
           userId: d.userId,
           quantidadeBoletos: d.boletos.length,
           nossoNumero: d.boletos[0]?.nossoNumero ?? '',
+          vencimento: formatDateBR(d.vencimento),
+          titulo: d.titulo,
+          corpo: d.corpo,
         }));
         return base;
       }
@@ -427,7 +495,7 @@ export class BoletoNotificacaoService {
               userId: destinatario.userId,
               nossoNumero: destinatario.boletos[0]?.nossoNumero || null,
               quantidadeBoletos: destinatario.boletos.length,
-              dataVencimentoOriginal: toUtcDateOnly(dataAlvo),
+              dataVencimentoOriginal: toUtcDateOnly(destinatario.vencimento),
               tipoMensagem: tipo,
               expoPushToken: destinatario.expoPushToken,
               statusEnvio: 'ENFILEIRADO',
@@ -455,7 +523,7 @@ export class BoletoNotificacaoService {
       );
 
       // 8. Envio via Expo em lotes de até 100
-      await this.enviarLotes(tag, tipo, dataAlvo, enfileirados, metricas);
+      await this.enviarLotes(tag, tipo, enfileirados, metricas);
 
       // 9. Receipts assíncronos
       if (metricas.totalEnviados > 0) {
@@ -496,7 +564,6 @@ export class BoletoNotificacaoService {
   private async enviarLotes(
     tag: string,
     tipo: TipoMensagem,
-    dataAlvo: Date,
     enfileirados: Array<{ logId: number; destinatario: Destinatario }>,
     metricas: MetricasMomento,
   ): Promise<void> {
@@ -513,7 +580,7 @@ export class BoletoNotificacaoService {
           screen: 'financeiro',
           origem: 'boleto_cobranca',
           tipoMensagem: tipo,
-          dataVencimentoOriginal: formatDateISO(dataAlvo),
+          dataVencimentoOriginal: formatDateISO(destinatario.vencimento),
           quantidadeBoletos: destinatario.boletos.length,
         },
         sound: 'default',

@@ -6,12 +6,14 @@ function boleto(overrides: Record<string, unknown> = {}) {
     codigo_associado: 55,
     nome_associado: 'Fulano',
     cpf: '52998224725',
-    data_vencimento: '10/03/2026',
-    data_vencimento_original: '10/03/2026',
+    data_vencimento: '2026-09-10',
+    data_vencimento_original: '2026-09-10',
     codigo_situacao_boleto: '2',
+    codigo_tipo_boleto: '1',
+    tipo_boleto: 'MENSALIDADE',
     situacao_boleto: 'ABERTO',
     valor_boleto: '99.90',
-    mes_referente: '03/2026',
+    mes_referente: '09/2026',
     veiculos: [{ codigo_veiculo: 1, placa: 'ABC1D23' }],
     ...overrides,
   };
@@ -41,7 +43,11 @@ describe('SgaBoletoPeriodoClient', () => {
         total_registros: '3000',
         pagina_corrente: 1,
         boletos: [
-          boleto({ codigo_situacao_boleto: 2, codigo_associado: '77' }),
+          boleto({
+            codigo_situacao_boleto: 2,
+            codigo_tipo_boleto: 5,
+            codigo_associado: '77',
+          }),
         ],
       });
 
@@ -50,6 +56,7 @@ describe('SgaBoletoPeriodoClient', () => {
       expect(pagina.totalRegistros).toBe(3000);
       expect(pagina.boletos).toHaveLength(1);
       expect(pagina.boletos[0].codigoSituacaoBoleto).toBe('2');
+      expect(pagina.boletos[0].codigoTipoBoleto).toBe('5');
       expect(pagina.boletos[0].codigoAssociado).toBe(77);
       expect(pagina.boletos[0].nossoNumero).toBe('1001');
     });
@@ -61,8 +68,8 @@ describe('SgaBoletoPeriodoClient', () => {
     });
   });
 
-  describe('listarAbertosPorVencimentoOriginal (paginação)', () => {
-    it('itera páginas base-0 até cobrir numero_paginas e envia os parâmetros corretos', async () => {
+  describe('listarAbertosPorVencimento (paginação por vencimento efetivo)', () => {
+    it('itera páginas base-0 até cobrir numero_paginas e envia a janela de data_vencimento', async () => {
       sgaAuth.executeRequestWithAuth
         .mockResolvedValueOnce({
           status: 200,
@@ -85,9 +92,10 @@ describe('SgaBoletoPeriodoClient', () => {
           },
         });
 
-      const resultado = await client.listarAbertosPorVencimentoOriginal(
+      const resultado = await client.listarAbertosPorVencimento(
         'MAIS_PRIME',
-        new Date(2026, 2, 10),
+        new Date(2026, 8, 11),
+        new Date(2026, 8, 15),
       );
 
       expect(sgaAuth.executeRequestWithAuth).toHaveBeenCalledTimes(2);
@@ -97,8 +105,8 @@ describe('SgaBoletoPeriodoClient', () => {
         'https://sga.test/api/sga/v2/listar/boleto-associado/periodo',
       );
       expect(primeiraChamada[1].data).toEqual({
-        data_vencimento_original_inicial: '10/03/2026',
-        data_vencimento_original_final: '10/03/2026',
+        data_vencimento_inicial: '11/09/2026',
+        data_vencimento_final: '15/09/2026',
         codigo_situacao_boleto: 2,
         quantidade_por_pagina: 2,
         inicio_paginacao: 0,
@@ -113,7 +121,6 @@ describe('SgaBoletoPeriodoClient', () => {
         '3',
       ]);
       expect(resultado.totalRegistros).toBe(3);
-      expect(resultado.numeroPaginas).toBe(2);
       expect(resultado.paginasConsultadas).toBe(2);
       expect(resultado.origem).toBe('SGA');
     });
@@ -134,9 +141,10 @@ describe('SgaBoletoPeriodoClient', () => {
         })
         .mockResolvedValueOnce({ status: 200, data: { boletos: [] } });
 
-      const resultado = await client.listarAbertosPorVencimentoOriginal(
+      const resultado = await client.listarAbertosPorVencimento(
         'MAIS_PRIME',
-        new Date(2026, 2, 10),
+        new Date(2026, 8, 10),
+        new Date(2026, 8, 10),
       );
 
       expect(resultado.boletos.map((b) => b.nossoNumero)).toEqual([
@@ -155,9 +163,10 @@ describe('SgaBoletoPeriodoClient', () => {
       });
 
       await expect(
-        client.listarAbertosPorVencimentoOriginal(
+        client.listarAbertosPorVencimento(
           'MAIS_PRIME',
-          new Date(2026, 2, 10),
+          new Date(2026, 8, 10),
+          new Date(2026, 8, 10),
         ),
       ).rejects.toThrow(/HTTP 500/);
     });

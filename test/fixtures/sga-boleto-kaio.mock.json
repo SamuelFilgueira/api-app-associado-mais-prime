@@ -1,0 +1,36 @@
+{
+  "mostrando ": 1,
+  "numero_paginas": 1,
+  "total_registros": "1",
+  "pagina_corrente": 1,
+  "boletos": [
+    {
+      "nosso_numero": 9990001,
+      "linha_digitavel": "23793.08600 90000.999000 10029.878001 1 15650000012990",
+      "valor_boleto": "129.90",
+      "valor_pagamento": "0.00",
+      "codigo_tipo_boleto": "1",
+      "tipo_boleto": "MENSALIDADE",
+      "codigo_associado": 99001,
+      "nome_associado": "KAIO TESTE",
+      "cpf": "15654718738",
+      "email": "kaio@example.com",
+      "data_emissao": "2026-09-05",
+      "data_vencimento": "2026-09-10",
+      "data_vencimento_original": "2026-09-10",
+      "data_pagamento": null,
+      "codigo_situacao_boleto": "2",
+      "situacao_boleto": "ABERTO",
+      "codigo_banco": "27",
+      "mes_referente": "09/2026",
+      "veiculos": [
+        {
+          "codigo_veiculo": 90501,
+          "placa": "ABC1D23",
+          "codigo_regional": "1",
+          "situacao_veiculo": "ATIVO"
+        }
+      ]
+    }
+  ]
+}

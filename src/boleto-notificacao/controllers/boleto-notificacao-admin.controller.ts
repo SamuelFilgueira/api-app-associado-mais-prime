@@ -19,10 +19,7 @@ import { AdminRoleGuard } from 'src/infra/guards/admin-role.guard';
 import { BOLETO_NOTIFICACAO_QUEUE } from 'src/queue/queue.module';
 import { parseDateBR } from 'src/shared/date.util';
 import { BoletoNotificacaoConfigService } from 'src/boleto-notificacao/config/boleto-notificacao.config';
-import {
-  diasEfetivosDoMes,
-  mascararCpf,
-} from 'src/boleto-notificacao/helpers/ciclo-cobranca.helper';
+import { mascararCpf } from 'src/boleto-notificacao/helpers/ciclo-cobranca.helper';
 import {
   BoletoNotificacaoService,
   JOB_EXECUTAR_ROTINA,
@@ -48,22 +45,15 @@ export class BoletoNotificacaoAdminController {
     @InjectQueue(BOLETO_NOTIFICACAO_QUEUE) private readonly queue: Queue,
   ) {}
 
-  /** Configuração efetiva + estado do agendamento + dias de gatilho do mês atual. */
+  /** Configuração efetiva da régua + estado do agendamento. */
   @Get('config')
   async getConfig() {
     const config = this.configService.get();
-    const hoje = new Date();
     const agendamento = await this.schedulerService.statusAgendamento();
     return {
       ...config,
       sgaMockFile: config.sgaMockFile ?? null,
       agendamento,
-      diasEfetivosMesAtual: diasEfetivosDoMes(
-        hoje.getFullYear(),
-        hoje.getMonth() + 1,
-        config,
-      ),
-      diasEfetivosFevereiro: diasEfetivosDoMes(hoje.getFullYear(), 2, config),
     };
   }
 

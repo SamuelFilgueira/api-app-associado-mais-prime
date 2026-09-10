@@ -692,9 +692,12 @@ enum ReinspectionPhotoStatus {
 }
 
 enum BoletoNotificacaoTipo {
+  DM5
   D0
+  D1
   D5
   D6
+  D20
 }
 
 enum BoletoNotificacaoStatus {

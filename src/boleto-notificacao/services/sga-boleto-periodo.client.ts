@@ -4,11 +4,7 @@ import * as path from 'path';
 import { SgaAuthService } from 'src/integrations/hinova/sga-auth.service';
 import { BaseOrigin } from 'src/shared/token-resolver.service';
 import { baseTag } from 'src/shared/log.util';
-import {
-  formatDateBR,
-  isSameLocalDate,
-  parseDateSga,
-} from 'src/shared/date.util';
+import { formatDateBR, parseDateSga } from 'src/shared/date.util';
 import { BoletoNotificacaoConfigService } from 'src/boleto-notificacao/config/boleto-notificacao.config';
 import {
   SituacaoBoletoSga,
@@ -75,18 +71,22 @@ export class SgaBoletoPeriodoClient {
   ) {}
 
   /**
-   * Lista todos os boletos ABERTOS cujo vencimento original é exatamente a
-   * data-alvo (janela de 1 dia), percorrendo todas as páginas.
+   * Lista todos os boletos ABERTOS cujo vencimento EFETIVO (`data_vencimento`,
+   * já prorrogado pelo SGA para o próximo dia útil) está dentro da janela
+   * [dataInicial, dataFinal], percorrendo todas as páginas. As etapas de dia
+   * único usam dataInicial = dataFinal; a etapa D-5 usa a janela D-5..D-1.
    */
-  async listarAbertosPorVencimentoOriginal(
+  async listarAbertosPorVencimento(
     tenant: BaseOrigin,
-    dataAlvo: Date,
+    dataInicial: Date,
+    dataFinal: Date,
   ): Promise<SgaBoletoPeriodoResultado> {
     const config = this.configService.get();
-    const dataAlvoStr = formatDateBR(dataAlvo);
+    const dataInicialStr = formatDateBR(dataInicial);
+    const dataFinalStr = formatDateBR(dataFinal);
     const tag = `[BOLETO-NOTIF]${baseTag(tenant)}`;
 
-    const mock = this.carregarMock(dataAlvoStr);
+    const mock = this.carregarMock(dataInicial, dataFinal);
 
     const boletos: SgaBoletoPeriodo[] = [];
     const vistos = new Set<string>();
@@ -97,8 +97,8 @@ export class SgaBoletoPeriodoClient {
 
     while (pagina < MAX_PAGINAS) {
       const body: SgaBoletoPeriodoRequest = {
-        data_vencimento_original_inicial: dataAlvoStr,
-        data_vencimento_original_final: dataAlvoStr,
+        data_vencimento_inicial: dataInicialStr,
+        data_vencimento_final: dataFinalStr,
         codigo_situacao_boleto: Number(SituacaoBoletoSga.ABERTO),
         quantidade_por_pagina: config.quantidadePorPagina,
         inicio_paginacao: pagina,
@@ -116,7 +116,7 @@ export class SgaBoletoPeriodoClient {
             : Math.ceil(totalRegistros / config.quantidadePorPagina);
 
         this.logger.log(
-          `${tag} vencimento_original=${dataAlvoStr} situacao=ABERTO → total_registros=${totalRegistros} ` +
+          `${tag} vencimento_efetivo=${dataInicialStr}..${dataFinalStr} situacao=ABERTO → total_registros=${totalRegistros} ` +
             `numero_paginas=${numeroPaginas} (quantidade_por_pagina=${config.quantidadePorPagina})`,
         );
       }
@@ -267,6 +267,8 @@ export class SgaBoletoPeriodoClient {
       dataVencimento: toText(b.data_vencimento),
       dataVencimentoOriginal: toText(b.data_vencimento_original),
       codigoSituacaoBoleto: normalizarCodigoSituacao(b.codigo_situacao_boleto),
+      codigoTipoBoleto: normalizarCodigoSituacao(b.codigo_tipo_boleto),
+      tipoBoleto: toText(b.tipo_boleto),
       situacaoBoleto: toText(b.situacao_boleto),
       valorBoleto: toText(b.valor_boleto),
       mesReferente: toText(b.mes_referente),
@@ -281,7 +283,10 @@ export class SgaBoletoPeriodoClient {
    * JSON local (array de boletos ou objeto `{ boletos: [...] }` no formato do
    * SGA) e simula filtro + paginação em memória.
    */
-  private carregarMock(dataAlvoStr: string): SgaBoletoPeriodo[] | null {
+  private carregarMock(
+    dataInicial: Date,
+    dataFinal: Date,
+  ): SgaBoletoPeriodo[] | null {
     const arquivo = this.configService.get().sgaMockFile;
     if (!arquivo) return null;
 
@@ -298,19 +303,18 @@ export class SgaBoletoPeriodoClient {
     }
 
     const pagina = this.parsePagina(conteudo);
-    const dataAlvo = parseDateSga(dataAlvoStr);
     const filtrados = pagina.boletos.filter((b) => {
-      const vencimento = parseDateSga(b.dataVencimentoOriginal);
+      const vencimento = parseDateSga(b.dataVencimento);
       return (
         !!vencimento &&
-        !!dataAlvo &&
-        isSameLocalDate(vencimento, dataAlvo) &&
+        vencimento >= dataInicial &&
+        vencimento <= dataFinal &&
         b.codigoSituacaoBoleto === SituacaoBoletoSga.ABERTO
       );
     });
 
     this.logger.warn(
-      `[BOLETO-NOTIF] ⚠️ MOCK SGA ativo (${caminho}): ${filtrados.length}/${pagina.boletos.length} boletos casam com vencimento_original=${dataAlvoStr} e ABERTO`,
+      `[BOLETO-NOTIF] ⚠️ MOCK SGA ativo (${caminho}): ${filtrados.length}/${pagina.boletos.length} boletos casam com vencimento_efetivo=${formatDateBR(dataInicial)}..${formatDateBR(dataFinal)} e ABERTO`,
     );
 
     return filtrados;
