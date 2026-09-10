@@ -459,7 +459,7 @@ model BoletoNotificacaoLog {
   execucaoId             Int
   tenant                 String                    @db.VarChar(50)
   codigoAssociado        Int
-  cpf                    String                    @db.VarChar(11)
+  cpf                    String                    @db.VarChar(14)
   userId                 Int?
   nossoNumero            String?                   @db.VarChar(50)
   quantidadeBoletos      Int                       @default(1)
