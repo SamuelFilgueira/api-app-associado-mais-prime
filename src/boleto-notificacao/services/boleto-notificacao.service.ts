@@ -26,6 +26,7 @@ import {
   normalizarCpf,
   primeiroNome,
   renderizarMensagem,
+  selecionarMaisRecentePorPlaca,
   TokensMensagem,
 } from 'src/boleto-notificacao/helpers/ciclo-cobranca.helper';
 import { SgaBoletoPeriodoClient } from 'src/boleto-notificacao/services/sga-boleto-periodo.client';
@@ -98,6 +99,16 @@ interface JanelaEtapa {
   descricao: string;
 }
 
+/** Resultado da consulta única por tenant, já filtrada e deduplicada. */
+interface DadosTenant {
+  origem: 'SGA' | 'MOCK';
+  paginasConsultadas: number;
+  /** Boletos crus da janela ampla (pós-parse, pré-filtros) — base da métrica. */
+  brutos: SgaBoletoPeriodo[];
+  /** ABERTOS + tipo permitido + dedupe "mais recente por placa". */
+  prontos: SgaBoletoPeriodo[];
+}
+
 interface Destinatario extends GrupoAssociado {
   userId: number;
   expoPushToken: string;
@@ -162,6 +173,33 @@ export class BoletoNotificacaoService {
 
     const resultados: ResultadoMomento[] = [];
     for (const tenant of tenants) {
+      // Uma única consulta ampla ao SGA por tenant (D-5 até o alcance do D+20):
+      // necessária para a regra "só o fechamento mais recente por placa" e
+      // reduz o volume de chamadas à Hinova.
+      let dados: DadosTenant;
+      try {
+        dados = await this.consultarTenant(tenant, dataReferencia);
+      } catch (error) {
+        const mensagemErro =
+          error instanceof Error ? error.message : String(error);
+        this.logger.error(
+          `[BOLETO-NOTIF]${baseTag(tenant)} ❌ falha na consulta ao SGA: ${mensagemErro}`,
+        );
+        for (const tipo of tipos) {
+          resultados.push(
+            await this.registrarFalhaConsulta(
+              tenant,
+              tipo,
+              dataReferencia,
+              dryRun,
+              origem,
+              mensagemErro,
+            ),
+          );
+        }
+        continue;
+      }
+
       for (const tipo of tipos) {
         resultados.push(
           await this.processarMomento(
@@ -170,6 +208,7 @@ export class BoletoNotificacaoService {
             dataReferencia,
             dryRun,
             origem,
+            dados,
           ),
         );
       }
@@ -204,28 +243,147 @@ export class BoletoNotificacaoService {
   }
 
   /**
-   * Janela de vencimento efetivo da etapa. Etapas pós-vencimento são de dia
-   * único (hoje − offset); a DM5 cobre D-5..D-1, o que também implementa a
-   * regra "boleto gerado depois de D-5 dispara quando aparecer, até D-1" —
-   * a idempotência garante um único envio por associado × vencimento.
+   * Janela de vencimento efetivo da etapa. Regra global: a etapa é definida
+   * pela FAIXA DE ATRASO do boleto (ABERTO + tipo permitido), não apenas pelo
+   * dia exato — assim um boleto que "entra atrasado" na régua recebe a
+   * mensagem da faixa em que está (uma única vez, via idempotência):
+   *   DM5: D-5..D-1 (pré-vencimento; cobre boleto gerado depois de D-5)
+   *   D0:  atraso 0 · D1: 1..4 · D5: 5 · D6: 6..(D20-1) · D20: 20..(20+alcance)
    */
   private janelaDaEtapa(referencia: Date, tipo: TipoMensagem): JanelaEtapa {
-    const offsets = this.configService.get().offsets;
-    if (tipo === 'DM5') {
-      const inicio = addDays(referencia, 1);
-      const fim = addDays(referencia, offsets.DM5);
+    const config = this.configService.get();
+    const offsets = config.offsets;
+
+    // atraso maior = vencimento mais antigo → é o INÍCIO da janela de datas
+    const faixaAtraso = (deAtraso: number, ateAtraso: number): JanelaEtapa => {
+      const fimAtraso = Math.max(deAtraso, ateAtraso);
+      const inicio = calcularDataAlvo(referencia, fimAtraso);
+      const fim = calcularDataAlvo(referencia, deAtraso);
       return {
         inicio,
         fim,
-        descricao: `${formatDateBR(inicio)} a ${formatDateBR(fim)}`,
+        descricao:
+          inicio.getTime() === fim.getTime()
+            ? formatDateBR(fim)
+            : `${formatDateBR(inicio)} a ${formatDateBR(fim)}`,
       };
+    };
+
+    switch (tipo) {
+      case 'DM5': {
+        const inicio = addDays(referencia, 1);
+        const fim = addDays(referencia, offsets.DM5);
+        return {
+          inicio,
+          fim,
+          descricao: `${formatDateBR(inicio)} a ${formatDateBR(fim)}`,
+        };
+      }
+      case 'D0':
+        return faixaAtraso(0, 0);
+      case 'D1':
+        return faixaAtraso(offsets.D1, offsets.D5 - 1);
+      case 'D5':
+        return faixaAtraso(offsets.D5, offsets.D5);
+      case 'D6':
+        return faixaAtraso(offsets.D6, offsets.D20 - 1);
+      case 'D20':
+        return faixaAtraso(offsets.D20, offsets.D20 + config.alcanceD20);
     }
-    const alvo = calcularDataAlvo(referencia, offsets[tipo]);
-    return { inicio: alvo, fim: alvo, descricao: formatDateBR(alvo) };
   }
 
   /**
-   * Processa um momento do ciclo (tenant × tipo) para a data de referência.
+   * Consulta única do tenant: janela ampla (D-5 futuro até D+20+alcance no
+   * passado), filtros de situação/tipo e a regra "havendo mais de um boleto
+   * em aberto do mesmo tipo para a mesma placa, vale só o mais recente".
+   */
+  private async consultarTenant(
+    tenant: string,
+    dataReferencia: Date,
+  ): Promise<DadosTenant> {
+    const config = this.configService.get();
+    const inicio = calcularDataAlvo(
+      dataReferencia,
+      config.offsets.D20 + config.alcanceD20,
+    );
+    const fim = addDays(dataReferencia, config.offsets.DM5);
+
+    const consulta = await this.sgaClient.listarAbertosPorVencimento(
+      tenant,
+      inicio,
+      fim,
+    );
+
+    const filtroTipos = config.codigosTipoBoleto;
+    const abertosDoTipo = consulta.boletos.filter((b) => {
+      const vencimento = parseDateSga(b.dataVencimento);
+      return (
+        !!vencimento &&
+        b.codigoSituacaoBoleto === SituacaoBoletoSga.ABERTO &&
+        (filtroTipos.length === 0 || filtroTipos.includes(b.codigoTipoBoleto))
+      );
+    });
+
+    const { mantidos, descartados } =
+      selecionarMaisRecentePorPlaca(abertosDoTipo);
+    if (descartados.length > 0) {
+      this.logger.log(
+        `[BOLETO-NOTIF]${baseTag(tenant)} ${descartados.length} boleto(s) em aberto ignorados por existir boleto mais recente da mesma placa (ex.: nosso_numero ${descartados[0]?.nossoNumero})`,
+      );
+    }
+
+    return {
+      origem: consulta.origem,
+      paginasConsultadas: consulta.paginasConsultadas,
+      brutos: consulta.boletos,
+      prontos: mantidos,
+    };
+  }
+
+  /** Registra execuções FALHA para todos os tipos quando a consulta do tenant cai. */
+  private async registrarFalhaConsulta(
+    tenant: string,
+    tipo: TipoMensagem,
+    dataReferencia: Date,
+    dryRun: boolean,
+    origem: 'AGENDADA' | 'MANUAL',
+    erro: string,
+  ): Promise<ResultadoMomento> {
+    const janela = this.janelaDaEtapa(dataReferencia, tipo);
+    const base: ResultadoMomento = {
+      tenant,
+      tipo,
+      dataReferencia: formatDateBR(dataReferencia),
+      dataAlvo: janela.descricao,
+      gatilho: true,
+      dryRun,
+      execucaoId: null,
+      status: 'FALHA',
+      metricas: metricasVazias(),
+      erro,
+    };
+    if (!dryRun) {
+      const execucao = await this.prisma.boletoNotificacaoExecucao.create({
+        data: {
+          tenant,
+          tipoMensagem: tipo,
+          dataReferencia: toUtcDateOnly(dataReferencia),
+          dataAlvo: toUtcDateOnly(janela.fim),
+          status: 'FALHA',
+          origem,
+          erro: erro.slice(0, 2000),
+          finalizadoEm: new Date(),
+        },
+        select: { id: true },
+      });
+      base.execucaoId = execucao.id;
+    }
+    return base;
+  }
+
+  /**
+   * Processa um momento do ciclo (tenant × tipo) para a data de referência,
+   * a partir da consulta única do tenant.
    */
   async processarMomento(
     tenant: string,
@@ -233,6 +391,7 @@ export class BoletoNotificacaoService {
     dataReferencia: Date,
     dryRun: boolean,
     origem: 'AGENDADA' | 'MANUAL',
+    dados: DadosTenant,
   ): Promise<ResultadoMomento> {
     const config = this.configService.get();
     const janela = this.janelaDaEtapa(dataReferencia, tipo);
@@ -270,34 +429,27 @@ export class BoletoNotificacaoService {
     base.execucaoId = execucaoId;
 
     try {
-      // 1. Consulta paginada ao SGA (ABERTO, vencimento efetivo dentro da janela)
-      const consulta = await this.sgaClient.listarAbertosPorVencimento(
-        tenant,
-        janela.inicio,
-        janela.fim,
-      );
-      base.origemDados = consulta.origem;
-      metricas.totalRegistrosSga =
-        consulta.totalRegistros || consulta.boletos.length;
-      metricas.totalPaginasSga = consulta.paginasConsultadas;
+      // 1. Recorte da janela da etapa sobre a consulta única do tenant
+      const naJanela = (b: SgaBoletoPeriodo) => {
+        const vencimento = parseDateSga(b.dataVencimento);
+        return (
+          !!vencimento &&
+          vencimento >= janela.inicio &&
+          vencimento <= janela.fim
+        );
+      };
+      base.origemDados = dados.origem;
+      metricas.totalRegistrosSga = dados.brutos.filter(naJanela).length;
+      metricas.totalPaginasSga = dados.paginasConsultadas;
 
-      // 2. Filtro defensivo local (o SGA já filtra situação/data; aqui também
-      //    entram os filtros da régua: tipo de boleto e, em D+6/D+20, contrato suspenso)
-      const filtroTipos = config.codigosTipoBoleto;
+      // 2. Elegíveis da etapa: janela + (D+6/D+20) filtro de contrato suspenso.
+      //    Situação ABERTO, tipo de boleto e "mais recente por placa" já
+      //    foram aplicados na consulta do tenant.
       const filtroSuspenso =
         tipo === 'D6' || tipo === 'D20'
           ? config.situacoesContratoSuspenso.map((s) => s.toUpperCase())
           : [];
-      const elegiveis = consulta.boletos.filter((b) => {
-        // O SGA responde datas em yyyy-mm-dd (doc diz dd/mm/yyyy) — parser aceita ambos
-        const vencimento = parseDateSga(b.dataVencimento);
-        const situacaoOk = b.codigoSituacaoBoleto === SituacaoBoletoSga.ABERTO;
-        const dataOk =
-          !!vencimento &&
-          vencimento >= janela.inicio &&
-          vencimento <= janela.fim;
-        const tipoOk =
-          filtroTipos.length === 0 || filtroTipos.includes(b.codigoTipoBoleto);
+      const elegiveis = dados.prontos.filter((b) => {
         const suspensoOk =
           filtroSuspenso.length === 0 ||
           b.veiculos.some((v) =>
@@ -307,13 +459,8 @@ export class BoletoNotificacaoService {
                 .toUpperCase(),
             ),
           );
-        return situacaoOk && dataOk && tipoOk && suspensoOk;
+        return naJanela(b) && suspensoOk;
       });
-      if (elegiveis.length !== consulta.boletos.length) {
-        this.logger.warn(
-          `${tag} ${consulta.boletos.length - elegiveis.length} boleto(s) fora dos filtros da etapa (situação/data/tipo/suspenso) foram descartados`,
-        );
-      }
       metricas.totalBoletosElegiveis = elegiveis.length;
 
       // 3. Agrupa por associado × vencimento efetivo (1 push por grupo)

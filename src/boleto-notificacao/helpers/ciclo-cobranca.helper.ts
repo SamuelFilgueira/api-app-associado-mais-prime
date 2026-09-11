@@ -1,4 +1,5 @@
-import { addDays, startOfDay } from 'src/shared/date.util';
+import { addDays, parseDateSga, startOfDay } from 'src/shared/date.util';
+import { SgaBoletoPeriodo } from 'src/boleto-notificacao/interfaces/sga-boleto-periodo.interface';
 
 // Régua v2 (10/09/2026): não há mais "dias fixos de gatilho" — a âncora é o
 // vencimento EFETIVO (data_vencimento do SGA, já prorrogado para dia útil),
@@ -10,6 +11,60 @@ import { addDays, startOfDay } from 'src/shared/date.util';
  */
 export function calcularDataAlvo(dataReferencia: Date, offset: number): Date {
   return addDays(startOfDay(dataReferencia), -offset);
+}
+
+/** Chaves de veículo de um boleto (placa, com fallback para codigo_veiculo). */
+function chavesDeVeiculo(boleto: SgaBoletoPeriodo): string[] {
+  return boleto.veiculos
+    .map((v) => {
+      const placa = String(v.placa ?? '')
+        .trim()
+        .toUpperCase();
+      if (placa) return `placa:${placa}`;
+      const codigo = String(v.codigo_veiculo ?? '').trim();
+      return codigo ? `veiculo:${codigo}` : '';
+    })
+    .filter(Boolean);
+}
+
+/**
+ * Regra: havendo mais de um boleto EM ABERTO do mesmo tipo para uma mesma
+ * placa, apenas o de vencimento mais recente participa da régua. A comparação
+ * é feita entre boletos do MESMO codigo_tipo_boleto (a regra fala de
+ * fechamentos entre si); boletos sem veículo identificável passam direto.
+ */
+export function selecionarMaisRecentePorPlaca(boletos: SgaBoletoPeriodo[]): {
+  mantidos: SgaBoletoPeriodo[];
+  descartados: SgaBoletoPeriodo[];
+} {
+  // chave (tipo + veículo) → maior vencimento visto
+  const maisRecente = new Map<string, number>();
+  for (const boleto of boletos) {
+    const venc = parseDateSga(boleto.dataVencimento)?.getTime();
+    if (venc === undefined) continue;
+    for (const chave of chavesDeVeiculo(boleto)) {
+      const chaveTipo = `${boleto.codigoTipoBoleto}|${chave}`;
+      if (venc > (maisRecente.get(chaveTipo) ?? Number.NEGATIVE_INFINITY)) {
+        maisRecente.set(chaveTipo, venc);
+      }
+    }
+  }
+
+  const mantidos: SgaBoletoPeriodo[] = [];
+  const descartados: SgaBoletoPeriodo[] = [];
+  for (const boleto of boletos) {
+    const venc = parseDateSga(boleto.dataVencimento)?.getTime();
+    const chaves = chavesDeVeiculo(boleto);
+    const ehMaisRecente =
+      venc === undefined ||
+      chaves.length === 0 ||
+      chaves.some(
+        (chave) =>
+          maisRecente.get(`${boleto.codigoTipoBoleto}|${chave}`) === venc,
+      );
+    (ehMaisRecente ? mantidos : descartados).push(boleto);
+  }
+  return { mantidos, descartados };
 }
 
 /** Remove máscara e repõe zeros à esquerda; null se não for um CPF plausível. */

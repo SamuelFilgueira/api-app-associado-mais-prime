@@ -48,6 +48,12 @@ export interface BoletoNotificacaoConfig {
    * régua nas etapas D+6 e D+20). Vazio = não aplica o filtro extra.
    */
   situacoesContratoSuspenso: string[];
+  /**
+   * Dias de atraso ALÉM do D+20 que ainda recebem a mensagem D+20 no
+   * catch-up (boleto que entra atrasado na régua). Default 40 → cobre até
+   * D+60; evita notificar dívidas muito antigas na virada da rotina.
+   */
+  alcanceD20: number;
   /** Registros por página na consulta SGA. */
   quantidadePorPagina: number;
   /** Minutos de espera antes de consultar os receipts do Expo. */
@@ -229,6 +235,13 @@ export function loadBoletoNotificacaoConfig(
     codigosTipoBoleto: parseLista(env.BOLETO_NOTIFICACAO_CODIGOS_TIPO_BOLETO),
     situacoesContratoSuspenso: parseLista(
       env.BOLETO_NOTIFICACAO_SITUACOES_SUSPENSO,
+    ),
+    alcanceD20: parseInteiro(
+      'BOLETO_NOTIFICACAO_D20_ALCANCE',
+      env.BOLETO_NOTIFICACAO_D20_ALCANCE,
+      40,
+      0,
+      365,
     ),
     quantidadePorPagina: parseInteiro(
       'BOLETO_NOTIFICACAO_QTD_POR_PAGINA',

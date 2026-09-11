@@ -104,23 +104,17 @@ describe('BoletoNotificacaoService (régua v2)', () => {
     expect(resultados.map((r) => [r.tipo, r.dataAlvo])).toEqual([
       ['DM5', '11/09/2026 a 15/09/2026'],
       ['D0', '10/09/2026'],
-      ['D1', '09/09/2026'],
+      ['D1', '06/09/2026 a 09/09/2026'], // faixa de atraso 1..4
       ['D5', '05/09/2026'],
-      ['D6', '04/09/2026'],
-      ['D20', '21/08/2026'],
+      ['D6', '22/08/2026 a 04/09/2026'], // faixa de atraso 6..19
+      ['D20', '12/07/2026 a 21/08/2026'], // faixa de atraso 20..60
     ]);
-    expect(sgaClient.listarAbertosPorVencimento).toHaveBeenCalledTimes(6);
-    // Janela da DM5: D-1..D-5 (amanhã até +5)
+    // Consulta ÚNICA por tenant: janela ampla D+60 (passado) até D-5 (futuro)
+    expect(sgaClient.listarAbertosPorVencimento).toHaveBeenCalledTimes(1);
     expect(sgaClient.listarAbertosPorVencimento).toHaveBeenCalledWith(
       'MAIS_PRIME',
-      new Date(2026, 8, 11),
-      new Date(2026, 8, 15),
-    );
-    // Etapa de dia único: início = fim
-    expect(sgaClient.listarAbertosPorVencimento).toHaveBeenCalledWith(
-      'MAIS_PRIME',
-      new Date(2026, 8, 10),
-      new Date(2026, 8, 10),
+      new Date(2026, 6, 12), // hoje − 60 (D+20 + alcance 40)
+      new Date(2026, 8, 15), // hoje + 5 (janela DM5)
     );
   });
 
@@ -323,14 +317,13 @@ describe('BoletoNotificacaoService (régua v2)', () => {
       }),
     ];
     sgaClient.listarAbertosPorVencimento.mockImplementation(
-      (_t: string, inicio: Date) =>
+      (_t: string, inicio: Date, fim: Date) =>
         Promise.resolve(
           consultaSga(
-            boletos.filter(
-              (b) =>
-                new Date(`${b.dataVencimento}T00:00:00`).getDate() ===
-                inicio.getDate(),
-            ),
+            boletos.filter((b) => {
+              const venc = new Date(`${b.dataVencimento}T00:00:00`);
+              return venc >= inicio && venc <= fim;
+            }),
           ),
         ),
     );
@@ -416,18 +409,23 @@ describe('BoletoNotificacaoService (régua v2)', () => {
     });
   });
 
-  it('erro no SGA marca a execução como FALHA sem interromper os demais momentos', async () => {
+  it('erro na consulta do tenant marca TODAS as etapas do tenant como FALHA, sem afetar o outro tenant', async () => {
     sgaClient.listarAbertosPorVencimento
       .mockRejectedValueOnce(new Error('SGA fora do ar'))
       .mockResolvedValue(consultaSga([]));
 
     const resultados = await service.executarRotina({
       dataReferencia: new Date(2026, 8, 10),
-      tenants: ['MAIS_PRIME'],
+      tenants: ['MAIS_PRIME', 'MAIS_PRIME_RS'],
       tipos: ['DM5', 'D0'],
     });
 
-    expect(resultados.map((r) => r.status)).toEqual(['FALHA', 'CONCLUIDA']);
+    expect(resultados.map((r) => [r.tenant, r.status])).toEqual([
+      ['MAIS_PRIME', 'FALHA'],
+      ['MAIS_PRIME', 'FALHA'],
+      ['MAIS_PRIME_RS', 'CONCLUIDA'],
+      ['MAIS_PRIME_RS', 'CONCLUIDA'],
+    ]);
     expect(resultados[0].erro).toBe('SGA fora do ar');
   });
 });
