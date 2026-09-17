@@ -125,6 +125,11 @@ PASSWORD_SGA_HERTZ=
 TOKEN_BASE_SGA_HERTZ=
 
 MAIL_TO_PREVIA=previa@hertz.com.br
+
+# Redefinição de senha pelo Gmail (sem conta SES na Hertz). Default é ses.
+MAIL_PASSWORD_RESET_PROVIDER=gmail
+GMAIL_USER=<conta gmail da Hertz>
+SENHA_APP=<senha de app do Gmail>
 MAIL_TO_COBRANCA=cobranca@hertz.com.br
 
 M7_NOMINATIM_ENABLED=false

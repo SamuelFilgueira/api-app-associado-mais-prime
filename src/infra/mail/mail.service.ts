@@ -4,14 +4,18 @@ import { join } from 'path';
 import { debugLog } from 'src/shared/debug-log.util';
 import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2';
 import { TENANT } from 'src/config/tenant.config';
+import { MailConfig, carregarMailConfig } from 'src/infra/mail/mail.config';
 
 @Injectable()
 export class MailService {
   private readonly logger = new Logger(MailService.name);
   private transporter: nodemailer.Transporter;
   private sesClient: SESv2Client;
+  private readonly config: MailConfig;
 
   constructor() {
+    this.config = carregarMailConfig();
+
     this.transporter = nodemailer.createTransport({
       service: 'gmail',
       auth: {
@@ -42,6 +46,27 @@ export class MailService {
         <p style="color: #888; font-size: 12px;">Se você não solicitou a redefinição de senha, ignore este e-mail.</p>
       </div>
     `;
+
+    // Provedor escolhido por env (default: SES, comportamento original).
+    // Ver src/infra/mail/mail.config.ts.
+    if (this.config.passwordResetProvider === 'gmail') {
+      const mailOptions: nodemailer.SendMailOptions = {
+        from: `"${TENANT.appName}" <${process.env.GMAIL_USER}>`,
+        to,
+        subject: 'Redefinição de Senha',
+        html,
+      };
+      try {
+        await this.transporter.sendMail(mailOptions);
+      } catch (error) {
+        this.logger.error(
+          `Falha ao enviar e-mail de redefinição via Gmail para ${to}`,
+          error,
+        );
+        throw error;
+      }
+      return;
+    }
 
     const command = new SendEmailCommand({
       FromEmailAddress: process.env.MAIL_FROM!,

@@ -8,6 +8,8 @@ Uma única instalação atende **MAIS_PRIME e MAIS_PRIME_RS**: os dois tenants
 recebem o mesmo bundle, então não há nada por base neste módulo.
 
 Plano de deploy em produção e cuidados: `docs/EXPO_UPDATES_DEPLOY_PRODUCAO.md`.
+Guia operacional do dia a dia (release de loja + publicar OTA + rollback):
+`docs/GUIA_RELEASE_E_OTA.md`.
 
 ## 1. Como funciona
 

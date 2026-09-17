@@ -63,6 +63,8 @@ const WARN_IF_MISSING = [
  *   ANALYTICS_RATE_LIMIT_ENABLED / ANALYTICS_JOURNEY_TTL_DAYS: flags do analytics
  * - BOLETO_NOTIFICACAO_*: demais knobs da rotina de boletos (defaults validados
  *   em boleto-notificacao.config.ts)
+ * - MAIL_PASSWORD_RESET_PROVIDER: ses (default) | gmail — provedor do e-mail de
+ *   redefinição de senha (mail.config.ts). Hertz usa gmail; Mais Prime, ses.
  * - EXPO_UPDATES_DIR / EXPO_UPDATES_PUBLIC_URL / EXPO_UPDATES_PRIVATE_KEY_PATH /
  *   EXPO_UPDATES_PRIVATE_KEY_BASE64 / EXPO_UPDATES_KEY_ID /
  *   EXPO_UPDATES_UPLOAD_LIMIT_MB: servidor OTA self-hosted (expo-updates.config.ts
