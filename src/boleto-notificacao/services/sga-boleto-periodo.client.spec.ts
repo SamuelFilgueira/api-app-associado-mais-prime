@@ -156,6 +156,68 @@ describe('SgaBoletoPeriodoClient', () => {
       expect(resultado.paginasConsultadas).toBe(3);
     });
 
+    it('pausa entre páginas consecutivas (nunca antes da primeira) quando configurado', async () => {
+      const configComPausa = {
+        get: () => ({ ...config.get(), pausaEntrePaginasMs: 60_000 }),
+      };
+      const clientComPausa = new SgaBoletoPeriodoClient(
+        sgaAuth as any,
+        configComPausa as any,
+      );
+      const aguardar = jest
+        .spyOn(clientComPausa as any, 'aguardar')
+        .mockResolvedValue(undefined);
+
+      const pagina = (n: number, boletos: unknown[]) => ({
+        status: 200,
+        data: {
+          mostrando: boletos.length,
+          numero_paginas: 3,
+          total_registros: '5',
+          pagina_corrente: n,
+          boletos,
+        },
+      });
+      sgaAuth.executeRequestWithAuth
+        .mockResolvedValueOnce(
+          pagina(1, [boleto({ nosso_numero: 1 }), boleto({ nosso_numero: 2 })]),
+        )
+        .mockResolvedValueOnce(
+          pagina(2, [boleto({ nosso_numero: 3 }), boleto({ nosso_numero: 4 })]),
+        )
+        .mockResolvedValueOnce(pagina(3, [boleto({ nosso_numero: 5 })]));
+
+      const resultado = await clientComPausa.listarAbertosPorVencimento(
+        'MAIS_PRIME',
+        new Date(2026, 8, 10),
+        new Date(2026, 8, 10),
+      );
+
+      expect(resultado.paginasConsultadas).toBe(3);
+      // 3 páginas → 2 pausas (entre 0→1 e 1→2), ambas com o valor configurado
+      expect(aguardar).toHaveBeenCalledTimes(2);
+      expect(aguardar).toHaveBeenNthCalledWith(1, 60_000);
+      expect(aguardar).toHaveBeenNthCalledWith(2, 60_000);
+    });
+
+    it('sem a configuração de pausa não espera entre páginas', async () => {
+      const aguardar = jest.spyOn(client as any, 'aguardar');
+      sgaAuth.executeRequestWithAuth
+        .mockResolvedValueOnce({
+          status: 200,
+          data: { boletos: [boleto({ nosso_numero: 1 })] },
+        })
+        .mockResolvedValueOnce({ status: 200, data: { boletos: [] } });
+
+      await client.listarAbertosPorVencimento(
+        'MAIS_PRIME',
+        new Date(2026, 8, 10),
+        new Date(2026, 8, 10),
+      );
+
+      expect(aguardar).not.toHaveBeenCalled();
+    });
+
     it('lança erro descritivo em HTTP != 200', async () => {
       sgaAuth.executeRequestWithAuth.mockResolvedValueOnce({
         status: 500,

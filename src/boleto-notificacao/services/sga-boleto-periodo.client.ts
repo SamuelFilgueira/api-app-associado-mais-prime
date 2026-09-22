@@ -96,6 +96,16 @@ export class SgaBoletoPeriodoClient {
     let pagina = 0;
 
     while (pagina < MAX_PAGINAS) {
+      // Espaça as páginas para não caracterizar extração em massa na Hinova
+      // (ver BOLETO_NOTIFICACAO_PAUSA_ENTRE_PAGINAS_MS). Sem pausa no mock.
+      const pausaMs = config.pausaEntrePaginasMs ?? 0;
+      if (pagina > 0 && !mock && pausaMs > 0) {
+        this.logger.debug(
+          `${tag} aguardando ${pausaMs}ms antes da página ${pagina}/${numeroPaginas || '?'}`,
+        );
+        await this.aguardar(pausaMs);
+      }
+
       const body: SgaBoletoPeriodoRequest = {
         data_vencimento_inicial: dataInicialStr,
         data_vencimento_final: dataFinalStr,
@@ -169,6 +179,11 @@ export class SgaBoletoPeriodoClient {
       duplicadosEntrePaginas: duplicados,
       origem: mock ? 'MOCK' : 'SGA',
     };
+  }
+
+  /** Espera entre páginas; separado para ser observável/substituível em teste. */
+  protected aguardar(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   private async consultarPagina(

@@ -60,6 +60,7 @@ Textos default = textos oficiais do PDF (em `DEFAULT_MENSAGENS`, `config/boleto-
 | `BOLETO_NOTIFICACAO_CODIGOS_TIPO_BOLETO` | vazio (todos) | ex.: `1,5` |
 | `BOLETO_NOTIFICACAO_SITUACOES_SUSPENSO` | vazio (sem filtro) | ex.: `INADIMPLENTE,INADIMPLENTE +90` |
 | `BOLETO_NOTIFICACAO_QTD_POR_PAGINA` / `_RECEIPTS_DELAY_MIN` / `_TENANTS` / `_SGA_MOCK_FILE` | `500` / `15` / todas / — | como na v1 |
+| `BOLETO_NOTIFICACAO_PAUSA_ENTRE_PAGINAS_MS` | `60000` | pausa entre páginas consecutivas da consulta ao SGA. A Hinova bloqueia temporariamente o token por "extração de dados" quando as páginas chegam em rajada; 1 página/min descaracteriza o padrão. `0` desliga. Não há pausa antes da primeira página nem no mock. Com 13 páginas a varredura leva ~12 min. |
 
 Config lida no boot — alterou env, reinicie a API. Removidas da v1: `DIAS_VENCIMENTO` e `FALLBACK_MES_CURTO` (dias fixos não existem mais; fevereiro é resolvido pelo próprio vencimento efetivo).
 

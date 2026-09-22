@@ -56,6 +56,13 @@ export interface BoletoNotificacaoConfig {
   alcanceD20: number;
   /** Registros por página na consulta SGA. */
   quantidadePorPagina: number;
+  /**
+   * Pausa entre páginas consecutivas da consulta ao SGA (ms). A Hinova bloqueia
+   * temporariamente o token por "extração de dados" quando as páginas chegam
+   * em rajada; espaçar as páginas descaracteriza o padrão. Default 60 000 ms
+   * (1 página por minuto). 0 desliga. Não há pausa antes da primeira página.
+   */
+  pausaEntrePaginasMs: number;
   /** Minutos de espera antes de consultar os receipts do Expo. */
   receiptsDelayMinutos: number;
   /** Tenants processados (default: TENANT.baseNames). */
@@ -250,6 +257,13 @@ export function loadBoletoNotificacaoConfig(
       1,
       5000,
     ),
+    pausaEntrePaginasMs: parseInteiro(
+      'BOLETO_NOTIFICACAO_PAUSA_ENTRE_PAGINAS_MS',
+      env.BOLETO_NOTIFICACAO_PAUSA_ENTRE_PAGINAS_MS,
+      60_000,
+      0,
+      300_000,
+    ),
     receiptsDelayMinutos: parseInteiro(
       'BOLETO_NOTIFICACAO_RECEIPTS_DELAY_MIN',
       env.BOLETO_NOTIFICACAO_RECEIPTS_DELAY_MIN,
@@ -281,7 +295,7 @@ export class BoletoNotificacaoConfigService {
         `offsets=DM5:${this.config.offsets.DM5}/D1:${this.config.offsets.D1}/D5:${this.config.offsets.D5}/D6:${this.config.offsets.D6}/D20:${this.config.offsets.D20} ` +
         `tiposBoleto=[${this.config.codigosTipoBoleto.join(',') || 'todos'}] ` +
         `suspenso=[${this.config.situacoesContratoSuspenso.join(',') || 'sem filtro'}] ` +
-        `pagina=${this.config.quantidadePorPagina} tenants=[${this.config.tenants.join(',')}]` +
+        `pagina=${this.config.quantidadePorPagina} pausaEntrePaginas=${this.config.pausaEntrePaginasMs}ms tenants=[${this.config.tenants.join(',')}]` +
         `${this.config.sgaMockFile ? ' MOCK_SGA=' + this.config.sgaMockFile : ''}`,
     );
   }
