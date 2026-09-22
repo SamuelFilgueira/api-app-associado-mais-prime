@@ -2,10 +2,6 @@ import { Injectable, Logger } from '@nestjs/common';
 import axios from 'axios';
 import { TokenResolverService } from '../../shared/token-resolver.service';
 import { BaseOrigin } from '../../config/tenant.config';
-import {
-  ClubgasConfig,
-  carregarClubgasConfig,
-} from 'src/integrations/clubgas/clubgas.config';
 
 export interface ClubgasPostosResponse {
   result: unknown[];
@@ -14,26 +10,15 @@ export interface ClubgasPostosResponse {
 /**
  * Client HTTP da API ClubGas. Único ponto da aplicação que conhece a URL
  * e resolve o token da integração por base (multi-tenant).
- *
- * Em modo de teste (CLUBGAS_TEST_PLACA/CLUBGAS_TEST_CPF definidas), placa e
- * CPF do usuário são substituídos pelos fixos exigidos pela homologação da
- * ClubGas. Ver clubgas.config.ts.
  */
 @Injectable()
 export class ClubgasClient {
   private readonly logger = new Logger(ClubgasClient.name);
-  private readonly config: ClubgasConfig = carregarClubgasConfig();
-  private readonly baseUrl = this.config.baseUrl;
+  private readonly baseUrl =
+    process.env.CLUBGAS_BASE_URL ??
+    'https://clubgas-api.azurewebsites.net/api/v1';
 
   constructor(private readonly tokenResolver: TokenResolverService) {}
-
-  private placaEfetiva(placa: string): string {
-    return this.config.testPlaca ?? placa;
-  }
-
-  private cpfEfetivo(cpf: string): string {
-    return this.config.testCpf ?? cpf;
-  }
 
   private resolverToken(baseOrigin: BaseOrigin, contexto: string): string {
     const token = this.tokenResolver.resolveClubgasToken(baseOrigin);
@@ -52,7 +37,7 @@ export class ClubgasClient {
     params: { latitude: number; longitude: number; placa: string },
   ): Promise<ClubgasPostosResponse> {
     const token = this.resolverToken(baseOrigin, 'postos');
-    const url = `${this.baseUrl}/Posto/obter-map-app?Latitude=${params.latitude}&Longitude=${params.longitude}&Placa=${this.placaEfetiva(params.placa)}`;
+    const url = `${this.baseUrl}/Posto/obter-map-app?Latitude=${params.latitude}&Longitude=${params.longitude}&Placa=${params.placa}`;
     return this.get<ClubgasPostosResponse>(url, token);
   }
 
@@ -61,7 +46,7 @@ export class ClubgasClient {
     params: { placa: string; cpf: string },
   ): Promise<unknown> {
     const token = this.resolverToken(baseOrigin, 'cartão');
-    const url = `${this.baseUrl}/CartaoClub/obter-virtual?Placa=${this.placaEfetiva(params.placa)}&Cpf=${this.cpfEfetivo(params.cpf)}`;
+    const url = `${this.baseUrl}/CartaoClub/obter-virtual?Placa=${params.placa}&Cpf=${params.cpf}`;
     return this.get(url, token);
   }
 
@@ -73,7 +58,7 @@ export class ClubgasClient {
    * comportamento pendente de decisão (ver Apêndice A do plano de refatoração).
    */
   async obterTotalEconomizadoLegado(cpfCnpj: string): Promise<any> {
-    const url = `${this.baseUrl}/Aplicativo/total-economizado?CpfCnpj=${this.cpfEfetivo(cpfCnpj)}`;
+    const url = `${this.baseUrl}/Aplicativo/total-economizado?CpfCnpj=${cpfCnpj}`;
     return this.get(url, process.env.TOKEN_API_CLUBGAS as string);
   }
 }

@@ -63,9 +63,6 @@ const WARN_IF_MISSING = [
  *   ANALYTICS_RATE_LIMIT_ENABLED / ANALYTICS_JOURNEY_TTL_DAYS: flags do analytics
  * - BOLETO_NOTIFICACAO_*: demais knobs da rotina de boletos (defaults validados
  *   em boleto-notificacao.config.ts)
- * - CLUBGAS_TEST_PLACA / CLUBGAS_TEST_CPF: SOMENTE homologação ClubGas —
- *   substituem placa/CPF do usuário nas chamadas (clubgas.config.ts loga WARN
- *   no boot). Nunca definir em produção.
  * - MAIL_PASSWORD_RESET_PROVIDER: ses (default) | gmail — provedor do e-mail de
  *   redefinição de senha (mail.config.ts). Hertz usa gmail; Mais Prime, ses.
  * - EXPO_UPDATES_DIR / EXPO_UPDATES_PUBLIC_URL / EXPO_UPDATES_PRIVATE_KEY_PATH /

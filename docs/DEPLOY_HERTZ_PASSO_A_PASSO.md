@@ -126,11 +126,6 @@ TOKEN_BASE_SGA_HERTZ=
 
 MAIL_TO_PREVIA=previa@hertz.com.br
 
-# Homologação ClubGas (remover as 3 linhas ao receber credenciais de produção):
-CLUBGAS_BASE_URL=https://tst-clubgas-api.azurewebsites.net/api/v1
-CLUBGAS_TEST_PLACA=SEL0C00
-CLUBGAS_TEST_CPF=04806375128
-
 # Redefinição de senha pelo Gmail (sem conta SES na Hertz). Default é ses.
 MAIL_PASSWORD_RESET_PROVIDER=gmail
 GMAIL_USER=<conta gmail da Hertz>
