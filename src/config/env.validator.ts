@@ -63,6 +63,8 @@ const WARN_IF_MISSING = [
  *   ANALYTICS_RATE_LIMIT_ENABLED / ANALYTICS_JOURNEY_TTL_DAYS: flags do analytics
  * - BOLETO_NOTIFICACAO_*: demais knobs da rotina de boletos (defaults validados
  *   em boleto-notificacao.config.ts)
+ * - TOKEN_BASE_SGA_<BASE>1, …2 (até 9): tokens de base alternativos do SGA para
+ *   failover quando a Hinova bloqueia um deles (token-resolver / sga-auth.service)
  * - MAIL_PASSWORD_RESET_PROVIDER: ses (default) | gmail — provedor do e-mail de
  *   redefinição de senha (mail.config.ts). Hertz usa gmail; Mais Prime, ses.
  * - EXPO_UPDATES_DIR / EXPO_UPDATES_PUBLIC_URL / EXPO_UPDATES_PRIVATE_KEY_PATH /
@@ -105,7 +107,16 @@ export function validateEnvOrThrow() {
 
   const required = [...REQUIRED_BASE, ...requiredTenantEnvVars()];
 
-  const missing = required.filter((k) => !process.env[k]);
+  // TOKEN_BASE_SGA_<BASE> aceita variantes numeradas (…1, …2) para failover
+  // de token bloqueado pela Hinova — qualquer uma presente satisfaz.
+  const envPresente = (k: string): boolean => {
+    if (process.env[k]) return true;
+    if (!k.startsWith('TOKEN_BASE_SGA_')) return false;
+    return Array.from({ length: 9 }, (_, i) => `${k}${i + 1}`).some(
+      (n) => !!process.env[n],
+    );
+  };
+  const missing = required.filter((k) => !envPresente(k));
   if (missing.length) {
     logger.error(`Variáveis de ambiente ausentes: ${missing.join(', ')}`);
     throw new Error(`Missing environment variables: ${missing.join(', ')}`);

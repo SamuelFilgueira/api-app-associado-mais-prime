@@ -45,8 +45,36 @@ export class TokenResolverService {
     return this.resolve(baseOrigin, 'sgaPassword');
   }
 
+  /**
+   * Tokens de base do SGA disponíveis para a base, em ordem de preferência:
+   * `TOKEN_BASE_SGA_<BASE>`, `TOKEN_BASE_SGA_<BASE>1`, `TOKEN_BASE_SGA_<BASE>2`…
+   * (até 9). Mais de um token permite failover quando a Hinova bloqueia um
+   * deles temporariamente por "extração de dados" (ver SgaAuthService).
+   * Qualquer combinação vale: só o nome puro, só numerados, ou ambos.
+   */
+  resolveSgaBaseTokens(baseOrigin: BaseOrigin): string[] {
+    const nomeBase = tenantEnvName(baseOrigin, 'sgaBaseToken');
+    const nomes = [
+      nomeBase,
+      ...Array.from({ length: 9 }, (_, i) => `${nomeBase}${i + 1}`),
+    ];
+    const tokens = nomes
+      .map((n) => process.env[n]?.trim())
+      .filter((v): v is string => !!v);
+    const unicos = [...new Set(tokens)];
+
+    if (unicos.length === 0) {
+      this.logger.error(
+        `Missing env var ${nomeBase} (ou ${nomeBase}1, ${nomeBase}2…) for base ${baseOrigin}`,
+      );
+      throw new Error(`Environment variable ${nomeBase} is not configured`);
+    }
+    return unicos;
+  }
+
+  /** Primeiro token de base disponível (compatibilidade). */
   resolveSgaBaseToken(baseOrigin: BaseOrigin): string {
-    return this.resolve(baseOrigin, 'sgaBaseToken');
+    return this.resolveSgaBaseTokens(baseOrigin)[0];
   }
 
   resolveSgaAuthCredentials(baseOrigin: BaseOrigin): SgaAuthCredentials {
