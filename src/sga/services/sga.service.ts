@@ -10,6 +10,7 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import axios from 'axios';
 import { SuriNotificacaoService } from 'src/sga/services/suri-notificacao.service';
+import { AssociadoSincronizacaoService } from 'src/sga/services/associado-sincronizacao.service';
 import { PrismaService } from 'src/database/prisma.service';
 import { BaseOrigin } from 'src/shared/token-resolver.service';
 import { TENANT } from 'src/config/tenant.config';
@@ -37,17 +38,31 @@ export class SgaService {
     private readonly suriNotificacaoService: SuriNotificacaoService,
     @InjectQueue(BOLETO_VERIFICACAO_QUEUE as string)
     private readonly boletoVerificacaoQueue: Queue,
+    private readonly associadoSincronizacao: AssociadoSincronizacaoService,
   ) {}
 
   /**
-   * Busca o CPF limpo (somente dígitos) de um usuário pelo ID
+   * Busca o recorte do usuário usado nas consultas ao SGA: CPF limpo
+   * (somente dígitos), base de origem e os campos cadastrais comparados
+   * pela sincronização com o SGA (uma única leitura no banco).
    */
-  private async getUserCpf(userId: number): Promise<string> {
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+  private async getUserParaSga(userId: number) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        cpf: true,
+        baseOrigin: true,
+        name: true,
+        email: true,
+        cep: true,
+        address: true,
+      },
+    });
     if (!user || !user.cpf) {
       throw new NotFoundException('CPF não encontrado para o usuário');
     }
-    return user.cpf.replace(/\D/g, '');
+    return { ...user, cpf: user.cpf.replace(/\D/g, '') };
   }
 
   /**
@@ -113,9 +128,12 @@ export class SgaService {
   }
 
   async consultarAssociado(userId: number) {
-    const cpf = await this.getUserCpf(userId);
+    const usuario = await this.getUserParaSga(userId);
     try {
-      const response = await this.fetchSgaAssociado(cpf);
+      const response = await this.fetchSgaAssociado(
+        usuario.cpf,
+        usuario.baseOrigin ?? undefined,
+      );
       if (response.status === 406) {
         return response.data;
       }
@@ -127,6 +145,12 @@ export class SgaService {
           }
         );
       }
+      // Reaproveita o corpo já obtido para alinhar o cadastro local ao SGA,
+      // em segundo plano: não bloqueia nem altera a resposta ao app.
+      this.associadoSincronizacao.sincronizarEmSegundoPlano(
+        usuario,
+        response.data,
+      );
       return response.data;
     } catch (error: unknown) {
       if (axios.isAxiosError(error) && error.response?.data) {
@@ -137,9 +161,12 @@ export class SgaService {
   }
 
   async consultarVeiculosAssociado(userId: number) {
-    const cpf = await this.getUserCpf(userId);
+    const usuario = await this.getUserParaSga(userId);
     try {
-      const response = await this.fetchSgaAssociado(cpf);
+      const response = await this.fetchSgaAssociado(
+        usuario.cpf,
+        usuario.baseOrigin ?? undefined,
+      );
       if (response.status >= 400) {
         return (
           response.data || {
@@ -148,6 +175,13 @@ export class SgaService {
           }
         );
       }
+
+      // Mesmo corpo do SGA de /sga/associado: alinha o cadastro local também
+      // por esta rota, pois o app pode abrir consultando só os veículos.
+      this.associadoSincronizacao.sincronizarEmSegundoPlano(
+        usuario,
+        response.data,
+      );
 
       // Persistência local dos veículos
       const data = response.data as SgaAssociadoResponse | null | undefined;

@@ -4,11 +4,17 @@ import { SgaService } from 'src/sga/services/sga.service';
 import { SgaController } from 'src/sga/controllers/sga.controller';
 import { BoletoVerificacaoProcessor } from 'src/sga/processors/boleto-verificacao.processor';
 import { SuriNotificacaoService } from 'src/sga/services/suri-notificacao.service';
+import { AssociadoSincronizacaoService } from 'src/sga/services/associado-sincronizacao.service';
 
 @Module({
   imports: [HinovaModule],
   controllers: [SgaController],
-  providers: [SgaService, BoletoVerificacaoProcessor, SuriNotificacaoService],
+  providers: [
+    SgaService,
+    BoletoVerificacaoProcessor,
+    SuriNotificacaoService,
+    AssociadoSincronizacaoService,
+  ],
   exports: [SgaService],
 })
 export class SgaModule {}
