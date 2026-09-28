@@ -44,7 +44,7 @@ function formatarDataHoraCompacta(valor: string): string {
 }
 
 // TODO(dedupe/B11): diverge da versão da Lógica (esta emite dd/MM/yyyy HH:mm, sem segundos) — unificar exige decisão sobre o formato exibido nos PDFs.
-function formatarDataHora(valor: string): string {
+export function formatarDataHora(valor: string): string {
   if (!valor) return 'N/D';
   try {
     const d = new Date(valor);
@@ -481,10 +481,10 @@ function gerarHtmlRelatorio(dados: HistoricoM7PdfDataDto): string {
 }
 
 // ---------------------------------------------------------------------------
-// Contestação V2 — todos os pontos GPS com geocode (sem gráficos)
+// Formatação compartilhada com o PDF de contestação V2 (pdfkit, em contestacao-v2-pdfkit.service.ts)
 // ---------------------------------------------------------------------------
 
-function formatarDataHoraContestacao(valor: string): {
+export function formatarDataHoraContestacao(valor: string): {
   data: string;
   hora: string;
 } {
@@ -509,184 +509,6 @@ function formatarDataHoraContestacao(valor: string): {
   } catch {
     return { data: valor, hora: '' };
   }
-}
-
-function gerarLinhasContestacaoV2(
-  pontos: HistoricoM7ContestacaoPontoDto[],
-): string {
-  if (pontos.length === 0) {
-    return `<tr><td colspan="6" style="text-align:center;color:#6b7280;font-style:italic;padding:20px;">Nenhum ponto encontrado para o período informado.</td></tr>`;
-  }
-
-  return pontos
-    .map((ponto, indice) => {
-      const bgStyle = indice % 2 !== 0 ? 'background:#f9fafb;' : '';
-      const { data, hora } = formatarDataHoraContestacao(ponto.dataGps);
-      const vel = Number(ponto.velocidade ?? 0);
-      const velStyle = vel > 0 ? 'font-weight:600;' : '';
-      return `
-        <tr style="${bgStyle}">
-          <td>${escapeHtml(data)}</td>
-          <td>${escapeHtml(hora)}</td>
-          <td style="${velStyle}">${escapeHtml(String(vel))} km/h</td>
-          <td class="addr">${escapeHtml(ponto.endereco || '—')}</td>
-          <td style="font-family:monospace;font-size:9px;">${escapeHtml(ponto.latitude || '—')}</td>
-          <td style="font-family:monospace;font-size:9px;">${escapeHtml(ponto.longitude || '—')}</td>
-        </tr>
-      `;
-    })
-    .join('');
-}
-
-function gerarHtmlRelatorioContestacaoV2(
-  dados: HistoricoM7ContestacaoPdfDataDto,
-): string {
-  const { veiculo, periodo, pontos } = dados;
-  const agora = new Date();
-  const dataGeracao = formatarDataHora(agora.toISOString());
-
-  const logoTag = LOGO_BASE64
-    ? `<img src="data:image/png;base64,${LOGO_BASE64}" alt="Logo" style="height:44px;object-fit:contain;"/>`
-    : '';
-
-  return `
-    <!DOCTYPE html>
-    <html lang="pt-BR">
-    <head>
-      <meta charset="UTF-8" />
-      <title>Relatório de Rotas de Detalhadas — ${escapeHtml(veiculo.placa)}</title>
-      <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body {
-          font-family: Arial, Helvetica, sans-serif;
-          font-size: 10px;
-          color: #1f2937;
-          padding: 22px;
-        }
-        .header {
-          display: flex;
-          justify-content: space-between;
-          align-items: flex-start;
-          border-bottom: 2px solid #FF0000;
-          padding-bottom: 12px;
-          margin-bottom: 14px;
-        }
-        .header-left { display: flex; align-items: center; gap: 14px; }
-        .header h1 { font-size: 17px; color: #101010; }
-        .header .sub { color: #6b7280; margin-top: 3px; font-size: 10px; }
-        .header .meta-right { text-align: right; font-size: 9px; color: #6b7280; }
-        .info-grid {
-          display: grid;
-          grid-template-columns: repeat(4, 1fr);
-          gap: 8px;
-          margin-bottom: 14px;
-        }
-        .info-card {
-          background: #f3f4f6;
-          border-left: 3px solid #FF0000;
-          border-radius: 0 6px 6px 0;
-          padding: 8px 12px;
-        }
-        .info-card label {
-          font-size: 9px;
-          color: #6b7280;
-          text-transform: uppercase;
-          letter-spacing: 0.05em;
-          display: block;
-          margin-bottom: 3px;
-        }
-        .info-card span { font-size: 12px; font-weight: 700; color: #111827; }
-        .aviso {
-          background: #fffbeb;
-          border: 1px solid #fcd34d;
-          border-radius: 6px;
-          padding: 8px 12px;
-          font-size: 9px;
-          color: #92400e;
-          margin-bottom: 12px;
-        }
-        table { width: 100%; border-collapse: collapse; font-size: 9px; }
-        th {
-          background: #101010;
-          color: #fff;
-          padding: 7px 8px;
-          text-align: left;
-          font-weight: 600;
-          white-space: nowrap;
-        }
-        td { border: 1px solid #e5e7eb; padding: 5px 7px; vertical-align: top; }
-        .addr { max-width: 220px; word-break: break-word; }
-        .footer {
-          margin-top: 12px;
-          text-align: center;
-          font-size: 8px;
-          color: #9ca3af;
-          border-top: 1px solid #e5e7eb;
-          padding-top: 6px;
-        }
-      </style>
-    </head>
-    <body>
-      <div class="header">
-        <div class="header-left">
-          ${logoTag}
-          <div>
-            <h1>Relatório de Rotas Detalhadas</h1>
-            <p class="sub">Pontos GPS completos com geocode — para análise de rota</p>
-          </div>
-        </div>
-        <div class="meta-right">
-          <p>Gerado em: ${escapeHtml(dataGeracao)}</p>
-          <p style="margin-top:3px;">Total de pontos: <strong>${pontos.length}</strong></p>
-        </div>
-      </div>
-
-      <div class="info-grid">
-        <div class="info-card">
-          <label>Placa</label>
-          <span>${escapeHtml(veiculo.placa)}</span>
-        </div>
-        <div class="info-card">
-          <label>Chassi</label>
-          <span>${escapeHtml(veiculo.chassi)}</span>
-        </div>
-        <div class="info-card">
-          <label>Período Inicial</label>
-          <span>${escapeHtml(formatarDataBR(periodo.dataInicial))}</span>
-        </div>
-        <div class="info-card">
-          <label>Período Final</label>
-          <span>${escapeHtml(formatarDataBR(periodo.dataFinal))}</span>
-        </div>
-      </div>
-
-      <div class="aviso">
-        ⚠ Este relatório contém <strong>todos os pontos GPS</strong> registrados pelo rastreador no período,
-        com velocidade instantânea e endereço obtido por geocodificação reversa.
-      </div>
-
-      <table>
-        <thead>
-          <tr>
-            <th>Data</th>
-            <th>Hora</th>
-            <th>Velocidade</th>
-            <th>Endereço</th>
-            <th>Latitude</th>
-            <th>Longitude</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${gerarLinhasContestacaoV2(pontos)}
-        </tbody>
-      </table>
-
-      <div class="footer">
-        Relatório gerado pelo sistema ${TENANT.reportName} — ${escapeHtml(dataGeracao)}
-      </div>
-    </body>
-    </html>
-  `;
 }
 
 function gerarLinhasContestacao(
@@ -868,47 +690,6 @@ export class HistoricoPdfM7Service {
       );
       throw new InternalServerErrorException(
         'Erro ao gerar PDF de contestação M7',
-      );
-    } finally {
-      await browser.close();
-    }
-  }
-
-  async gerarPdfContestacaoV2(
-    dados: HistoricoM7ContestacaoPdfDataDto,
-  ): Promise<Buffer> {
-    const browser = await puppeteer.launch({
-      headless: true,
-      ...(process.env.PUPPETEER_EXECUTABLE_PATH && {
-        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
-      }),
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-      ],
-    });
-
-    try {
-      const page = await browser.newPage();
-      const html = gerarHtmlRelatorioContestacaoV2(dados);
-      await page.setContent(html, { waitUntil: 'networkidle0' });
-
-      const pdf = await page.pdf({
-        format: 'A4',
-        landscape: true,
-        printBackground: true,
-        margin: { top: '18px', right: '14px', bottom: '18px', left: '14px' },
-      });
-
-      return Buffer.from(pdf);
-    } catch (error) {
-      this.logger.error(
-        `Erro ao gerar PDF M7 de contestação v2: ${error instanceof Error ? error.message : JSON.stringify(error)}`,
-      );
-      throw new InternalServerErrorException(
-        'Erro ao gerar PDF de contestação M7 v2',
       );
     } finally {
       await browser.close();

@@ -31,6 +31,18 @@ export interface HistoricoM7ContestacaoPdfDataDto {
   pontos: HistoricoM7ContestacaoPontoDto[];
 }
 
+/**
+ * Cabeçalho do PDF de contestação V2 em streaming: os pontos chegam depois,
+ * em chunks, por isso o total é informado separadamente.
+ */
+export interface HistoricoM7ContestacaoV2CabecalhoDto {
+  veiculo: VeiculoM7InfoDto;
+  periodo: PeriodoM7Dto;
+  totalPontos: number;
+  /** Intervalo mínimo (s) entre linhas aplicado na amostragem; 0 = sem amostragem. */
+  intervaloMinSeg: number;
+}
+
 export interface HistoricoM7RotasPontoDto {
   latitude: number;
   longitude: number;

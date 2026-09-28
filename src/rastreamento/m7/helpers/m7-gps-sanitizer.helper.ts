@@ -7,7 +7,7 @@ const MIN_DISTANCIA_METROS = 15;
 /** Intervalo mínimo entre pontos consecutivos (segundos) */
 const MIN_INTERVALO_SEGUNDOS = 5;
 
-function calcularDistanciaMetros(
+export function calcularDistanciaMetros(
   lat1: number,
   lng1: number,
   lat2: number,
@@ -33,6 +33,54 @@ function parseIgnicao(value: boolean | number | string | undefined): boolean {
     return lower === 'true' || lower === '1' || lower === 'ligado';
   }
   return false;
+}
+
+function parseDataGpsMs(valor: unknown): number | null {
+  if (typeof valor !== 'string' || !valor.trim()) return null;
+  const iso = valor.includes('T') ? valor : valor.replace(' ', 'T');
+  const ms = new Date(iso).getTime();
+  return Number.isNaN(ms) ? null : ms;
+}
+
+/**
+ * Amostragem temporal para o relatório de contestação V2: mantém um ponto
+ * apenas se ele estiver a pelo menos `intervaloSeg` do último ponto mantido.
+ *
+ * Regras:
+ * - o primeiro e o último ponto são sempre mantidos;
+ * - pontos sem `data_gps` parseável são mantidos (não há como medir o intervalo);
+ * - `intervaloSeg <= 0` devolve a lista original (amostragem desligada);
+ * - a ordem original é preservada.
+ */
+export function amostrarPontosPorIntervalo(
+  pontos: M7PontoHistoricoRaw[],
+  intervaloSeg: number,
+): M7PontoHistoricoRaw[] {
+  if (!Number.isFinite(intervaloSeg) || intervaloSeg <= 0) return pontos;
+  if (pontos.length <= 2) return pontos;
+
+  const intervaloMs = intervaloSeg * 1000;
+  const resultado: M7PontoHistoricoRaw[] = [];
+  let ultimoMantidoMs: number | null = null;
+  const ultimoIndice = pontos.length - 1;
+
+  for (let i = 0; i < pontos.length; i++) {
+    const ponto = pontos[i];
+    const ms = parseDataGpsMs(ponto.data_gps);
+
+    if (ms === null || i === 0 || i === ultimoIndice) {
+      resultado.push(ponto);
+      if (ms !== null) ultimoMantidoMs = ms;
+      continue;
+    }
+
+    if (ultimoMantidoMs === null || ms - ultimoMantidoMs >= intervaloMs) {
+      resultado.push(ponto);
+      ultimoMantidoMs = ms;
+    }
+  }
+
+  return resultado;
 }
 
 export function sanitizarPontosGps(

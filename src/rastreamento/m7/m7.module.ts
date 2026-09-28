@@ -5,6 +5,8 @@ import { HistoricoM7Service } from 'src/rastreamento/m7/services/historico-m7.se
 import { HistoricoPdfM7Service } from 'src/rastreamento/m7/pdf/historico-pdf-m7.service';
 import { M7ReverseGeocodeService } from 'src/rastreamento/m7/services/m7-reverse-geocode.service';
 import { M7ViagensBuilderService } from 'src/rastreamento/m7/services/m7-viagens-builder.service';
+import { ContestacaoV2PdfKitService } from 'src/rastreamento/m7/pdf/contestacao-v2-pdfkit.service';
+import { m7RedisProvider } from 'src/rastreamento/m7/providers/m7-redis.provider';
 
 /**
  * Provedor de rastreamento M7 (posição, histórico, PDF, reverse geocode).
@@ -13,9 +15,11 @@ import { M7ViagensBuilderService } from 'src/rastreamento/m7/services/m7-viagens
 @Module({
   controllers: [HistoricoM7Controller],
   providers: [
+    m7RedisProvider,
     RastreamentoM7,
     HistoricoM7Service,
     HistoricoPdfM7Service,
+    ContestacaoV2PdfKitService,
     M7ReverseGeocodeService,
     M7ViagensBuilderService,
   ],

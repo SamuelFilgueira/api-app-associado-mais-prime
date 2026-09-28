@@ -7,6 +7,9 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import axios from 'axios';
+import type { Writable } from 'stream';
+import { M7_GEOCODE_CONFIG } from 'src/config/m7-geocode.config';
+import { baseTag } from 'src/shared/log.util';
 import { BaseOrigin } from 'src/shared/token-resolver.service';
 import {
   M7ConsultaVeiculoResponse,
@@ -15,6 +18,7 @@ import {
 } from '../interfaces/m7-historico.interface';
 import {
   HistoricoM7ContestacaoPdfDataDto,
+  HistoricoM7ContestacaoV2CabecalhoDto,
   HistoricoM7PdfDataDto,
   HistoricoM7ResumoResponseDto,
   HistoricoM7RotasResponseDto,
@@ -27,13 +31,32 @@ import {
   toDateTimeParam,
   validarPeriodoMaximoContestacao,
 } from '../helpers/historico-m7-utils.helper';
-import { sanitizarPontosGps } from '../helpers/m7-gps-sanitizer.helper';
+import {
+  amostrarPontosPorIntervalo,
+  sanitizarPontosGps,
+} from '../helpers/m7-gps-sanitizer.helper';
+import { ContestacaoV2PdfKitService } from '../pdf/contestacao-v2-pdfkit.service';
 import { HistoricoPdfM7Service } from '../pdf/historico-pdf-m7.service';
-import { M7ReverseGeocodeService } from './m7-reverse-geocode.service';
+import {
+  ContextoGeocode,
+  M7ReverseGeocodeService,
+  PreparoContestacao,
+  ReverseGeocodeItem,
+} from './m7-reverse-geocode.service';
 import { M7ViagensBuilderService } from './m7-viagens-builder.service';
 import { RastreamentoM7 } from './rastreamento-m7';
 
 const M7_REQUEST_TIMEOUT = 50_000;
+
+/** Resultado da fase 1 do PDF de contestação V2 (antes de qualquer byte na resposta). */
+export interface ContestacaoV2Preparada {
+  cabecalho: HistoricoM7ContestacaoV2CabecalhoDto;
+  preparo: PreparoContestacao;
+  contexto: ContextoGeocode;
+  pontosRaw: number;
+  inicioMs: number;
+  tempos: { msM7Veiculo: number; msM7Historico: number; msPreparo: number };
+}
 
 @Injectable()
 export class HistoricoM7Service {
@@ -41,6 +64,7 @@ export class HistoricoM7Service {
 
   constructor(
     private readonly pdfService: HistoricoPdfM7Service,
+    private readonly contestacaoPdfKitService: ContestacaoV2PdfKitService,
     private readonly reverseGeocodeService: M7ReverseGeocodeService,
     private readonly viagensBuilderService: M7ViagensBuilderService,
     private readonly rastreamentoM7: RastreamentoM7,
@@ -456,16 +480,30 @@ export class HistoricoM7Service {
     return this.pdfService.gerarPdfContestacao(dadosPdf);
   }
 
-  async gerarPdfContestacaoV2(
+  // ---------------------------------------------------------------------------
+  // Contestação V2 — streaming em duas fases
+  //
+  // 1) `prepararContestacaoV2`: tudo que pode falhar com status HTTP próprio
+  //    (validação, M7) e a preparação dos pontos (amostragem, herança, Redis).
+  //    Nenhum byte foi enviado ainda; exceções seguem para o HttpExceptionFilter.
+  // 2) `escreverContestacaoV2`: o controller já enviou os headers; o PDF é
+  //    escrito em chunks (geocode do chunk → linhas → bytes no socket), o que
+  //    mantém a conexão do app ativa (read timeout de 60 s entre bytes).
+  // ---------------------------------------------------------------------------
+
+  async prepararContestacaoV2(
     cnpj: string,
     chassi: string,
     dataInicial: string,
     dataFinal: string,
     baseOrigin: BaseOrigin,
-  ): Promise<Buffer> {
+  ): Promise<ContestacaoV2Preparada> {
+    const inicioMs = Date.now();
     validarPeriodoMaximoContestacao(dataInicial, dataFinal);
 
+    let t = Date.now();
     const veiculoData = await this.consultarVeiculo(cnpj, chassi, baseOrigin);
+    const msM7Veiculo = Date.now() - t;
 
     if (!veiculoData?.veiculo?.codigo) {
       throw new NotFoundException('Veículo não encontrado na plataforma M7');
@@ -473,29 +511,121 @@ export class HistoricoM7Service {
 
     const { codigo, placa, chassi: chassiM7 } = veiculoData.veiculo;
 
+    t = Date.now();
     const historicoRaw = await this.buscarHistoricoGps(
       codigo,
       dataInicial,
       dataFinal,
       baseOrigin,
     );
+    const msM7Historico = Date.now() - t;
 
     const pontosRaw = Array.isArray(historicoRaw?.historico)
       ? historicoRaw.historico
       : [];
 
-    const pontos = await this.reverseGeocodeService.montarPontosContestacao(
+    const intervaloMinSeg = M7_GEOCODE_CONFIG.intervaloMinSeg;
+    const pontosAmostrados = amostrarPontosPorIntervalo(
       pontosRaw,
-      baseOrigin,
+      intervaloMinSeg,
     );
 
-    const dadosPdf: HistoricoM7ContestacaoPdfDataDto = {
-      veiculo: { codigo, placa, chassi: chassiM7 },
-      periodo: { dataInicial, dataFinal },
-      pontos,
-    };
+    t = Date.now();
+    const contexto = this.reverseGeocodeService.criarContexto(baseOrigin);
+    const preparo = this.reverseGeocodeService.prepararPontosContestacao(
+      pontosAmostrados,
+      contexto,
+    );
+    await this.reverseGeocodeService.carregarCacheRedis(
+      preparo.ancoras,
+      contexto,
+    );
+    const msPreparo = Date.now() - t;
 
-    return this.pdfService.gerarPdfContestacaoV2(dadosPdf);
+    return {
+      cabecalho: {
+        veiculo: { codigo, placa, chassi: chassiM7 },
+        periodo: { dataInicial, dataFinal },
+        totalPontos: preparo.pontos.length,
+        intervaloMinSeg,
+      },
+      preparo,
+      contexto,
+      pontosRaw: pontosRaw.length,
+      inicioMs,
+      tempos: { msM7Veiculo, msM7Historico, msPreparo },
+    };
+  }
+
+  /**
+   * Escreve o PDF no destino em chunks. Lança se o cliente desconectar ou se o
+   * writer falhar — o controller decide como encerrar a resposta.
+   */
+  async escreverContestacaoV2(
+    preparada: ContestacaoV2Preparada,
+    destino: Writable,
+  ): Promise<void> {
+    const { cabecalho, preparo, contexto, inicioMs, tempos } = preparada;
+    const baseOrigin = contexto.baseOrigin;
+    const chunk = M7_GEOCODE_CONFIG.chunkPontos;
+
+    const writer = this.contestacaoPdfKitService.criarWriter(
+      cabecalho,
+      destino,
+    );
+    const msPrimeiroByte = Date.now() - inicioMs;
+
+    let msGeocode = 0;
+    let msPdf = 0;
+
+    try {
+      for (let i = 0; i < preparo.pontos.length; i += chunk) {
+        if (destino.destroyed || destino.writableEnded) {
+          throw new Error('cliente encerrou a conexão durante o streaming');
+        }
+
+        const fatia = preparo.pontos.slice(i, i + chunk);
+
+        const itens: ReverseGeocodeItem[] = [];
+        const vistos = new Set<string>();
+        for (const ponto of fatia) {
+          if (!ponto.key || vistos.has(ponto.key)) continue;
+          if (contexto.resolvidos.has(ponto.key)) continue;
+          vistos.add(ponto.key);
+          const ancora = preparo.ancoraPorKey.get(ponto.key);
+          if (ancora) itens.push(ancora);
+        }
+
+        let t = Date.now();
+        await this.reverseGeocodeService.resolverEnderecos(itens, contexto);
+        msGeocode += Date.now() - t;
+
+        t = Date.now();
+        writer.escreverLinhas(
+          this.reverseGeocodeService.montarLinhasContestacao(
+            fatia,
+            contexto.resolvidos,
+          ),
+        );
+        msPdf += Date.now() - t;
+      }
+
+      const t = Date.now();
+      await writer.finalizar();
+      msPdf += Date.now() - t;
+    } catch (error) {
+      writer.abortar();
+      throw error;
+    }
+
+    this.logger.log(
+      `${baseTag(baseOrigin)} [contestação V2] pontosRaw=${preparada.pontosRaw} ` +
+        `pontosAmostrados=${preparo.pontos.length} intervaloMinSeg=${cabecalho.intervaloMinSeg} ` +
+        `${this.reverseGeocodeService.formatarEstatisticas(contexto.estatisticas)} | ` +
+        `ms: m7Veiculo=${tempos.msM7Veiculo} m7Historico=${tempos.msM7Historico} ` +
+        `preparo=${tempos.msPreparo} primeiroByte=${msPrimeiroByte} geocode=${msGeocode} ` +
+        `pdf=${msPdf} total=${Date.now() - inicioMs}`,
+    );
   }
 
   async obterResumo(

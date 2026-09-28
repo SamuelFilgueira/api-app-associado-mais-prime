@@ -67,6 +67,33 @@ Resumo funcional:
 
 ---
 
+## 2.1 Atualização 2026-09-28 — streaming, amostragem, herança e cache Redis
+
+Veículos que rodam muitas horas por dia geravam dezenas de milhares de pontos em 4 dias e a
+requisição estourava timeout. A causa confirmada no app: `FileSystem.downloadAsync` (expo-file-system)
+tem **read timeout de 60 s entre bytes** (Android; iOS usa o mesmo padrão do URLSession), e a API não
+enviava nenhum byte até o PDF inteiro existir. O fluxo do `pdf-contestacao-v2` passou a ser:
+
+1. **Fase 1 — preparação (nenhum byte enviado):** validação do período → `consultarVeiculo` →
+   `buscarHistoricoGps` → **amostragem temporal** (`amostrarPontosPorIntervalo`, intervalo mínimo
+   `M7_CONTESTACAO_INTERVALO_MIN_SEG`, default 10 s; primeiro e último ponto sempre mantidos) →
+   normalização e **herança espacial** (`prepararPontosContestacao`) → `MGET` no **Redis**
+   (`carregarCacheRedis`). Erros aqui seguem para o `HttpExceptionFilter` como antes.
+2. **Fase 2 — streaming:** o controller envia `200`, `Content-Type: application/pdf` e
+   `Content-Disposition` (sem `Content-Length`; transfer chunked) e chama `escreverContestacaoV2`.
+   O cabeçalho do PDF (pdfkit) sai imediatamente; a cada chunk de `M7_CONTESTACAO_CHUNK_PONTOS`
+   (default 500) pontos, as âncoras pendentes do chunk são resolvidas pelo pool e as linhas são
+   escritas e enviadas. Erro após o primeiro byte → `res.destroy()` (o app recebe falha de rede em
+   vez de PDF truncado). Cliente desconectado → escrita interrompida.
+3. Um `Logger.log` por requisição resume contadores (`pontosRaw`, `pontosAmostrados`, `ancoras`,
+   `herdados`, `cacheMem`, `cacheRedis`, `geocodadas`, `semMatch`, `porOrcamento`) e tempos por
+   etapa (`m7Veiculo`, `m7Historico`, `preparo`, `primeiroByte`, `geocode`, `pdf`, `total`).
+
+Contrato HTTP (rota, query, status, `Content-Type`, `Content-Disposition`) inalterado. O algoritmo
+de geocoding (`buscarReverseGeocodeNominatimMysql`) não foi alterado. Knobs e defaults em
+`src/config/m7-geocode.config.ts`. O PDF de contestação V1 (`pdf-contestacao`) continua em
+Puppeteer, mas também se beneficia da herança, do Redis e do pool via `montarPontosContestacao`.
+
 ## 3. Componentes Participantes
 
 ## 3.1 Controller
@@ -385,26 +412,29 @@ Informação reaproveitada da primeira ocorrência:
 - `cidade` do ponto M7 é armazenada em `ReverseGeocodeItem.cidade`;
 - essa cidade é usada como override do município na geocodificação.
 
-## 6.4 Execução em lote
+## 6.4 Herança espacial, cache Redis e pool de workers
 
-Método:
+Métodos (em `M7ReverseGeocodeService`):
 
-- `reverseGeocodeEmLote(items, baseOrigin)`
-
-Responsabilidade:
-
-- geocodificar as coordenadas únicas em lotes.
-
-Critério atual:
-
-- usa `M7_REV_GEOCODE_CONCURRENCY = 6`;
-- divide o array em lotes de até 6 itens;
-- dentro de cada lote executa `Promise.all(...)`;
-- os lotes são processados sequencialmente no `for` externo.
+- `prepararPontosContestacao(pontosRaw, contexto)` — normaliza e aplica a **herança espacial**:
+  as âncoras são indexadas por célula de 4 casas decimais (~11 m); um ponto a até
+  `M7_REV_GEOCODE_HERANCA_METROS` (default 20 m) de uma âncora **da mesma cidade** recebe a
+  chave dela em vez de virar nova coordenada a geocodificar. A âncora é fixa (erro máximo de
+  20 m, sem acúmulo). Ordem e quantidade de pontos são preservadas; só o endereço é reaproveitado.
+- `carregarCacheRedis(ancoras, contexto)` — `MGET` em lotes de 1000 nas chaves
+  `m7:revgeo:v1:{round(lat·1e4)}:{round(lon·1e4)}:{cidade-slug}`; hits saem do lote e têm o TTL
+  renovado (`EXPIRE`, `M7_REV_GEOCODE_REDIS_TTL_SEG`, default 7 dias). Redis indisponível abre um
+  circuito de 60 s e o fluxo segue só com o banco — nunca falha a requisição.
+- `resolverEnderecos(itens, contexto)` — pool de `M7_REV_GEOCODE_CONCURRENCY` workers
+  (default 8; cada geocode usa até 3 conexões MySQL) consumindo um índice compartilhado, sem
+  head-of-line blocking entre lotes. Respeita o orçamento `M7_REV_GEOCODE_BUDGET_MS`
+  (default 90 s): excedido, as âncoras restantes recebem `"lat, lon"`. Endereços vindos do banco
+  são gravados no Redis com `SET … EX` fora do caminho crítico; o fallback `"lat, lon"` nunca é gravado.
 
 Saída:
 
-- `Map<string, string>` onde a chave é `latitude,longitude` e o valor é o endereço resolvido.
+- `contexto.resolvidos: Map<string, string>` onde a chave é a `key` da âncora e o valor o endereço.
+
 
 ## 6.5 Override de cidade vindo da M7
 
@@ -436,24 +466,24 @@ Objetivo funcional do override:
 
 Método:
 
-- `reverseGeocodeCoordenada(latitude, longitude, baseOrigin, cidadeOverride?)`
+- `reverseGeocodeCoordenada(latitude, longitude, baseOrigin, cidadeOverride?)` (assinatura mantida
+  para o viagens builder e o Softruck; internamente delega a `resolverCoordenada`).
 
 Estruturas usadas:
 
-- `reverseGeocodeCache: Map<string, string>`
-- `reverseGeocodeInFlight: Map<string, Promise<string>>`
+- `reverseGeocodeCache: Map<string, string>` — LRU simples limitado a `M7_REV_GEOCODE_MEM_CACHE_MAX`
+  entradas (default 50 000).
+- `reverseGeocodeInFlight: Map<string, Promise<string>>`.
 
 Comportamento atual:
 
-1. monta `key = "latitude,longitude"`.
-2. se existir endereço em `reverseGeocodeCache` e não houver `cidadeOverride`, retorna o valor em memória.
-3. se existir Promise em `reverseGeocodeInFlight` e não houver `cidadeOverride`, reutiliza a mesma Promise.
-4. caso contrário, executa a resolução efetiva.
+1. a chave é `"latitude,longitude|cidadeOverride"` — o override faz parte da chave porque o
+   endereço depende dele. Antes, o cache era ignorado sempre que havia `cidadeOverride`, ou seja,
+   em todo ponto M7 (que sempre traz `cidade`).
+2. hit em memória retorna imediatamente (origem `memoria`);
+3. Promise em andamento para a mesma chave é reutilizada;
+4. caso contrário, consulta o banco local (origem `banco`) ou devolve `"lat, lon"` (origem `fallback`).
 
-Efeito:
-
-- evita repetir consultas locais para a mesma coordenada em uma mesma execução do serviço;
-- evita disparar consultas duplicadas simultâneas para a mesma chave.
 
 ## 6.7 Consulta principal no banco local `nominatim_rj.placex`
 
@@ -718,93 +748,41 @@ Etapas exatas:
 
 ## 8. Geração do PDF
 
-## 8.1 Método responsável
+## 8.1 Serviço responsável
 
-Método:
+- `ContestacaoV2PdfKitService.criarWriter(cabecalho, destino)` em
+  `src/rastreamento/m7/pdf/contestacao-v2-pdfkit.service.ts` — devolve um `ContestacaoV2PdfWriter`
+  (pdfkit, sem Chromium) que faz `pipe` direto na resposta HTTP.
 
-- `HistoricoPdfM7Service.gerarPdfContestacaoV2(dados)`
+Por que pdfkit e não Puppeteer: o relatório é uma tabela plana de seis colunas; o Chromium só
+paginava texto, custava 1–3 s e centenas de MB por requisição, renderizava tabelas gigantes em dois
+passes e só entregava o PDF no fim — incompatível com o streaming exigido pelo timeout de 60 s entre
+bytes do app. Os demais PDFs (histórico M7, contestação V1, Lógica, Softruck) continuam em Puppeteer.
 
-Passos atuais:
+## 8.2 Escritor incremental
 
-1. abre uma instância do Puppeteer com `headless: true`;
-2. se existir `PUPPETEER_EXECUTABLE_PATH`, injeta `executablePath`;
-3. usa os argumentos:
-   - `--no-sandbox`
-   - `--disable-setuid-sandbox`
-   - `--disable-dev-shm-usage`
-   - `--disable-gpu`
-4. cria uma nova página;
-5. monta o HTML por `gerarHtmlRelatorioContestacaoV2(dados)`;
-6. renderiza o HTML com `page.setContent(html, { waitUntil: 'networkidle0' })`;
-7. gera o PDF com `page.pdf(...)`;
-8. retorna `Buffer.from(pdf)`;
-9. fecha o browser no bloco `finally`.
+- `iniciar` (construtor): A4 paisagem, margens 18/14 pt, `bufferPages: false` (cada página fechada
+  é enviada na hora), logo PNG de `TENANT.logoPath`, título, "Gerado em", "Total de pontos"
+  (já conhecido: a amostragem acontece antes do streaming), quatro cards (placa, chassi, período
+  inicial, período final), aviso e cabeçalho da tabela.
+- `escreverLinhas(pontos[])`: zebra, colunas Data | Hora | Velocidade | Endereço | Latitude |
+  Longitude, altura da linha calculada pela quebra do endereço, quebra de página com cabeçalho da
+  tabela repetido. Pode ser chamado por chunk.
+- `finalizar()`: linha "Nenhum ponto encontrado…" quando não houve linhas, rodapé institucional e
+  `doc.end()`.
+- `abortar()`: interrompe a escrita (cliente desconectou ou erro).
 
-Se houver erro:
+## 8.3 Texto do aviso
 
-- registra erro no logger;
-- lança `InternalServerErrorException('Erro ao gerar PDF de contestação M7 v2')`.
+Com amostragem ativa: "Atenção: este relatório contém os pontos GPS registrados pelo rastreador no
+período, com intervalo mínimo de N s entre registros, velocidade instantânea e endereço obtido por
+geocodificação reversa." Com `M7_CONTESTACAO_INTERVALO_MIN_SEG=0` o texto volta a dizer "todos os
+pontos GPS".
 
-## 8.2 HTML do relatório
+## 8.4 Fontes e caracteres
 
-Função:
-
-- `gerarHtmlRelatorioContestacaoV2(dados)`
-
-Estrutura atual do documento:
-
-- cabeçalho com logo opcional (`LOGO_BASE64`);
-- título `Relatório de Contestação de Multa`;
-- subtítulo `Pontos GPS completos com geocode — para análise de infração`;
-- metadados com data/hora de geração e total de pontos;
-- cards com:
-  - placa
-  - chassi
-  - período inicial
-  - período final
-- bloco de aviso sobre a finalidade do relatório;
-- tabela com os pontos;
-- rodapé institucional.
-
-## 8.3 Tabela de pontos do PDF
-
-Função:
-
-- `gerarLinhasContestacaoV2(pontos)`
-
-Colunas geradas atualmente:
-
-- Data
-- Hora
-- Velocidade
-- Endereço
-- Latitude
-- Longitude
-
-Transformações visuais:
-
-- linhas alternadas com fundo diferente;
-- velocidade maior que zero recebe `font-weight: 600`;
-- endereço usa classe `.addr` com quebra de linha;
-- latitude e longitude são renderizadas em fonte monoespaçada.
-
-Caso `pontos.length === 0`:
-
-- a tabela renderiza uma linha única com a mensagem:
-  - `Nenhum ponto encontrado para o período informado.`
-
-## 8.4 Configuração atual do PDF
-
-`page.pdf(...)` usa:
-
-- `format: 'A4'`
-- `landscape: true`
-- `printBackground: true`
-- `margin`:
-  - `top: '18px'`
-  - `right: '14px'`
-  - `bottom: '18px'`
-  - `left: '14px'`
+Helvetica / Helvetica-Bold / Helvetica-Oblique (padrão do PDF, WinAnsi — cobre acentos do
+português). O glifo "⚠" do HTML antigo não existe na Helvetica e foi substituído por "Atenção:".
 
 ---
 
@@ -1031,7 +1009,8 @@ Não há, nesse fluxo específico, agrupamento por viagem para o PDF de contesta
 - A cidade informada no ponto M7 tem prioridade sobre a cidade inferida pelo banco local.
 - O fallback para `reverse_geocode_cache` é condicional a flag de ambiente.
 - Se nenhum geocode local for resolvido, o sistema retorna as coordenadas como texto no campo `endereco`.
-- O frontend recebe diretamente um PDF binário, não um JSON.
+- O frontend recebe diretamente um PDF binário, não um JSON — em streaming (chunked), sem `Content-Length`.
+- As linhas do V2 são amostradas (intervalo mínimo configurável, default 10 s); o V1 não é amostrado.
 
 ---
 
@@ -1043,4 +1022,7 @@ Não há, nesse fluxo específico, agrupamento por viagem para o PDF de contesta
 - `src/rastreamento/m7/interfaces/m7-historico.interface.ts`
 - `src/rastreamento/m7/services/historico-m7.service.ts`
 - `src/rastreamento/m7/pdf/historico-pdf-m7.service.ts`
-- `prisma/schema.prisma`
+- `src/rastreamento/m7/pdf/contestacao-v2-pdfkit.service.ts`
+- `src/rastreamento/m7/providers/m7-redis.provider.ts`
+- `src/rastreamento/m7/helpers/m7-gps-sanitizer.helper.ts`
+- `src/config/m7-geocode.config.ts`

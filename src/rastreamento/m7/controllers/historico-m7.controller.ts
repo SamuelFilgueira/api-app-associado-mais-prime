@@ -152,9 +152,14 @@ export class HistoricoM7Controller {
   }
 
   /**
-   * Gera o relatório PDF de contestação de multa M7 (v2) com todos os pontos GPS
-   * geocodificados individualmente via banco nominatim_rj.
+   * Gera o relatório PDF de contestação de multa M7 (v2): pontos GPS amostrados
+   * (intervalo mínimo configurável) e geocodificados via banco nominatim_rj.
    * Sem gráficos — informações brutas para análise de infrações.
+   *
+   * A resposta é enviada em streaming (transfer chunked, sem Content-Length):
+   * os primeiros bytes saem assim que a M7 responde e cada chunk geocodificado
+   * vira páginas imediatamente, mantendo ativa a conexão do app.
+   * Rota, query, status e demais headers são os mesmos de antes.
    *
    * GET /rastreamento/historico/m7/pdf-contestacao-v2
    *   ?cnpj=XX.XXX.XXX/0001-XX
@@ -172,7 +177,8 @@ export class HistoricoM7Controller {
     const user = req.user;
     const baseOrigin = this.baseContextService.getBaseOrigin();
 
-    const pdfBuffer = await this.historicoM7Service.gerarPdfContestacaoV2(
+    // Fase 1: qualquer erro aqui ainda vira resposta HTTP normal (nada enviado).
+    const preparada = await this.historicoM7Service.prepararContestacaoV2(
       query.cnpj,
       query.chassi,
       query.dataInicial,
@@ -188,10 +194,23 @@ export class HistoricoM7Controller {
 
     void user;
 
+    res.status(200);
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="${fileName}"`);
-    res.setHeader('Content-Length', String(pdfBuffer.length));
-    res.send(pdfBuffer);
+    res.flushHeaders();
+
+    // Fase 2: headers já enviados — em erro não há como trocar o status;
+    // derruba o socket para o app receber falha de rede em vez de PDF truncado.
+    try {
+      await this.historicoM7Service.escreverContestacaoV2(preparada, res);
+    } catch (error) {
+      this.logger.error(
+        `[${baseOrigin}] falha no streaming do PDF de contestação V2 (chassi=${safeChassi}): ${
+          error instanceof Error ? error.message : JSON.stringify(error)
+        }`,
+      );
+      res.destroy();
+    }
   }
 
   /**

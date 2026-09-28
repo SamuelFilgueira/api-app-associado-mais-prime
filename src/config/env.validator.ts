@@ -55,9 +55,13 @@ const WARN_IF_MISSING = [
  * - CEPABERTO_TOKEN / CEPABERTO_API_TOKEN: geocodificação de oficinas
  *   (oficina.service aceita os dois nomes; sem token, oficina fica sem coordenadas)
  * - ENABLE_TEST_ENDPOINTS: habilita rotas de teste (auth.controller)
- * - M7_NOMINATIM_DB / M7_NOMINATIM_TABLE / M7_NOMINATIM_ENABLED /
- *   M7_REV_GEOCODE_CACHE_PROVIDERS / M7_REV_GEOCODE_CACHE_RADIUS_KEYS /
- *   M7_REV_GEOCODE_LEGACY_CACHE_FALLBACK: reverse geocode M7 (defaults no service)
+ * - M7_NOMINATIM_DB / M7_NOMINATIM_TABLE / M7_NOMINATIM_ENABLED: banco local de
+ *   reverse geocode M7 (defaults no service)
+ * - M7_REV_GEOCODE_CONCURRENCY / M7_REV_GEOCODE_HERANCA_METROS /
+ *   M7_REV_GEOCODE_MEM_CACHE_MAX / M7_REV_GEOCODE_BUDGET_MS /
+ *   M7_REV_GEOCODE_REDIS_TTL_SEG / M7_CONTESTACAO_INTERVALO_MIN_SEG /
+ *   M7_CONTESTACAO_CHUNK_PONTOS: knobs do reverse geocode e do PDF de
+ *   contestação V2 (defaults e limites em m7-geocode.config.ts)
  * - SOFTRUCK_REV_GEOCODE_TIMEOUT_MS: timeout do reverse geocode Softruck
  * - ANALYTICS_JOURNEY_ENABLED / ANALYTICS_LINK_USER_ENABLED /
  *   ANALYTICS_RATE_LIMIT_ENABLED / ANALYTICS_JOURNEY_TTL_DAYS: flags do analytics
