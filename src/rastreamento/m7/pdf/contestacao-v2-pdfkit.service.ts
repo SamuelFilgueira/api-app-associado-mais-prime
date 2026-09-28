@@ -37,7 +37,10 @@ const COR = {
   titulo: '#101010',
   cinza: '#6b7280',
   cinzaClaro: '#9ca3af',
-  vermelho: '#FF0000',
+  /** Cor da marca do tenant (vermelho na Mais Prime, laranja na Hertz). */
+  get marca(): string {
+    return TENANT.brandColor;
+  },
   bordaTabela: '#e5e7eb',
   zebra: '#f9fafb',
   cardFundo: '#f3f4f6',
@@ -320,7 +323,7 @@ export class ContestacaoV2PdfWriter {
       .lineWidth(2)
       .moveTo(MARGEM.esquerda, yLinha)
       .lineTo(MARGEM.esquerda + LARGURA_UTIL, yLinha)
-      .stroke(COR.vermelho);
+      .stroke(COR.marca);
     this.y = yLinha + 14;
 
     // Cards de informação (placa, chassi, período inicial, período final)
@@ -337,7 +340,7 @@ export class ContestacaoV2PdfWriter {
     cards.forEach((card, indice) => {
       const x = MARGEM.esquerda + indice * (larguraCard + gap);
       doc.rect(x, this.y, larguraCard, alturaCard).fill(COR.cardFundo);
-      doc.rect(x, this.y, 3, alturaCard).fill(COR.vermelho);
+      doc.rect(x, this.y, 3, alturaCard).fill(COR.marca);
       doc
         .font(FONTE)
         .fontSize(9)

@@ -18,6 +18,7 @@ const TENANT_ENV_KEYS = [
   'TENANT_APP_NAME',
   'TENANT_REPORT_NAME',
   'TENANT_LOGO_PATH',
+  'TENANT_BRAND_COLOR',
   'TENANT_DOCUMENTS_BASE_URL',
   'MAIL_TO_PREVIA',
   'MAIL_TO_COBRANCA',
@@ -126,6 +127,18 @@ describe('tenant.config', () => {
       expect(TENANT.mailPrevia).toBe('previa@maisprime.org.br');
       expect(TENANT.mailCobranca).toBe('cobranca@maisprime.org.br');
       expect(TENANT.documentsBaseUrl).toBe('https://app-dev.texvngroup.com.br');
+    });
+
+    it('cor da marca: default vermelho da Mais Prime; Hertz via TENANT_BRAND_COLOR; inválida cai no default', () => {
+      expect(TENANT.brandColor).toBe('#FF0000');
+
+      process.env.TENANT_BRAND_COLOR = '#ff7a00';
+      resetTenantConfigCache();
+      expect(TENANT.brandColor).toBe('#FF7A00');
+
+      process.env.TENANT_BRAND_COLOR = 'laranja';
+      resetTenantConfigCache();
+      expect(TENANT.brandColor).toBe('#FF0000');
     });
   });
 

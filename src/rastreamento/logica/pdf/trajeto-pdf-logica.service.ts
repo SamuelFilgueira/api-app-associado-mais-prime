@@ -128,7 +128,7 @@ function gerarHtmlRelatorio(data: TrajetoPdfData): string {
           display: flex;
           justify-content: space-between;
           align-items: center;
-          border-bottom: 2px solid #FF0000;
+          border-bottom: 2px solid ${TENANT.brandColor};
           padding-bottom: 12px;
           margin-bottom: 16px;
         }
@@ -163,7 +163,7 @@ function gerarHtmlRelatorio(data: TrajetoPdfData): string {
         }
         .summary-card {
           background: #f5f5f5;
-          border-left: 3px solid #FF0000;
+          border-left: 3px solid ${TENANT.brandColor};
           padding: 10px 14px;
           border-radius: 0 6px 6px 0;
         }

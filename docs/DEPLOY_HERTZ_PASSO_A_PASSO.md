@@ -155,7 +155,7 @@ O seed é idempotente e cria o ADMIN do painel e as políticas de versão do app
 
 ### 4.4 Logo
 
-Substituir `assets/Logo.png` pela logo da Hertz (usada nos 3 geradores de PDF) ou apontar `TENANT_LOGO_PATH`.
+Substituir `assets/Logo.png` pela logo da Hertz (usada nos 3 geradores de PDF) ou apontar `TENANT_LOGO_PATH`. Definir também `TENANT_BRAND_COLOR=#FF7A00` (laranja): sem ela os PDFs saem com o vermelho da Mais Prime.
 
 ### 4.5 Subir
 

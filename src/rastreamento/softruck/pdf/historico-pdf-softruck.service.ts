@@ -103,7 +103,7 @@ function gerarGraficoDistribuicaoDias(
       const y = paddingTop + maxBarH - barH;
       const parts = dayKey.split('-');
       const label = parts.length === 3 ? `${parts[2]}/${parts[1]}` : dayKey;
-      const fillColor = count > 0 ? '#FF0000' : '#d1d5db';
+      const fillColor = count > 0 ? TENANT.brandColor : '#d1d5db';
       return `
         <rect x="${x}" y="${y}" width="${barWidth}" height="${barH}" fill="${fillColor}" rx="3"/>
         <text x="${x + barWidth / 2}" y="${y - 4}" text-anchor="middle" font-size="9" fill="#374151" font-family="Arial">${count}</text>
@@ -235,7 +235,7 @@ function gerarHtmlRelatorio(dados: HistoricoPdfDataDto): string {
           display: flex;
           justify-content: space-between;
           align-items: center;
-          border-bottom: 2px solid #FF0000;
+          border-bottom: 2px solid ${TENANT.brandColor};
           padding-bottom: 12px;
           margin-bottom: 16px;
         }
@@ -281,7 +281,7 @@ function gerarHtmlRelatorio(dados: HistoricoPdfDataDto): string {
         }
         .summary-card {
           background: #f5f5f5;
-          border-left: 3px solid #FF0000;
+          border-left: 3px solid ${TENANT.brandColor};
           padding: 10px 14px;
           border-radius: 0 6px 6px 0;
         }
@@ -311,7 +311,7 @@ function gerarHtmlRelatorio(dados: HistoricoPdfDataDto): string {
           letter-spacing: 0.06em;
           margin-bottom: 10px;
           padding-bottom: 4px;
-          border-bottom: 1px solid #FF0000;
+          border-bottom: 1px solid ${TENANT.brandColor};
         }
         table {
           width: 100%;
@@ -381,7 +381,7 @@ function gerarHtmlRelatorio(dados: HistoricoPdfDataDto): string {
           width: 100%;
         }
         .region-bar {
-          background: #FF0000;
+          background: ${TENANT.brandColor};
           height: 6px;
           border-radius: 3px;
           min-width: 4px;

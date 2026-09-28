@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 /**
  * Configuração de tenant (multi-base) da aplicação.
  *
@@ -60,6 +61,19 @@ const DEFAULT_TENANT_BASES = 'MAIS_PRIME:,MAIS_PRIME_RS:_RS';
 
 /** Marca padrão — mantém os textos atuais em e-mails e PDFs. */
 const DEFAULT_TENANT_NAME = 'Mais Prime';
+/** Vermelho da Mais Prime — cor de destaque original dos relatórios PDF. */
+const DEFAULT_BRAND_COLOR = '#FF0000';
+
+/** Aceita `#RGB` ou `#RRGGBB`; qualquer outra coisa cai no default (com aviso). */
+function parseBrandColor(raw: string | undefined): string {
+  const valor = raw?.trim();
+  if (!valor) return DEFAULT_BRAND_COLOR;
+  if (/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(valor)) return valor.toUpperCase();
+  new Logger('TenantConfig').warn(
+    `TENANT_BRAND_COLOR="${valor}" inválida (esperado #RRGGBB) — usando ${DEFAULT_BRAND_COLOR}`,
+  );
+  return DEFAULT_BRAND_COLOR;
+}
 
 /** URL base padrão de documentos — preserva o valor que estava hardcoded. */
 const DEFAULT_DOCUMENTS_BASE_URL = 'https://app-dev.texvngroup.com.br';
@@ -104,6 +118,8 @@ interface TenantConfig {
   appName: string;
   reportName: string;
   logoPath: string;
+  /** Cor da marca (hex) usada nos PDFs. Ex.: `#FF0000` (Mais Prime), `#FF7A00` (Hertz). */
+  brandColor: string;
   mailPrevia: string;
   mailCobranca: string;
   documentsBaseUrl: string;
@@ -231,6 +247,7 @@ function build(): TenantConfig {
     appName: process.env.TENANT_APP_NAME?.trim() || `${name} App`,
     reportName: process.env.TENANT_REPORT_NAME?.trim() || name,
     logoPath: process.env.TENANT_LOGO_PATH?.trim() || 'assets/Logo.png',
+    brandColor: parseBrandColor(process.env.TENANT_BRAND_COLOR),
     mailPrevia: process.env.MAIL_TO_PREVIA?.trim() || 'previa@maisprime.org.br',
     mailCobranca:
       process.env.MAIL_TO_COBRANCA?.trim() || 'cobranca@maisprime.org.br',
@@ -302,6 +319,11 @@ export const TENANT = {
   /** Caminho da logo (relativo ao cwd) usada nos PDFs. */
   get logoPath(): string {
     return config().logoPath;
+  },
+
+  /** Cor de destaque da marca (hex) usada nos PDFs. Env `TENANT_BRAND_COLOR`. */
+  get brandColor(): string {
+    return config().brandColor;
   },
 
   /** Destinatário dos e-mails de prévia de revistoria. */

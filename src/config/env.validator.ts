@@ -50,6 +50,7 @@ const WARN_IF_MISSING = [
  * em REQUIRED_BASE (regra do CLAUDE.md).
  *
  * - APP_URL: base pública para links de upload (file-upload.service, tenant.config)
+ * - TENANT_BRAND_COLOR: cor hex da marca nos PDFs (default #FF0000; Hertz usa laranja)
  * - PORT / REDIS_PORT / APP_TIMEZONE: infra com default
  * - PRISMA_CONNECTION_LIMIT / PRISMA_POOL_TIMEOUT: pool MySQL (prisma.service)
  * - CEPABERTO_TOKEN / CEPABERTO_API_TOKEN: geocodificação de oficinas

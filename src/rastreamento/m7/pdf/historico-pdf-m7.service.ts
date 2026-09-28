@@ -101,7 +101,7 @@ function gerarGraficoDistribuicaoDias(dias: DiaM7ResumoDto[]): string {
       const y = paddingTop + maxBarH - barH;
       const parts = dia.data.split('-');
       const label = parts.length === 3 ? `${parts[2]}/${parts[1]}` : dia.data;
-      const fillColor = count > 0 ? '#FF0000' : '#d1d5db';
+      const fillColor = count > 0 ? TENANT.brandColor : '#d1d5db';
       return `
         <rect x="${x}" y="${y}" width="${barWidth}" height="${barH}" fill="${fillColor}" rx="3"/>
         <text x="${x + barWidth / 2}" y="${y - 4}" text-anchor="middle" font-size="9" fill="#374151" font-family="Arial">${count}</text>
@@ -243,7 +243,7 @@ function gerarHtmlRelatorio(dados: HistoricoM7PdfDataDto): string {
           display: flex;
           justify-content: space-between;
           align-items: center;
-          border-bottom: 2px solid #FF0000;
+          border-bottom: 2px solid ${TENANT.brandColor};
           padding-bottom: 12px;
           margin-bottom: 16px;
         }
@@ -278,7 +278,7 @@ function gerarHtmlRelatorio(dados: HistoricoM7PdfDataDto): string {
         }
         .summary-card {
           background: #f5f5f5;
-          border-left: 3px solid #FF0000;
+          border-left: 3px solid ${TENANT.brandColor};
           padding: 10px 14px;
           border-radius: 0 6px 6px 0;
         }
@@ -300,7 +300,7 @@ function gerarHtmlRelatorio(dados: HistoricoM7PdfDataDto): string {
           letter-spacing: 0.06em;
           margin-bottom: 10px;
           padding-bottom: 4px;
-          border-bottom: 1px solid #FF0000;
+          border-bottom: 1px solid ${TENANT.brandColor};
         }
         table { width: 100%; border-collapse: collapse; font-size: 10px; }
         th {
@@ -317,7 +317,7 @@ function gerarHtmlRelatorio(dados: HistoricoM7PdfDataDto): string {
           color: #101010;
           font-weight: 600;
           font-size: 11px;
-          border: 1px solid #FF0000;
+          border: 1px solid ${TENANT.brandColor};
           padding: 8px 10px;
         }
         .addr { max-width: 200px; word-break: break-word; }
@@ -367,7 +367,7 @@ function gerarHtmlRelatorio(dados: HistoricoM7PdfDataDto): string {
           width: 100%;
         }
         .region-bar {
-          background: #FF0000;
+          background: ${TENANT.brandColor};
           height: 6px;
           border-radius: 3px;
           min-width: 4px;
@@ -561,7 +561,7 @@ function gerarHtmlRelatorioContestacao(
           display: flex;
           justify-content: space-between;
           align-items: center;
-          border-bottom: 2px solid #FF0000;
+          border-bottom: 2px solid ${TENANT.brandColor};
           padding-bottom: 10px;
           margin-bottom: 14px;
         }
