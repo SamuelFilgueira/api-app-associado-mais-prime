@@ -202,6 +202,11 @@ export class SgaBoletoPeriodoClient {
         headers: { 'Content-Type': 'application/json' },
         timeout: 60_000,
         validateStatus: () => true,
+        // Varredura paginada: se a Hinova bloquear o token ativo no meio das
+        // páginas, NÃO alternar para o token reserva — continuar a extração
+        // com ele só o queimaria também, e é ele que mantém o app de pé.
+        // A rotina falha nesta execução e tenta de novo no próximo agendamento.
+        failoverTokenBase: false,
       },
     );
 

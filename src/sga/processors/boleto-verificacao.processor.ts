@@ -1,6 +1,6 @@
 import { SGA_BASE_URL } from 'src/integrations/hinova/hinova.constants';
 import { Processor, WorkerHost, InjectQueue } from '@nestjs/bullmq';
-import { Logger } from '@nestjs/common';
+import { Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { Job, Queue } from 'bullmq';
 import { SuriNotificacaoService } from 'src/sga/services/suri-notificacao.service';
 import { BOLETO_VERIFICACAO_QUEUE } from 'src/queue/queue.module';
@@ -10,6 +10,14 @@ import { PrismaService } from 'src/database/prisma.service';
 import { MailService } from 'src/infra/mail/mail.service';
 import { debugLog } from 'src/shared/debug-log.util';
 import { janelaVencimentoBoleto } from 'src/sga/helpers/janela-boleto.helper';
+import {
+  BoletoVerificacaoConfig,
+  JOB_ID_PREFIXO_VERIFICACAO,
+  JOB_VERIFICAR_BOLETO,
+  deveConsultarSga,
+  excedeuIdadeMaxima,
+  getBoletoVerificacaoConfig,
+} from 'src/sga/config/boleto-verificacao.config';
 
 interface BoletoVerificacaoJobData {
   userVehicleId: number;
@@ -22,9 +30,21 @@ interface BoletoVerificacaoJobData {
   debugId?: string;
 }
 
+/** Situações do boleto no SGA (tabela oficial): 1 BAIXADO, 4 BAIXADO C/ PENDÊNCIA. */
+const SITUACOES_PAGO = new Set(['1', '4']);
+/** 3 CANCELADO, 999 EXCLUÍDO — o boleto nunca mais será pago; a verificação encerra. */
+const SITUACOES_ENCERRADO = new Set(['3', '999']);
+
 @Processor(BOLETO_VERIFICACAO_QUEUE as string)
-export class BoletoVerificacaoProcessor extends WorkerHost {
+export class BoletoVerificacaoProcessor
+  extends WorkerHost
+  implements OnApplicationBootstrap
+{
   private readonly logger = new Logger(BoletoVerificacaoProcessor.name);
+  private readonly config: BoletoVerificacaoConfig =
+    getBoletoVerificacaoConfig();
+  /** Instante da última sondagem ao SGA feita por este worker (espaçamento). */
+  private ultimaChamadaSgaEm = 0;
 
   constructor(
     private readonly sgaAuthService: SgaAuthService,
@@ -35,6 +55,64 @@ export class BoletoVerificacaoProcessor extends WorkerHost {
     private readonly queue: Queue,
   ) {
     super();
+  }
+
+  /**
+   * No boot, encerra pollers de boletos já além da idade máxima: repeatables
+   * antigos foram criados sem `endDate` e ficariam ativos para sempre.
+   * Nunca derruba o boot.
+   */
+  async onApplicationBootstrap(): Promise<void> {
+    try {
+      const { ativos, removidos } = await this.limparPollersExpirados();
+      this.logger.log(
+        `Pollers de boleto de reativação ativos: ${ativos}; encerrados por idade (> ${this.config.maxDias} dias): ${removidos}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Falha ao limpar pollers de boleto expirados: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  async limparPollersExpirados(): Promise<{
+    ativos: number;
+    removidos: number;
+  }> {
+    const repeatables = await this.queue.getRepeatableJobs();
+    const pollers = repeatables.filter((r) => r.name === JOB_VERIFICAR_BOLETO);
+    const agora = Date.now();
+    let removidos = 0;
+
+    for (const poller of pollers) {
+      const nossoNumero = poller.id?.startsWith(JOB_ID_PREFIXO_VERIFICACAO)
+        ? poller.id.slice(JOB_ID_PREFIXO_VERIFICACAO.length)
+        : null;
+      if (!nossoNumero) continue;
+
+      const pagamento = await this.prisma.reinspectionPayment.findUnique({
+        where: { nossoNumero },
+        select: { boletoCriadoEm: true },
+      });
+      if (
+        !pagamento ||
+        !excedeuIdadeMaxima(
+          this.config,
+          pagamento.boletoCriadoEm.getTime(),
+          agora,
+        )
+      ) {
+        continue;
+      }
+
+      await this.queue.removeRepeatableByKey(poller.key);
+      removidos++;
+      this.logger.warn(
+        `Poller do boleto nosso_numero=${nossoNumero} encerrado no boot: criado em ${pagamento.boletoCriadoEm.toISOString()}, além da idade máxima.`,
+      );
+    }
+
+    return { ativos: pollers.length - removidos, removidos };
   }
 
   async process(job: Job<BoletoVerificacaoJobData>): Promise<void> {
@@ -49,8 +127,46 @@ export class BoletoVerificacaoProcessor extends WorkerHost {
       debugId,
     } = job.data;
 
+    // Idade máxima e cadência por idade: decididas pelo banco, sem tocar o SGA.
+    const agora = Date.now();
+    const pagamento = await this.buscarPagamento(nosso_numero);
+    if (pagamento) {
+      const criadoEm = pagamento.boletoCriadoEm.getTime();
+
+      if (excedeuIdadeMaxima(this.config, criadoEm, agora)) {
+        this.logger.warn(
+          debugLog(
+            BoletoVerificacaoProcessor.name,
+            'Verificação encerrada: boleto além da idade máxima',
+            debugId,
+            {
+              nossoNumero: nosso_numero,
+              boletoCriadoEm: pagamento.boletoCriadoEm.toISOString(),
+              maxDias: this.config.maxDias,
+            },
+          ),
+        );
+        await this.encerrarPoller(job);
+        return;
+      }
+
+      // Pago no banco com o poller ainda ativo (ex.: reinício entre a gravação
+      // e a reativação): vai direto ao SGA para concluir a reativação.
+      if (
+        !pagamento.pago &&
+        !deveConsultarSga(this.config, {
+          criadoEm,
+          ultimaConsultaEm: pagamento.updatedAt.getTime(),
+          agora,
+        })
+      ) {
+        return;
+      }
+    }
+
     const url = `${SGA_BASE_URL}/processa-pdf/boleto`;
 
+    await this.espacarChamadaSga();
     const response = await this.sgaAuthService.executeRequestWithAuth(
       baseOrigin,
       {
@@ -152,6 +268,7 @@ export class BoletoVerificacaoProcessor extends WorkerHost {
         data_vencimento_original_final: dataFinalStr,
       };
 
+      await this.espacarChamadaSga();
       const fallbackResponse = await this.sgaAuthService.executeRequestWithAuth(
         baseOrigin,
         {
@@ -203,10 +320,12 @@ export class BoletoVerificacaoProcessor extends WorkerHost {
       }
     }
 
-    // Persistir/atualizar status do pagamento em toda execução do job
-    try {
-      const pago = codigoSituacao === '1' || codigoSituacao === '4';
+    const pago =
+      codigoSituacao !== undefined && SITUACOES_PAGO.has(codigoSituacao);
 
+    // Persistir/atualizar status do pagamento em toda consulta ao SGA
+    // (o `updatedAt` desta linha é a "última consulta" usada pela cadência).
+    try {
       await this.prisma.reinspectionPayment.upsert({
         where: { nossoNumero: String(nosso_numero) },
         update: {
@@ -227,15 +346,6 @@ export class BoletoVerificacaoProcessor extends WorkerHost {
           pagoEm: pago ? new Date() : null,
         },
       });
-
-      // this.logger.log(
-      //   debugLog(BoletoVerificacaoProcessor.name, 'Pagamento de revistoria persistido (job)', debugId, {
-      //     userVehicleId,
-      //     nossoNumero: nosso_numero,
-      //     situacao: codigoSituacao ?? 'PENDENTE',
-      //     pago,
-      //   }),
-      // );
     } catch (persistError) {
       this.logger.error(
         debugLog(
@@ -254,7 +364,24 @@ export class BoletoVerificacaoProcessor extends WorkerHost {
       );
     }
 
-    if (codigoSituacao !== '1' && codigoSituacao !== '4') {
+    // Boleto cancelado/excluído no SGA: nunca mais será pago — encerra o poller
+    if (
+      codigoSituacao !== undefined &&
+      SITUACOES_ENCERRADO.has(codigoSituacao)
+    ) {
+      this.logger.log(
+        debugLog(
+          BoletoVerificacaoProcessor.name,
+          'Verificação encerrada: boleto cancelado/excluído no SGA',
+          debugId,
+          { nossoNumero: nosso_numero, situacao: codigoSituacao },
+        ),
+      );
+      await this.encerrarPoller(job);
+      return;
+    }
+
+    if (!pago) {
       return;
     }
 
@@ -360,9 +487,7 @@ export class BoletoVerificacaoProcessor extends WorkerHost {
     }
 
     // Remover o job recorrente
-    if (job.repeatJobKey) {
-      await this.queue.removeRepeatableByKey(job.repeatJobKey);
-    }
+    await this.encerrarPoller(job);
 
     // Notificar usuário via Suri que o boleto foi pago
     if (nome && telefone_celular) {
@@ -402,5 +527,44 @@ export class BoletoVerificacaoProcessor extends WorkerHost {
         ),
       );
     }
+  }
+
+  /**
+   * Linha do pagamento usada para cadência/idade. Falha de leitura não
+   * interrompe o job: sem a linha, o fluxo segue como sempre (consulta o SGA).
+   */
+  private async buscarPagamento(nossoNumero: number) {
+    try {
+      return await this.prisma.reinspectionPayment.findUnique({
+        where: { nossoNumero: String(nossoNumero) },
+        select: { pago: true, boletoCriadoEm: true, updatedAt: true },
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Falha ao ler pagamento nosso_numero=${nossoNumero} antes da verificação: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return null;
+    }
+  }
+
+  /** Remove o repeatable deste boleto (encerra o poller). */
+  private async encerrarPoller(job: Job<BoletoVerificacaoJobData>) {
+    if (job.repeatJobKey) {
+      await this.queue.removeRepeatableByKey(job.repeatJobKey);
+    }
+  }
+
+  /**
+   * Garante um espaçamento mínimo entre sondagens consecutivas ao SGA. O
+   * BullMQ alinha todos os repeatables `every` ao relógio, então os pollers
+   * disparam juntos; sem isto as chamadas saem em rajada.
+   */
+  private async espacarChamadaSga(): Promise<void> {
+    const espera =
+      this.ultimaChamadaSgaEm + this.config.espacamentoMs - Date.now();
+    if (espera > 0) {
+      await new Promise((resolve) => setTimeout(resolve, espera));
+    }
+    this.ultimaChamadaSgaEm = Date.now();
   }
 }

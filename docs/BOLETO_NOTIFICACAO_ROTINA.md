@@ -64,6 +64,8 @@ Textos default = textos oficiais do PDF (em `DEFAULT_MENSAGENS`, `config/boleto-
 
 Config lida no boot — alterou env, reinicie a API. Removidas da v1: `DIAS_VENCIMENTO` e `FALLBACK_MES_CURTO` (dias fixos não existem mais; fevereiro é resolvido pelo próprio vencimento efetivo).
 
+**Bloqueio de token durante a varredura (desde 2026-10-06):** a consulta paginada chama o SGA com `failoverTokenBase: false`. Se a Hinova bloquear o token de base ativo no meio das páginas, a rotina **não** alterna para o token reserva (continuar a extração com ele só o bloquearia também, e é ele que mantém o app funcionando). A execução falha, fica registrada como `FALHA` e o BullMQ tenta uma vez mais após 5 min (`attempts: 2`); o próximo agendamento diário roda normalmente. Detalhes em `docs/HINOVA_BLOQUEIO_TOKEN_PROTECOES.md`.
+
 ## 3. Endpoints admin e migration
 
 Endpoints inalterados (`/api/boleto-notificacao/admin/*`, role ADMIN). Mudanças de payload: `GET /config` não traz mais `diasVencimento`/`fallbackMesCurto`/`diasEfetivos*` e `offsets`/`mensagens` agora têm as 6 etapas; `simular-datas` retorna a **janela** por etapa (DM5 = intervalo) com `gatilho` sempre `true`; `POST /executar` aceita `tipos` ∈ {DM5, D0, D1, D5, D6, D20}; dry-run agora inclui `titulo`/`corpo`/`vencimento` renderizados na `amostraDestinatarios`.

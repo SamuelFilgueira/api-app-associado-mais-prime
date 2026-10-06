@@ -17,6 +17,13 @@ import { TENANT } from 'src/config/tenant.config';
 import { SgaAuthService } from 'src/integrations/hinova/sga-auth.service';
 import { debugLog } from 'src/shared/debug-log.util';
 import { BOLETO_VERIFICACAO_QUEUE } from 'src/queue/queue.module';
+import {
+  INTERVALO_BASE_MS,
+  JOB_ID_PREFIXO_VERIFICACAO,
+  JOB_VERIFICAR_BOLETO,
+  getBoletoVerificacaoConfig,
+  prazoFinalPoller,
+} from 'src/sga/config/boleto-verificacao.config';
 
 type SgaVeiculo = {
   chassi?: string;
@@ -632,10 +639,12 @@ export class SgaService {
       }
     }
 
-    // 10. Disparar job recorrente (2min) para verificar pagamento do boleto
+    // 10. Disparar job recorrente (2min) para verificar pagamento do boleto.
+    // `endDate` encerra o repeatable na idade máxima (BOLETO_VERIFICACAO_MAX_DIAS);
+    // a cadência por idade e os demais encerramentos ficam no processor.
     if (nossoNumero && codigo_veiculo) {
       await this.boletoVerificacaoQueue.add(
-        'verificar-boleto',
+        JOB_VERIFICAR_BOLETO,
         {
           userVehicleId,
           nosso_numero: nossoNumero,
@@ -647,8 +656,11 @@ export class SgaService {
           debugId,
         },
         {
-          repeat: { every: 120_000 },
-          jobId: `boleto-verificacao-${nossoNumero}`,
+          repeat: {
+            every: INTERVALO_BASE_MS,
+            endDate: prazoFinalPoller(getBoletoVerificacaoConfig()),
+          },
+          jobId: `${JOB_ID_PREFIXO_VERIFICACAO}${nossoNumero}`,
         },
       );
     }

@@ -154,4 +154,117 @@ describe('SgaAuthService — failover de token de base', () => {
     expect(makeRequest).toHaveBeenCalledTimes(2);
     expect(svc.tokenBaseAtivo('MAIS_PRIME')).toEqual({ indice: 0, total: 2 });
   });
+
+  it('requisição com failoverTokenBase=false: 403 de bloqueio volta ao chamador sem trocar token nem reautenticar', async () => {
+    axiosPost.mockImplementation(loginHinova(new Set()) as any);
+    const svc = new SgaAuthService(resolverCom(['base-1', 'base-2']));
+    const makeRequest = jest.fn().mockResolvedValue(resp(403, BLOQUEIO));
+
+    const resultado = await svc.executeWithAuth('MAIS_PRIME', makeRequest, {
+      failoverTokenBase: false,
+    });
+
+    expect(resultado.status).toBe(403);
+    expect(makeRequest).toHaveBeenCalledTimes(1);
+    expect(axiosPost).toHaveBeenCalledTimes(1); // só o login inicial
+    expect(svc.tokenBaseAtivo('MAIS_PRIME')).toEqual({ indice: 0, total: 2 });
+  });
+
+  it('executeRequestWithAuth não repassa failoverTokenBase ao axios', async () => {
+    axiosPost.mockImplementation(loginHinova(new Set()) as any);
+    const axiosRequest = jest
+      .spyOn(axios, 'request')
+      .mockResolvedValue(resp(200, { ok: true }));
+    const svc = new SgaAuthService(resolverCom(['base-1']));
+
+    await svc.executeRequestWithAuth('HERTZ', {
+      method: 'GET',
+      url: 'https://sga.test/x',
+      failoverTokenBase: false,
+    });
+
+    const configEnviada = axiosRequest.mock.calls[0][0] as Record<
+      string,
+      unknown
+    >;
+    expect(configEnviada).not.toHaveProperty('failoverTokenBase');
+    expect(configEnviada.headers).toEqual({
+      Authorization: 'Bearer user-de-base-1',
+    });
+  });
+});
+
+describe('SgaAuthService — pausa de login após falha (anti-tempestade)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jest.useFakeTimers({ now: new Date('2026-10-06T12:00:00Z') });
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('todos os tokens bloqueados: por 60s as requisições falham sem chamar a Hinova; depois volta a tentar', async () => {
+    axiosPost.mockImplementation(
+      loginHinova(new Set(['base-1', 'base-2'])) as any,
+    );
+    const svc = new SgaAuthService(resolverCom(['base-1', 'base-2']));
+
+    await expect(svc.getUserToken('MAIS_PRIME')).rejects.toThrow(
+      'Falha ao autenticar',
+    );
+    expect(axiosPost).toHaveBeenCalledTimes(2); // uma volta completa
+
+    // Dentro da pausa: nenhuma chamada nova à Hinova, mesmo com várias requisições
+    jest.advanceTimersByTime(30_000);
+    await expect(svc.getUserToken('MAIS_PRIME')).rejects.toThrow(
+      'nova tentativa de login em',
+    );
+    await expect(svc.executeWithAuth('MAIS_PRIME', jest.fn())).rejects.toThrow(
+      'Falha ao autenticar',
+    );
+    expect(axiosPost).toHaveBeenCalledTimes(2);
+
+    // Pausa vencida e Hinova liberou: autentica de novo normalmente
+    jest.advanceTimersByTime(31_000);
+    axiosPost.mockImplementation(loginHinova(new Set()) as any);
+    await expect(svc.getUserToken('MAIS_PRIME')).resolves.toBe(
+      'user-de-base-2',
+    );
+    expect(axiosPost).toHaveBeenCalledTimes(3);
+  });
+
+  it('falha comum de login (ex.: HTTP 500): pausa de 15s em vez de repetir o login a cada requisição', async () => {
+    axiosPost.mockResolvedValue(resp(500, { mensagem: 'erro' }) as any);
+    const svc = new SgaAuthService(resolverCom(['base-unico']));
+
+    await expect(svc.executeWithAuth('HERTZ', jest.fn())).rejects.toThrow(
+      'Falha ao autenticar',
+    );
+    await expect(svc.executeWithAuth('HERTZ', jest.fn())).rejects.toThrow(
+      'nova tentativa de login em',
+    );
+    expect(axiosPost).toHaveBeenCalledTimes(1);
+
+    jest.advanceTimersByTime(15_000);
+    await expect(svc.executeWithAuth('HERTZ', jest.fn())).rejects.toThrow(
+      'Falha ao autenticar',
+    );
+    expect(axiosPost).toHaveBeenCalledTimes(2);
+  });
+
+  it('login bem-sucedido limpa a pausa e o token fica em cache', async () => {
+    axiosPost
+      .mockResolvedValueOnce(resp(500, {}) as any)
+      .mockImplementation(loginHinova(new Set()) as any);
+    const svc = new SgaAuthService(resolverCom(['base-1']));
+
+    await expect(svc.getUserToken('HERTZ')).rejects.toThrow(
+      'Falha ao autenticar',
+    );
+    jest.advanceTimersByTime(15_000);
+    await expect(svc.getUserToken('HERTZ')).resolves.toBe('user-de-base-1');
+    await expect(svc.getUserToken('HERTZ')).resolves.toBe('user-de-base-1');
+    expect(axiosPost).toHaveBeenCalledTimes(2);
+  });
 });

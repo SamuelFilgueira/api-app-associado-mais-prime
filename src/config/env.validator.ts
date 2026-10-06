@@ -70,6 +70,10 @@ const WARN_IF_MISSING = [
  *   em boleto-notificacao.config.ts)
  * - TOKEN_BASE_SGA_<BASE>1, …2 (até 9): tokens de base alternativos do SGA para
  *   failover quando a Hinova bloqueia um deles (token-resolver / sga-auth.service)
+ * - BOLETO_VERIFICACAO_MAX_DIAS / BOLETO_VERIFICACAO_INTERVALO_APOS_24H_MIN /
+ *   BOLETO_VERIFICACAO_INTERVALO_APOS_7D_MIN / BOLETO_VERIFICACAO_ESPACAMENTO_MS:
+ *   limites do poller de boleto de reativação (defaults e faixas em
+ *   sga/config/boleto-verificacao.config.ts)
  * - MAIL_PASSWORD_RESET_PROVIDER: ses (default) | gmail — provedor do e-mail de
  *   redefinição de senha (mail.config.ts). Hertz usa gmail; Mais Prime, ses.
  * - EXPO_UPDATES_DIR / EXPO_UPDATES_PUBLIC_URL / EXPO_UPDATES_PRIVATE_KEY_PATH /
