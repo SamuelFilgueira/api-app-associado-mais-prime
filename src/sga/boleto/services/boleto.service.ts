@@ -222,6 +222,7 @@ export class BoletoService {
             'Content-Type': 'application/json',
           },
           validateStatus: () => true,
+          compartilharEmVoo: true,
         });
 
       //his.logger.log(`Resposta da API de boletos para veículo ${codigo_veiculo}: status=${response.status} body=${JSON.stringify(response.data)}`);

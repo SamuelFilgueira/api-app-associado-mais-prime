@@ -104,6 +104,9 @@ export class SgaService {
       method: 'GET',
       url,
       validateStatus: () => true,
+      // Leitura: /sga/associado e /sga/veiculos disparam esta mesma chamada na
+      // abertura do app; requisições idênticas em voo compartilham a resposta.
+      compartilharEmVoo: true,
     });
   }
 
@@ -131,6 +134,7 @@ export class SgaService {
       method: 'GET',
       url,
       validateStatus: () => true,
+      compartilharEmVoo: true,
     });
   }
 
@@ -326,6 +330,7 @@ export class SgaService {
       method: 'GET',
       url,
       validateStatus: () => true,
+      compartilharEmVoo: true,
     });
   }
 

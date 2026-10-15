@@ -31,11 +31,22 @@ em alta frequência e insistência contra um token já recusado.
 | **Pausa de login após falha** (`SgaAuthService`): 15 s após qualquer falha, **60 s quando todos os tokens de base estão bloqueados**. Nesse intervalo as requisições falham na hora, **sem chamar a Hinova**; um login bem-sucedido limpa a pausa. Dedupe em voo mantido. | `sga-auth.service.ts` | Durante um bloqueio: no máximo 1 sondagem de login por minuto por base, em vez de uma por requisição do app. |
 | **`failoverTokenBase: false` na varredura** da rotina de boletos. | `sga-auth.service.ts` (`SgaRequestOptions`), `sga-boleto-periodo.client.ts` | Se o token ativo for bloqueado no meio das páginas, a rotina falha (e tenta de novo no próximo agendamento), mas **o token reserva fica livre para o app**. |
 
+## 3.1. Segunda rodada (2026-10-15): a cota é por token e o app sozinho a esgota
+
+Com as proteções acima no ar, os três tokens de MAIS_PRIME caíram em 15/10 (11:10, 14:30 e 14:35) **sem poller ativo, sem rotina rodando e sem pico de tráfego** (30–150 req/min nas rotas que batem no SGA, o normal). Leitura: a "extração de dados" da Hinova é uma **cota acumulada por token de base**, atingida por algumas horas do uso corriqueiro do app. O `SgaAuthService` era "sticky": 100% das chamadas iam para um token até ele cair, e o failover transferia a mesma carga para o próximo.
+
+| Proteção | Arquivo | Efeito |
+|---|---|---|
+| **Rotação dos tokens de base**: uma sessão (`token_usuario`) por token, requisições alternam entre eles (round-robin). Token bloqueado sai da rotação por 60 s e depois é sondado de novo; 403 de bloqueio repete uma vez com outro token livre. Com um token só, comportamento idêntico ao anterior. | `sga-auth.service.ts` | A carga por token cai para 1/N. Com três tokens, cada um recebe um terço do tráfego. |
+| **Compartilhamento de leituras idênticas em voo** (`compartilharEmVoo: true`): requisições concorrentes com a mesma base, método, URL e corpo recebem a resposta de uma única chamada à Hinova. Nada fica guardado depois que a chamada termina — não é cache. | `sga-auth.service.ts`; ativado em `sga.service.ts` (associado, veículo, produtos), `boleto.service.ts`, `beneficios-veiculo.service.ts`, `associado.service.ts` | Elimina o `associado/buscar` duplicado da abertura do app (`/sga/associado` + `/sga/veiculos`) e as repetições de refresh simultâneo. |
+
+Log de diagnóstico: `estadoTokensBase(base)` devolve `{ total, ultimoUsado, bloqueados }`; as linhas `BLOQUEADO pela Hinova … fora da rotação por 60s` mostram qual token caiu e com qual a requisição foi repetida.
+
 ## 4. O que NÃO mudou (contrato com o app)
 
 - Rotas, payloads e respostas do SGA ao app são as mesmas. Nenhum cache de resposta foi adicionado.
 - Falhas de autenticação continuam chegando ao chamador como antes (`Error` com mensagem `Falha ao autenticar no SGA para base …`); durante a pausa elas apenas chegam mais rápido.
-- Failover de token de base para o tráfego do app continua igual (403 de bloqueio → troca de token → repete uma vez).
+- 403 de bloqueio no tráfego do app continua sendo repetido uma vez com outro token livre; a diferença é que os tokens agora se revezam em vez de um só carregar tudo.
 - Reativação do veículo após pagamento: nas primeiras 24h do boleto o tempo é o mesmo (até 2 min). Depois, até 10 min (1–7 dias) ou até 60 min (> 7 dias). Após `MAX_DIAS`, o boleto não é mais verificado automaticamente.
 - A rotina de notificação de boletos mantém pausa entre páginas e janela; só deixa de usar o token reserva.
 

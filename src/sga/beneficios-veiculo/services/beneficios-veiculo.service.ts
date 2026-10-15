@@ -65,6 +65,7 @@ export class BeneficiosVeiculoService {
               'Content-Type': 'application/json',
             },
             validateStatus: () => true,
+            compartilharEmVoo: true,
           },
         );
 

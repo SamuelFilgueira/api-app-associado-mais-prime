@@ -107,7 +107,12 @@ export class AssociadoService {
     try {
       response = await this.callSgaWithRetry(
         baseOrigin,
-        { method: 'GET', url, validateStatus: () => true },
+        {
+          method: 'GET',
+          url,
+          validateStatus: () => true,
+          compartilharEmVoo: true,
+        },
         `buscar associado CPF=${cpf}`,
       );
     } catch (err: unknown) {
@@ -208,7 +213,13 @@ export class AssociadoService {
       try {
         const response = await this.callSgaWithRetry(
           base,
-          { method: 'GET', url, validateStatus: () => true, timeout: 20000 },
+          {
+            method: 'GET',
+            url,
+            validateStatus: () => true,
+            timeout: 20000,
+            compartilharEmVoo: true,
+          },
           `detectBaseOrigin CPF=${cpf} base=${base}`,
         );
         if (response.status === 200) {
@@ -242,6 +253,7 @@ export class AssociadoService {
         method: 'GET',
         url,
         validateStatus: () => true,
+        compartilharEmVoo: true,
       });
     } catch (err: any) {
       this.logger.error(

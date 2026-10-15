@@ -43,6 +43,15 @@ function loginHinova(bloqueados: Set<string>) {
   };
 }
 
+/** Token de base usado em cada login (ordem das chamadas a axios.post). */
+function basesLogadas(): string[] {
+  return axiosPost.mock.calls.map((call) =>
+    (
+      call[2] as { headers: { Authorization: string } }
+    ).headers.Authorization.replace('Bearer ', ''),
+  );
+}
+
 describe('ehBloqueioPorExtracao', () => {
   it('reconhece o 403 de bloqueio, com e sem acento, e ignora os demais', () => {
     expect(ehBloqueioPorExtracao(403, BLOQUEIO)).toBe(true);
@@ -55,47 +64,74 @@ describe('ehBloqueioPorExtracao', () => {
   });
 });
 
-describe('SgaAuthService — failover de token de base', () => {
+describe('SgaAuthService — rotação dos tokens de base', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    jest.useFakeTimers({ now: new Date('2026-10-15T12:00:00Z') });
   });
 
-  it('login: token 1 bloqueado → usa o token 2 e permanece nele nos próximos logins', async () => {
-    axiosPost.mockImplementation(loginHinova(new Set(['base-1'])) as any);
-    const svc = new SgaAuthService(resolverCom(['base-1', 'base-2']));
-
-    const token = await svc.getUserToken('MAIS_PRIME');
-
-    expect(token).toBe('user-de-base-2');
-    expect(axiosPost).toHaveBeenCalledTimes(2); // base-1 (403) + base-2 (200)
-    expect(svc.tokenBaseAtivo('MAIS_PRIME')).toEqual({ indice: 1, total: 2 });
-
-    // Novo login (cache invalidado) começa direto pelo token 2
-    svc.invalidateUserToken('MAIS_PRIME');
-    await svc.getUserToken('MAIS_PRIME');
-    expect(axiosPost).toHaveBeenCalledTimes(3);
-    const ultimaAuth = axiosPost.mock.calls[2][2] as {
-      headers: { Authorization: string };
-    };
-    expect(ultimaAuth.headers.Authorization).toBe('Bearer base-2');
+  afterEach(() => {
+    jest.useRealTimers();
   });
 
-  it('login: todos os tokens bloqueados → falha após uma volta completa', async () => {
-    axiosPost.mockImplementation(
-      loginHinova(new Set(['base-1', 'base-2'])) as any,
-    );
-    const svc = new SgaAuthService(resolverCom(['base-1', 'base-2']));
+  it('alterna os tokens a cada requisição e mantém uma sessão por token (um login cada)', async () => {
+    axiosPost.mockImplementation(loginHinova(new Set()) as any);
+    const svc = new SgaAuthService(resolverCom(['base-1', 'base-2', 'base-3']));
+    const makeRequest = jest.fn().mockResolvedValue(resp(200, { ok: true }));
 
-    await expect(svc.getUserToken('MAIS_PRIME')).rejects.toThrow(
-      'Falha ao autenticar',
-    );
-    expect(axiosPost).toHaveBeenCalledTimes(2);
+    for (let i = 0; i < 6; i++) {
+      await svc.executeWithAuth('MAIS_PRIME', makeRequest);
+    }
+
+    expect(basesLogadas()).toEqual(['base-1', 'base-2', 'base-3']);
+    expect(makeRequest.mock.calls.map((c) => c[0])).toEqual([
+      'user-de-base-1',
+      'user-de-base-2',
+      'user-de-base-3',
+      'user-de-base-1',
+      'user-de-base-2',
+      'user-de-base-3',
+    ]);
   });
 
-  it('requisição: 403 de bloqueio → troca o token de base, reautentica e repete uma vez', async () => {
+  it('com um único token o comportamento é o de sempre (um login, sessão reutilizada)', async () => {
+    axiosPost.mockImplementation(loginHinova(new Set()) as any);
+    const svc = new SgaAuthService(resolverCom(['base-unico']));
+    const makeRequest = jest.fn().mockResolvedValue(resp(200, {}));
+
+    await svc.executeWithAuth('HERTZ', makeRequest);
+    await svc.executeWithAuth('HERTZ', makeRequest);
+
+    expect(axiosPost).toHaveBeenCalledTimes(1);
+    expect(makeRequest).toHaveBeenNthCalledWith(2, 'user-de-base-unico');
+  });
+
+  it('login: token bloqueado sai da rotação; os demais seguem sendo usados', async () => {
+    axiosPost.mockImplementation(loginHinova(new Set(['base-2'])) as any);
+    const svc = new SgaAuthService(resolverCom(['base-1', 'base-2', 'base-3']));
+    const makeRequest = jest.fn().mockResolvedValue(resp(200, {}));
+
+    for (let i = 0; i < 4; i++) {
+      await svc.executeWithAuth('MAIS_PRIME', makeRequest);
+    }
+
+    expect(basesLogadas()).toEqual(['base-1', 'base-2', 'base-3']);
+    expect(makeRequest.mock.calls.map((c) => c[0])).toEqual([
+      'user-de-base-1',
+      'user-de-base-3',
+      'user-de-base-1',
+      'user-de-base-3',
+    ]);
+    expect(svc.estadoTokensBase('MAIS_PRIME')).toEqual({
+      total: 3,
+      ultimoUsado: 2,
+      bloqueados: [1],
+    });
+  });
+
+  it('requisição: 403 de bloqueio → tira o token da rotação e repete UMA vez com outro', async () => {
     axiosPost.mockImplementation(loginHinova(new Set()) as any);
     const svc = new SgaAuthService(resolverCom(['base-1', 'base-2']));
-
     const makeRequest = jest.fn(
       (tokenUsuario: string): Promise<AxiosResponse<unknown>> =>
         Promise.resolve(
@@ -108,10 +144,35 @@ describe('SgaAuthService — failover de token de base', () => {
     const resultado = await svc.executeWithAuth('MAIS_PRIME', makeRequest);
 
     expect(resultado.status).toBe(200);
-    expect(makeRequest).toHaveBeenCalledTimes(2);
     expect(makeRequest).toHaveBeenNthCalledWith(1, 'user-de-base-1');
     expect(makeRequest).toHaveBeenNthCalledWith(2, 'user-de-base-2');
-    expect(svc.tokenBaseAtivo('MAIS_PRIME')).toEqual({ indice: 1, total: 2 });
+    expect(svc.estadoTokensBase('MAIS_PRIME').bloqueados).toEqual([0]);
+
+    // Próximas requisições não voltam ao token 1 enquanto ele está bloqueado
+    await svc.executeWithAuth('MAIS_PRIME', makeRequest);
+    expect(makeRequest).toHaveBeenNthCalledWith(3, 'user-de-base-2');
+  });
+
+  it('token bloqueado volta a ser sondado depois de 60s', async () => {
+    axiosPost.mockImplementation(loginHinova(new Set()) as any);
+    const svc = new SgaAuthService(resolverCom(['base-1', 'base-2']));
+    let bloquearBase1 = true;
+    const makeRequest = jest.fn(
+      (tokenUsuario: string): Promise<AxiosResponse<unknown>> =>
+        Promise.resolve(
+          bloquearBase1 && tokenUsuario === 'user-de-base-1'
+            ? resp<unknown>(403, BLOQUEIO)
+            : resp<unknown>(200, { ok: true }),
+        ),
+    );
+
+    await svc.executeWithAuth('MAIS_PRIME', makeRequest); // base-1 bloqueia → base-2
+    jest.advanceTimersByTime(61_000);
+    bloquearBase1 = false; // Hinova liberou
+
+    await svc.executeWithAuth('MAIS_PRIME', makeRequest);
+    expect(makeRequest).toHaveBeenLastCalledWith('user-de-base-1');
+    expect(svc.estadoTokensBase('MAIS_PRIME').bloqueados).toEqual([]);
   });
 
   it('requisição: 403 de bloqueio com um único token → devolve o 403 como antes, sem reautenticar', async () => {
@@ -126,7 +187,7 @@ describe('SgaAuthService — failover de token de base', () => {
     expect(axiosPost).toHaveBeenCalledTimes(1); // só o login inicial
   });
 
-  it('403 comum (sem mensagem de bloqueio) não aciona failover', async () => {
+  it('403 comum (sem mensagem de bloqueio) não tira o token da rotação', async () => {
     axiosPost.mockImplementation(loginHinova(new Set()) as any);
     const svc = new SgaAuthService(resolverCom(['base-1', 'base-2']));
     const makeRequest = jest
@@ -137,10 +198,10 @@ describe('SgaAuthService — failover de token de base', () => {
 
     expect(resultado.status).toBe(403);
     expect(makeRequest).toHaveBeenCalledTimes(1);
-    expect(svc.tokenBaseAtivo('MAIS_PRIME')).toEqual({ indice: 0, total: 2 });
+    expect(svc.estadoTokensBase('MAIS_PRIME').bloqueados).toEqual([]);
   });
 
-  it('401 continua reautenticando com o MESMO token de base e repetindo a requisição', async () => {
+  it('401 reautentica a MESMA sessão e repete a requisição', async () => {
     axiosPost.mockImplementation(loginHinova(new Set()) as any);
     const svc = new SgaAuthService(resolverCom(['base-1', 'base-2']));
     let chamadas = 0;
@@ -152,10 +213,10 @@ describe('SgaAuthService — failover de token de base', () => {
 
     expect(resultado.status).toBe(200);
     expect(makeRequest).toHaveBeenCalledTimes(2);
-    expect(svc.tokenBaseAtivo('MAIS_PRIME')).toEqual({ indice: 0, total: 2 });
+    expect(basesLogadas()).toEqual(['base-1', 'base-1']);
   });
 
-  it('requisição com failoverTokenBase=false: 403 de bloqueio volta ao chamador sem trocar token nem reautenticar', async () => {
+  it('requisição com failoverTokenBase=false: 403 de bloqueio volta ao chamador sem repetir com outro token', async () => {
     axiosPost.mockImplementation(loginHinova(new Set()) as any);
     const svc = new SgaAuthService(resolverCom(['base-1', 'base-2']));
     const makeRequest = jest.fn().mockResolvedValue(resp(403, BLOQUEIO));
@@ -166,70 +227,43 @@ describe('SgaAuthService — failover de token de base', () => {
 
     expect(resultado.status).toBe(403);
     expect(makeRequest).toHaveBeenCalledTimes(1);
-    expect(axiosPost).toHaveBeenCalledTimes(1); // só o login inicial
-    expect(svc.tokenBaseAtivo('MAIS_PRIME')).toEqual({ indice: 0, total: 2 });
-  });
-
-  it('executeRequestWithAuth não repassa failoverTokenBase ao axios', async () => {
-    axiosPost.mockImplementation(loginHinova(new Set()) as any);
-    const axiosRequest = jest
-      .spyOn(axios, 'request')
-      .mockResolvedValue(resp(200, { ok: true }));
-    const svc = new SgaAuthService(resolverCom(['base-1']));
-
-    await svc.executeRequestWithAuth('HERTZ', {
-      method: 'GET',
-      url: 'https://sga.test/x',
-      failoverTokenBase: false,
-    });
-
-    const configEnviada = axiosRequest.mock.calls[0][0] as Record<
-      string,
-      unknown
-    >;
-    expect(configEnviada).not.toHaveProperty('failoverTokenBase');
-    expect(configEnviada.headers).toEqual({
-      Authorization: 'Bearer user-de-base-1',
-    });
+    expect(axiosPost).toHaveBeenCalledTimes(1);
+    // O token bloqueado sai da rotação mesmo assim: a próxima vai para o outro
+    expect(svc.estadoTokensBase('MAIS_PRIME').bloqueados).toEqual([0]);
   });
 });
 
-describe('SgaAuthService — pausa de login após falha (anti-tempestade)', () => {
+describe('SgaAuthService — todos bloqueados e pausa de login', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    jest.useFakeTimers({ now: new Date('2026-10-06T12:00:00Z') });
+    jest.useFakeTimers({ now: new Date('2026-10-15T12:00:00Z') });
   });
 
   afterEach(() => {
     jest.useRealTimers();
   });
 
-  it('todos os tokens bloqueados: por 60s as requisições falham sem chamar a Hinova; depois volta a tentar', async () => {
+  it('todos os tokens bloqueados: falha após uma volta; por 60s as requisições falham sem chamar a Hinova; depois volta a sondar', async () => {
     axiosPost.mockImplementation(
       loginHinova(new Set(['base-1', 'base-2'])) as any,
     );
     const svc = new SgaAuthService(resolverCom(['base-1', 'base-2']));
 
     await expect(svc.getUserToken('MAIS_PRIME')).rejects.toThrow(
-      'Falha ao autenticar',
+      'todos os 2 token(s) de base estão bloqueados',
     );
     expect(axiosPost).toHaveBeenCalledTimes(2); // uma volta completa
 
-    // Dentro da pausa: nenhuma chamada nova à Hinova, mesmo com várias requisições
     jest.advanceTimersByTime(30_000);
-    await expect(svc.getUserToken('MAIS_PRIME')).rejects.toThrow(
-      'nova tentativa de login em',
-    );
     await expect(svc.executeWithAuth('MAIS_PRIME', jest.fn())).rejects.toThrow(
       'Falha ao autenticar',
     );
-    expect(axiosPost).toHaveBeenCalledTimes(2);
+    expect(axiosPost).toHaveBeenCalledTimes(2); // nenhuma chamada nova
 
-    // Pausa vencida e Hinova liberou: autentica de novo normalmente
     jest.advanceTimersByTime(31_000);
     axiosPost.mockImplementation(loginHinova(new Set()) as any);
-    await expect(svc.getUserToken('MAIS_PRIME')).resolves.toBe(
-      'user-de-base-2',
+    await expect(svc.getUserToken('MAIS_PRIME')).resolves.toMatch(
+      /^user-de-base-/,
     );
     expect(axiosPost).toHaveBeenCalledTimes(3);
   });
@@ -253,7 +287,7 @@ describe('SgaAuthService — pausa de login após falha (anti-tempestade)', () =
     expect(axiosPost).toHaveBeenCalledTimes(2);
   });
 
-  it('login bem-sucedido limpa a pausa e o token fica em cache', async () => {
+  it('login bem-sucedido limpa a pausa e a sessão fica em cache', async () => {
     axiosPost
       .mockResolvedValueOnce(resp(500, {}) as any)
       .mockImplementation(loginHinova(new Set()) as any);
@@ -266,5 +300,107 @@ describe('SgaAuthService — pausa de login após falha (anti-tempestade)', () =
     await expect(svc.getUserToken('HERTZ')).resolves.toBe('user-de-base-1');
     await expect(svc.getUserToken('HERTZ')).resolves.toBe('user-de-base-1');
     expect(axiosPost).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('SgaAuthService — executeRequestWithAuth', () => {
+  let axiosRequest: jest.SpyInstance;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    axiosPost.mockImplementation(loginHinova(new Set()) as any);
+    axiosRequest = jest.spyOn(axios, 'request');
+  });
+
+  it('não repassa as opções do SGA ao axios', async () => {
+    axiosRequest.mockResolvedValue(resp(200, { ok: true }));
+    const svc = new SgaAuthService(resolverCom(['base-1']));
+
+    await svc.executeRequestWithAuth('HERTZ', {
+      method: 'GET',
+      url: 'https://sga.test/x',
+      failoverTokenBase: false,
+      compartilharEmVoo: true,
+    });
+
+    const configEnviada = axiosRequest.mock.calls[0][0] as Record<
+      string,
+      unknown
+    >;
+    expect(configEnviada).not.toHaveProperty('failoverTokenBase');
+    expect(configEnviada).not.toHaveProperty('compartilharEmVoo');
+    expect(configEnviada.headers).toEqual({
+      Authorization: 'Bearer user-de-base-1',
+    });
+  });
+
+  it('compartilharEmVoo: requisições idênticas concorrentes fazem UMA chamada à Hinova e recebem a mesma resposta', async () => {
+    let liberar: (value: AxiosResponse<unknown>) => void = () => undefined;
+    axiosRequest.mockImplementation(
+      () => new Promise((resolve) => (liberar = resolve)),
+    );
+    const svc = new SgaAuthService(resolverCom(['base-1']));
+    const config = {
+      method: 'GET',
+      url: 'https://sga.test/associado/buscar/123',
+      compartilharEmVoo: true,
+    };
+
+    const a = svc.executeRequestWithAuth('HERTZ', config);
+    const b = svc.executeRequestWithAuth('HERTZ', config);
+    // deixa o login terminar e a chamada chegar ao axios
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(axiosRequest).toHaveBeenCalledTimes(1);
+    liberar(resp(200, { nome: 'Fulano' }));
+
+    const [ra, rb] = await Promise.all([a, b]);
+    expect(axiosRequest).toHaveBeenCalledTimes(1);
+    expect(ra).toBe(rb);
+
+    // Depois de concluída, uma nova chamada idêntica vai à Hinova de novo
+    axiosRequest.mockResolvedValue(resp(200, { nome: 'Fulano' }));
+    await svc.executeRequestWithAuth('HERTZ', config);
+    expect(axiosRequest).toHaveBeenCalledTimes(2);
+  });
+
+  it('compartilharEmVoo distingue base, URL e corpo', async () => {
+    axiosRequest.mockResolvedValue(resp(200, {}));
+    const svc = new SgaAuthService(resolverCom(['base-1']));
+
+    await Promise.all([
+      svc.executeRequestWithAuth('HERTZ', {
+        method: 'POST',
+        url: 'https://sga.test/listar',
+        data: { codigo_veiculo: 1 },
+        compartilharEmVoo: true,
+      }),
+      svc.executeRequestWithAuth('HERTZ', {
+        method: 'POST',
+        url: 'https://sga.test/listar',
+        data: { codigo_veiculo: 2 },
+        compartilharEmVoo: true,
+      }),
+      svc.executeRequestWithAuth('HERTZ', {
+        method: 'POST',
+        url: 'https://sga.test/listar',
+        data: { codigo_veiculo: 1 },
+        compartilharEmVoo: true,
+      }),
+    ]);
+
+    expect(axiosRequest).toHaveBeenCalledTimes(2);
+  });
+
+  it('sem compartilharEmVoo, cada requisição vai à Hinova', async () => {
+    axiosRequest.mockResolvedValue(resp(200, {}));
+    const svc = new SgaAuthService(resolverCom(['base-1']));
+    const config = { method: 'GET', url: 'https://sga.test/x' };
+
+    await Promise.all([
+      svc.executeRequestWithAuth('HERTZ', config),
+      svc.executeRequestWithAuth('HERTZ', config),
+    ]);
+
+    expect(axiosRequest).toHaveBeenCalledTimes(2);
   });
 });
