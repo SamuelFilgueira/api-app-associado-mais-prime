@@ -65,7 +65,10 @@ export class AuthService {
     }
 
     if (!dbUser.baseOrigin) {
-      throw new InternalServerErrorException('Usuário sem baseOrigin definida');
+      // Cadastro legado sem base definida: problema de dados, não do usuário.
+      throw new InternalServerErrorException(
+        'Não foi possível concluir o login. Entre em contato com a associação.',
+      );
     }
 
     const payload = {

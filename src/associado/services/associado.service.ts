@@ -17,6 +17,17 @@ import { BaseOrigin } from 'src/shared/token-resolver.service';
 import { TENANT } from 'src/config/tenant.config';
 import { SgaAuthService } from 'src/integrations/hinova/sga-auth.service';
 
+/** Campos da resposta do SGA usados para classificar instabilidade. */
+type RespostaSga = { status: number; data: unknown };
+
+/**
+ * Mensagem neutra exibida ao usuário quando o SGA está instável (rede, 5xx,
+ * token bloqueado pela Hinova, corpo inesperado). Não revela o vendor nem
+ * sugere problema no cadastro do associado.
+ */
+const MSG_SGA_INDISPONIVEL =
+  'Não foi possível validar seus dados neste momento devido a uma indisponibilidade temporária do sistema. Por favor, tente novamente em alguns minutos.';
+
 @Injectable()
 export class AssociadoService {
   private readonly logger = new Logger(AssociadoService.name);
@@ -120,18 +131,23 @@ export class AssociadoService {
       this.logger.error(
         `[PrimeiroAcesso] Todas as tentativas de consulta ao SGA falharam para CPF ${cpf}: ${msg}`,
       );
-      throw new InternalServerErrorException(
-        'Não foi possível validar seus dados neste momento devido a uma indisponibilidade temporária do sistema. Por favor, tente novamente em alguns minutos.',
-      );
+      throw new InternalServerErrorException(MSG_SGA_INDISPONIVEL);
     }
 
     if (response.status >= 500) {
       this.logger.error(
         `[PrimeiroAcesso] SGA retornou HTTP ${response.status} após todas as tentativas para CPF ${cpf}`,
       );
-      throw new InternalServerErrorException(
-        'Não foi possível validar seus dados neste momento devido a uma indisponibilidade temporária do sistema. Por favor, tente novamente em alguns minutos.',
+      throw new InternalServerErrorException(MSG_SGA_INDISPONIVEL);
+    }
+
+    // 401/403 (token bloqueado pela Hinova) ou 2xx sem JSON: instabilidade do
+    // SGA, não CPF inválido. Mantém o 400 (contrato do app) e troca só o texto.
+    if (this.respostaSgaIndisponivel(response as RespostaSga)) {
+      this.logger.error(
+        `[PrimeiroAcesso] SGA respondeu HTTP ${response.status} (indisponibilidade/bloqueio) para CPF ${cpf}`,
       );
+      throw new BadRequestException(MSG_SGA_INDISPONIVEL);
     }
 
     const data = response?.data;
@@ -161,6 +177,9 @@ export class AssociadoService {
     } = data || {};
 
     if (!apiCpf || !nome || !email) {
+      this.logger.warn(
+        `[PrimeiroAcesso] Cadastro do associado no SGA sem cpf/nome/email para CPF ${cpf} (base ${baseOrigin})`,
+      );
       throw new BadRequestException(
         'Dados do associado incompletos na API externa',
       );
@@ -209,6 +228,9 @@ export class AssociadoService {
 
     // Tenta cada base sequencialmente com retry automático
     const bases: BaseOrigin[] = TENANT.baseNames;
+    // Se alguma base falhou (rede, 5xx, 401/403, corpo inesperado), não dá
+    // para afirmar que o CPF não existe: a mensagem deve ser de instabilidade.
+    let houveFalhaSga = false;
     for (const base of bases) {
       try {
         const response = await this.callSgaWithRetry(
@@ -225,7 +247,14 @@ export class AssociadoService {
         if (response.status === 200) {
           return base;
         }
+        if (this.respostaSgaIndisponivel(response as RespostaSga)) {
+          houveFalhaSga = true;
+          this.logger.warn(
+            `[DetectBase] Base ${base} respondeu HTTP ${response.status} (indisponibilidade/bloqueio) para CPF ${cpf}`,
+          );
+        }
       } catch (err: unknown) {
+        houveFalhaSga = true;
         const msg = err instanceof Error ? err.message : String(err);
         this.logger.error(
           `[DetectBase] Falha ao consultar base ${base} para CPF ${cpf} após todas as tentativas: ${msg}`,
@@ -234,7 +263,25 @@ export class AssociadoService {
       }
     }
 
-    throw new NotFoundException('Usuário não encontrado em nenhuma base');
+    // Mantém NotFoundException (404) nos dois casos para não alterar o
+    // contrato com o app; só o texto muda.
+    if (houveFalhaSga) {
+      throw new NotFoundException(MSG_SGA_INDISPONIVEL);
+    }
+    throw new NotFoundException(
+      'CPF não localizado no cadastro de associados. Verifique o número informado.',
+    );
+  }
+
+  /**
+   * Resposta do SGA que indica instabilidade/bloqueio, e não uma resposta de
+   * negócio sobre o CPF: 401/403 (token inválido ou bloqueado pela Hinova),
+   * 5xx, ou 2xx cujo corpo não é JSON (ex.: página HTML de erro do proxy).
+   */
+  private respostaSgaIndisponivel(response: RespostaSga): boolean {
+    const { status, data } = response;
+    if (status === 401 || status === 403 || status >= 500) return true;
+    return status < 400 && (data === null || typeof data !== 'object');
   }
 
   async verificarSituacao(rawCpf: string) {
@@ -255,11 +302,21 @@ export class AssociadoService {
         validateStatus: () => true,
         compartilharEmVoo: true,
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
       this.logger.error(
-        `Erro ao consultar SGA para verificar situação: ${err?.message}`,
+        `Erro ao consultar SGA para verificar situação (CPF ${cpf}): ${msg}`,
       );
-      throw new InternalServerErrorException('Erro ao consultar SGA');
+      throw new InternalServerErrorException(MSG_SGA_INDISPONIVEL);
+    }
+
+    // Instabilidade/bloqueio do SGA não é falta de permissão do associado.
+    // Mantém o 403 (contrato do app) e troca só o texto.
+    if (this.respostaSgaIndisponivel(response as RespostaSga)) {
+      this.logger.error(
+        `[VerificarSituacao] SGA respondeu HTTP ${response.status} (indisponibilidade/bloqueio) para CPF ${cpf}`,
+      );
+      throw new ForbiddenException(MSG_SGA_INDISPONIVEL);
     }
 
     const data = response?.data;
