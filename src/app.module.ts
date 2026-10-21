@@ -26,6 +26,7 @@ import { AnalyticsModule } from './analytics/analytics.module';
 import { AppVersionModule } from './app-version/app-version.module';
 import { BoletoNotificacaoModule } from './boleto-notificacao/boleto-notificacao.module';
 import { ExpoUpdatesModule } from './expo-updates/expo-updates.module';
+import { DirectPartnersModule } from './direct-partners/direct-partners.module';
 
 @Module({
   imports: [
@@ -56,6 +57,7 @@ import { ExpoUpdatesModule } from './expo-updates/expo-updates.module';
     AppVersionModule,
     BoletoNotificacaoModule,
     ExpoUpdatesModule,
+    DirectPartnersModule,
   ],
   controllers: [AppController],
   providers: [AppService],

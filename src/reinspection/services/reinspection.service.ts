@@ -1,15 +1,11 @@
-import { SGA_BASE_URL } from 'src/integrations/hinova/hinova.constants';
 import {
   BadRequestException,
   Injectable,
-  InternalServerErrorException,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import axios from 'axios';
-import { promises as fs } from 'fs';
-import { join } from 'path';
 import {
+  ReinspectionHinovaEnvioOrigem,
   ReinspectionPhotoStatus,
   ReinspectionStatus,
   ReinspectionVehicleType,
@@ -20,11 +16,15 @@ import { CreateReinspectionDto } from 'src/reinspection/dto/create-reinspection.
 import { AddPhotosDto } from 'src/reinspection/dto/add-photos.dto';
 import { UpsertTemplatePhotoDto } from 'src/reinspection/dto/upsert-template-photo.dto';
 import { MailService } from 'src/infra/mail/mail.service';
-import { BaseOrigin } from 'src/shared/token-resolver.service';
-import { TENANT } from 'src/config/tenant.config';
-import { SgaAuthService } from 'src/integrations/hinova/sga-auth.service';
 import { SgaService } from 'src/sga/services/sga.service';
+import { ReinspectionHinovaService } from 'src/reinspection/services/reinspection-hinova.service';
 import { debugLog } from 'src/shared/debug-log.util';
+
+/** Usuário do painel que disparou a ação (para auditoria do envio à Hinova). */
+export interface ReinspectionActor {
+  userId?: number;
+  email?: string;
+}
 
 @Injectable()
 export class ReinspectionService {
@@ -34,8 +34,8 @@ export class ReinspectionService {
     private readonly prisma: PrismaService,
     private readonly mailService: MailService,
     private readonly fileUploadService: FileUploadService,
-    private readonly sgaAuthService: SgaAuthService,
     private readonly sgaService: SgaService,
+    private readonly reinspectionHinovaService: ReinspectionHinovaService,
   ) {}
 
   private log(
@@ -263,6 +263,8 @@ export class ReinspectionService {
         userVehicleId: true,
         vehicleType: true,
         status: true,
+        hinovaEnvioStatus: true,
+        hinovaUltimoEnvioEm: true,
         createdAt: true,
         updatedAt: true,
         userVehicle: {
@@ -367,6 +369,8 @@ export class ReinspectionService {
         userVehicleId: true,
         vehicleType: true,
         status: true,
+        hinovaEnvioStatus: true,
+        hinovaUltimoEnvioEm: true,
         createdAt: true,
         updatedAt: true,
         userVehicle: {
@@ -420,6 +424,9 @@ export class ReinspectionService {
         status: true,
         hinovaSituacao: true,
         sentToHinova: true,
+        hinovaEnviadaEm: true,
+        hinovaTentativas: true,
+        hinovaUltimoErro: true,
         createdAt: true,
       },
     });
@@ -433,6 +440,38 @@ export class ReinspectionService {
         ...p,
         url: this.fileUploadService.buildUrl(p.url),
       })),
+    };
+  }
+
+  /** Detalhe de uma revistoria pelo id (painel). */
+  async getById(reinspectionId: number) {
+    const reinspection = await this.prisma.reinspection.findUnique({
+      where: { id: reinspectionId },
+      select: {
+        id: true,
+        userVehicleId: true,
+        vehicleType: true,
+        status: true,
+        codigoVeiculo: true,
+        hinovaEnvioStatus: true,
+        hinovaUltimoEnvioEm: true,
+        createdAt: true,
+        updatedAt: true,
+        userVehicle: { select: { chassi: true, plate: true } },
+        _count: { select: { photos: true, hinovaEnvios: true } },
+      },
+    });
+
+    if (!reinspection) {
+      throw new NotFoundException('Revistoria não encontrada');
+    }
+
+    const { userVehicle, _count, ...rest } = reinspection;
+    return {
+      ...rest,
+      chassi: userVehicle.chassi,
+      plate: userVehicle.plate,
+      _count,
     };
   }
 
@@ -565,7 +604,11 @@ export class ReinspectionService {
     };
   }
 
-  async approveByUserVehicleId(userVehicleId: number, debugId?: string) {
+  async approveByUserVehicleId(
+    userVehicleId: number,
+    debugId?: string,
+    actor?: ReinspectionActor,
+  ) {
     const vehicle = await this.prisma.userVehicle.findUnique({
       where: { id: userVehicleId },
       select: { id: true, chassi: true, plate: true },
@@ -613,8 +656,27 @@ export class ReinspectionService {
       },
     });
 
+    // Envio à Hinova: cada tentativa fica registrada em ReinspectionHinovaEnvio.
+    // Falhas não bloqueiam a aprovação; o painel reenvia por
+    // POST /reinspection/:id/hinova/reenviar.
     try {
-      await this.sendReinspectionToHinova(updated.id);
+      const envio = await this.reinspectionHinovaService.enviarFotos(
+        updated.id,
+        {
+          origem: ReinspectionHinovaEnvioOrigem.APROVACAO,
+          adminPanelUserId: actor?.userId,
+          adminPanelUserEmail: actor?.email,
+          debugId,
+        },
+      );
+      if (envio && envio.totalFalhas > 0) {
+        this.warn(debugId, 'Envio à Hinova na aprovação com falhas', {
+          reinspectionId: updated.id,
+          envioId: envio.envioId,
+          status: envio.status,
+          totalFalhas: envio.totalFalhas,
+        });
+      }
     } catch (error) {
       this.error(debugId, 'Falha ao enviar revistoria aprovada para Hinova', {
         reinspectionId: updated.id,
@@ -725,125 +787,6 @@ export class ReinspectionService {
             ? boletoError.message
             : String(boletoError),
       });
-    }
-  }
-
-  private async sendReinspectionToHinova(reinspectionId: number) {
-    const reinspection = await this.prisma.reinspection.findUnique({
-      where: { id: reinspectionId },
-      select: {
-        id: true,
-        codigoVeiculo: true,
-        userVehicle: {
-          select: {
-            user: {
-              select: {
-                baseOrigin: true,
-              },
-            },
-          },
-        },
-        photos: {
-          orderBy: { id: 'asc' },
-          select: {
-            id: true,
-            nomeArquivo: true,
-            codigoTipo: true,
-            url: true,
-          },
-        },
-      },
-    });
-
-    if (!reinspection) {
-      throw new NotFoundException('Revistoria não encontrada');
-    }
-
-    const payloadPhotos = await Promise.all(
-      reinspection.photos.map(async (photo) => ({
-        photoId: photo.id,
-        nome_arquivo: photo.nomeArquivo,
-        codigo_tipo: photo.codigoTipo,
-        binario: await this.readPhotoAsBase64(photo.url),
-      })),
-    );
-
-    const payload: Record<string, unknown> = {
-      foto: payloadPhotos.map((photo) => ({
-        nome_arquivo: photo.nome_arquivo,
-        ...(photo.codigo_tipo != null
-          ? { codigo_tipo: photo.codigo_tipo }
-          : {}),
-        binario: photo.binario,
-      })),
-    };
-
-    if (reinspection.codigoVeiculo != null) {
-      payload.codigo_veiculo = reinspection.codigoVeiculo;
-    }
-
-    const hinovaUrl = `${SGA_BASE_URL}/veiculo/foto/cadastrar`;
-    const baseOrigin =
-      reinspection.userVehicle?.user?.baseOrigin ?? TENANT.defaultBase;
-
-    const response = await this.sgaAuthService.executeRequestWithAuth(
-      baseOrigin,
-      {
-        method: 'POST',
-        url: hinovaUrl,
-        data: payload,
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        validateStatus: () => true,
-      },
-    );
-
-    if (Array.isArray(response.data)) {
-      const photosByNomeArquivo = new Map(
-        payloadPhotos.map((photo) => [photo.nome_arquivo, photo.photoId]),
-      );
-
-      for (const result of response.data as Array<{
-        nome_arquivo: string;
-        situacao: string;
-      }>) {
-        const photoId = photosByNomeArquivo.get(result.nome_arquivo);
-        if (photoId) {
-          await this.prisma.reinspectionPhoto.update({
-            where: { id: photoId },
-            data: {
-              hinovaSituacao: result.situacao,
-              sentToHinova: result.situacao === 'Inserido',
-            },
-          });
-        }
-      }
-    }
-
-    if (response.status >= 400) {
-      this.logger.warn(
-        `Hinova retornou erro no envio da revistoria aprovada | reinspectionId=${reinspection.id} | status=${response.status} | response=${JSON.stringify(response.data)}`,
-      );
-    }
-  }
-
-  private async readPhotoAsBase64(photoUrl: string | null): Promise<string> {
-    if (!photoUrl) {
-      throw new BadRequestException(
-        'Não foi possível enviar para Hinova: foto sem URL local',
-      );
-    }
-
-    const filePath = join(process.cwd(), photoUrl);
-
-    try {
-      const buffer = await fs.readFile(filePath);
-      return buffer.toString('base64');
-    } catch {
-      throw new InternalServerErrorException(
-        `Falha ao ler arquivo local para envio à Hinova: ${photoUrl}`,
-      );
     }
   }
 
@@ -962,6 +905,8 @@ export class ReinspectionService {
         userVehicleId: true,
         vehicleType: true,
         status: true,
+        hinovaEnvioStatus: true,
+        hinovaUltimoEnvioEm: true,
         createdAt: true,
         updatedAt: true,
         userVehicle: {

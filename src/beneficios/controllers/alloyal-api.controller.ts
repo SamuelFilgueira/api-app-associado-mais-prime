@@ -17,6 +17,7 @@ import {
   HttpException,
   HttpStatus,
   UseGuards,
+  Optional,
 } from '@nestjs/common';
 import { AlloyalApiService } from 'src/beneficios/services/alloyal-api.service';
 import { AlloyalCategoryDto } from 'src/beneficios/dto/alloyal-category.dto';
@@ -39,6 +40,8 @@ import {
 } from 'src/beneficios/dto/alloyal-login.dto';
 import { AlloyalSessionHeaders } from 'src/beneficios/services/alloyal-api.service';
 import { JwtAuthGuard } from 'src/infra/guards/jwt-auth.guard';
+import { AlloyalCategoriesCacheService } from 'src/beneficios/services/alloyal-categories-cache.service';
+import { BaseOrigin } from 'src/infra/decorators/base-origin.decorator';
 
 /**
  * Controller responsável por expor endpoints da API Alloyal de benefícios
@@ -48,7 +51,12 @@ import { JwtAuthGuard } from 'src/infra/guards/jwt-auth.guard';
 @UseGuards(JwtAuthGuard)
 export class AlloyalApiController {
   private readonly logger = new Logger(AlloyalApiController.name);
-  constructor(private readonly alloyalApiService: AlloyalApiService) {}
+  constructor(
+    private readonly alloyalApiService: AlloyalApiService,
+    // Opcional para não quebrar o contract spec, que monta só o service.
+    @Optional()
+    private readonly categoriesCache?: AlloyalCategoriesCacheService,
+  ) {}
 
   private getSessionHeaders(
     uid?: string,
@@ -112,10 +120,14 @@ export class AlloyalApiController {
     @Headers('uid') uid: string,
     @Headers('client') client: string,
     @Headers('access-token') accessToken: string,
+    @BaseOrigin() baseOrigin?: string,
   ): Promise<AlloyalCategoryDto[]> {
     try {
       const session = this.getSessionHeaders(uid, client, accessToken);
-      return await this.alloyalApiService.getCategories(session);
+      const categorias = await this.alloyalApiService.getCategories(session);
+      // Alimenta o cache por base usado pelo painel de parceiros diretos (§5.0)
+      void this.categoriesCache?.armazenar(baseOrigin, categorias);
+      return categorias;
     } catch (error) {
       this.logger.error('Erro ao buscar categorias', error.stack);
       throw new HttpException(

@@ -10,6 +10,17 @@ import { UserRole } from '@prisma/client';
 import { ADMIN_PANEL_ROLES_KEY } from 'src/infra/decorators/admin-panel-roles.decorator';
 import { AdminPanelRole } from 'src/infra/enums/admin-panel-role.enum';
 
+/**
+ * Autoriza rotas do painel administrativo.
+ *
+ * Regras:
+ * - Sem `@AdminPanelRoles(...)` na rota/classe → libera.
+ * - `role` do token precisa ser ADMIN (usuários do app comuns são barrados).
+ * - Tokens do painel carregam `adminRole` (perfil do usuário do painel):
+ *   `ADMIN` acessa tudo; os demais perfis só acessam rotas que listem o seu perfil.
+ * - Tokens sem `adminRole` (usuário ADMIN legado do app, sem perfil de painel)
+ *   continuam liberados para manter compatibilidade.
+ */
 @Injectable()
 export class AdminPanelRoleGuard implements CanActivate {
   constructor(private readonly reflector: Reflector) {}
@@ -37,7 +48,18 @@ export class AdminPanelRoleGuard implements CanActivate {
       );
     }
 
-    // ADMIN tem acesso total ao painel, independentemente das roles da rota.
+    const adminRole = tokenUser.adminRole as AdminPanelRole | undefined;
+
+    if (!adminRole || adminRole === AdminPanelRole.ADMIN) {
+      return true;
+    }
+
+    if (!requiredRoles.includes(adminRole)) {
+      throw new ForbiddenException(
+        'Seu perfil do painel não tem acesso a este recurso',
+      );
+    }
+
     return true;
   }
 }

@@ -8,34 +8,35 @@ datasource db {
 }
 
 model user {
-  id                            Int            @id @default(autoincrement())
+  id                            Int                             @id @default(autoincrement())
   name                          String
-  cpf                           String         @unique(map: "User_cpf_key")
+  cpf                           String                          @unique(map: "User_cpf_key")
   email                         String
   passwordHash                  String
-  isActive                      Boolean        @default(true)
-  createdAt                     DateTime       @default(now())
-  updatedAt                     DateTime       @updatedAt
+  isActive                      Boolean                         @default(true)
+  createdAt                     DateTime                        @default(now())
+  updatedAt                     DateTime                        @updatedAt
   latitude                      Float?
   longitude                     Float?
-  primeiroLogin                 Boolean        @default(false)
+  primeiroLogin                 Boolean                         @default(false)
   profilePhotoUrl               String?
   address                       String?
   cep                           String?
   plate                         String?
-  acceptsMarketingNotifications Boolean        @default(true)
-  notificacaoIgnicao            Boolean        @default(false)
-  role                          UserRole       @default(USER)
-  ancoraAtiva                   Boolean        @default(false)
-  expoPushToken                 String?        @db.VarChar(255)
+  acceptsMarketingNotifications Boolean                         @default(true)
+  notificacaoIgnicao            Boolean                         @default(false)
+  role                          UserRole                        @default(USER)
+  ancoraAtiva                   Boolean                         @default(false)
+  expoPushToken                 String?                         @db.VarChar(255)
   // Base de origem (tenant). Deixou de ser enum para que cada empresa do
   // grupo defina suas bases via TENANT_BASES, sem migration de schema.
   // Validação dos valores aceitos: src/config/tenant.config.ts
-  baseOrigin                    String?        @db.VarChar(50)
-  totalEconomizado              Float          @default(0)
+  baseOrigin                    String?                         @db.VarChar(50)
+  totalEconomizado              Float                           @default(0)
   notifications                 Notification[]
   userVehicles                  UserVehicle[]
   fuelSessions                  FuelSession[]
+  directPartnerRedemptions      DirectPartnerCouponRedemption[]
 }
 
 model workshop {
@@ -374,18 +375,53 @@ model Notification {
 }
 
 model Reinspection {
-  id            Int                     @id @default(autoincrement())
-  userVehicleId Int
-  vehicleType   ReinspectionVehicleType
-  status        ReinspectionStatus      @default(PENDENTE)
-  createdAt     DateTime                @default(now())
-  updatedAt     DateTime                @updatedAt
-  codigoVeiculo Int?
-  userVehicle   UserVehicle             @relation(fields: [userVehicleId], references: [id], onDelete: Cascade, map: "Reinspection_userVehicleId_fkey")
-  photos        ReinspectionPhoto[]
+  id                  Int                           @id @default(autoincrement())
+  userVehicleId       Int
+  vehicleType         ReinspectionVehicleType
+  status              ReinspectionStatus            @default(PENDENTE)
+  createdAt           DateTime                      @default(now())
+  updatedAt           DateTime                      @updatedAt
+  codigoVeiculo       Int?
+  /// Resultado consolidado do último envio de fotos à Hinova (eixo separado do `status`).
+  hinovaEnvioStatus   ReinspectionHinovaEnvioStatus @default(NAO_ENVIADA)
+  hinovaUltimoEnvioEm DateTime?
+  userVehicle         UserVehicle                   @relation(fields: [userVehicleId], references: [id], onDelete: Cascade, map: "Reinspection_userVehicleId_fkey")
+  photos              ReinspectionPhoto[]
+  hinovaEnvios        ReinspectionHinovaEnvio[]
 
   @@index([status], map: "Reinspection_status_idx")
   @@index([userVehicleId], map: "Reinspection_userVehicleId_idx")
+  @@index([hinovaEnvioStatus], map: "Reinspection_hinovaEnvioStatus_idx")
+}
+
+/// Uma linha por tentativa de envio de fotos de revistoria à Hinova
+/// (`/veiculo/foto/cadastrar`), seja na aprovação ou em reenvio manual pelo painel.
+model ReinspectionHinovaEnvio {
+  id                  Int                           @id @default(autoincrement())
+  reinspectionId      Int
+  origem              ReinspectionHinovaEnvioOrigem
+  status              ReinspectionHinovaEnvioStatus
+  baseOrigin          String                        @db.VarChar(30)
+  codigoVeiculo       Int?
+  /// Usuário do painel que disparou o reenvio (null quando origem = APROVACAO sem contexto).
+  adminPanelUserId    Int?
+  adminPanelUserEmail String?                       @db.VarChar(150)
+  totalFotos          Int                           @default(0)
+  totalInseridas      Int                           @default(0)
+  totalFalhas         Int                           @default(0)
+  /// Ids das fotos incluídas na tentativa.
+  photoIds            Json
+  httpStatus          Int?
+  /// Resposta da Hinova (sem binários), truncada.
+  responseBody        Json?
+  errorMessage        String?                       @db.VarChar(500)
+  duracaoMs           Int?
+  createdAt           DateTime                      @default(now())
+  reinspection        Reinspection                  @relation(fields: [reinspectionId], references: [id], onDelete: Cascade, map: "ReinspectionHinovaEnvio_reinspectionId_fkey")
+
+  @@index([reinspectionId], map: "ReinspectionHinovaEnvio_reinspectionId_idx")
+  @@index([createdAt], map: "ReinspectionHinovaEnvio_createdAt_idx")
+  @@index([status], map: "ReinspectionHinovaEnvio_status_idx")
 }
 
 model ReinspectionAnalyst {
@@ -481,18 +517,21 @@ model BoletoNotificacaoLog {
 }
 
 model ReinspectionPhoto {
-  id              Int                        @id @default(autoincrement())
-  reinspectionId  Int
-  nomeArquivo     String                     @db.VarChar(255)
-  codigoTipo      Int?
-  url             String?                    @db.VarChar(500)
-  hinovaSituacao  String?                    @db.VarChar(50)
-  sentToHinova    Boolean                    @default(false)
-  createdAt       DateTime                   @default(now())
-  status          ReinspectionPhotoStatus
-  templatePhotoId Int?
-  reinspection    Reinspection               @relation(fields: [reinspectionId], references: [id], onDelete: Cascade, map: "ReinspectionPhoto_reinspectionId_fkey")
-  templatePhoto   ReinspectionTemplatePhoto? @relation(fields: [templatePhotoId], references: [id], map: "ReinspectionPhoto_templatePhotoId_fkey")
+  id               Int                        @id @default(autoincrement())
+  reinspectionId   Int
+  nomeArquivo      String                     @db.VarChar(255)
+  codigoTipo       Int?
+  url              String?                    @db.VarChar(500)
+  hinovaSituacao   String?                    @db.VarChar(50)
+  sentToHinova     Boolean                    @default(false)
+  hinovaEnviadaEm  DateTime?
+  hinovaTentativas Int                        @default(0)
+  hinovaUltimoErro String?                    @db.VarChar(500)
+  createdAt        DateTime                   @default(now())
+  status           ReinspectionPhotoStatus
+  templatePhotoId  Int?
+  reinspection     Reinspection               @relation(fields: [reinspectionId], references: [id], onDelete: Cascade, map: "ReinspectionPhoto_reinspectionId_fkey")
+  templatePhoto    ReinspectionTemplatePhoto? @relation(fields: [templatePhotoId], references: [id], map: "ReinspectionPhoto_templatePhotoId_fkey")
 
   @@index([reinspectionId], map: "ReinspectionPhoto_reinspectionId_idx")
   @@index([status], map: "ReinspectionPhoto_status_idx")
@@ -676,6 +715,19 @@ enum ReinspectionStatus {
   REPROVADA
 }
 
+/// Resultado de um envio (ou do último envio) de fotos à Hinova.
+enum ReinspectionHinovaEnvioStatus {
+  NAO_ENVIADA
+  ENVIADA
+  PARCIAL
+  FALHA
+}
+
+enum ReinspectionHinovaEnvioOrigem {
+  APROVACAO
+  REENVIO_MANUAL
+}
+
 enum AdminPanelRole {
   REVISTORIA
   EVENTOS
@@ -712,4 +764,130 @@ enum BoletoNotificacaoExecucaoStatus {
   CONCLUIDA
   PULADA
   FALHA
+}
+
+// ---------------------------------------------------------------------------
+// Parceiros diretos (clube de vantagens fora da rede Alloyal)
+// Spec: CONTRATO_PARCEIROS_DIRETOS.md v1.1 (2026-10-19)
+// ---------------------------------------------------------------------------
+
+/// Parceiro credenciado diretamente pela empresa (fora da rede Alloyal).
+model DirectPartner {
+  id                 Int                   @id @default(autoincrement())
+  name               String                @db.VarChar(150)
+  shortDescription   String                @db.VarChar(160)
+  description        String?               @db.Text
+  category           DirectPartnerCategory
+  categoryLabel      String?               @db.VarChar(60)
+  /// { [baseOrigin]: number[] } — categorias Alloyal por base
+  alloyalCategoryIds Json?
+  tone               DirectPartnerTone     @default(ACCENT)
+  logoUrl            String?               @db.VarChar(500)
+  coverUrl           String?               @db.VarChar(500)
+
+  // Endereço
+  street     String  @db.VarChar(200)
+  number     String? @db.VarChar(20)
+  complement String? @db.VarChar(100)
+  district   String  @db.VarChar(100)
+  city       String  @db.VarChar(100)
+  state      State
+  zipCode    String  @db.VarChar(9)
+  reference  String? @db.VarChar(160)
+  latitude   Float
+  longitude  Float
+
+  // Contato e funcionamento
+  phone            String? @db.VarChar(20)
+  whatsapp         String? @db.VarChar(20)
+  website          String? @db.VarChar(300)
+  instagram        String? @db.VarChar(100)
+  openingHoursText String? @db.VarChar(160)
+  /// DirectPartnerOpeningHour[] — { weekday, opens, closes }
+  openingHours     Json?
+
+  // Exibição
+  isActive  Boolean @default(true)
+  featured  Boolean @default(false)
+  sortOrder Int     @default(0)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  bases   DirectPartnerBase[]
+  coupons DirectPartnerCoupon[]
+
+  @@index([isActive, featured, sortOrder])
+  @@index([category])
+}
+
+/// Bases (tenants) em que o parceiro é publicado. 1..N por parceiro.
+model DirectPartnerBase {
+  partnerId  Int
+  /// MAIS_PRIME, MAIS_PRIME_RS... (validado por isTenantBase)
+  baseOrigin String        @db.VarChar(40)
+  partner    DirectPartner @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  @@id([partnerId, baseOrigin])
+  @@index([baseOrigin])
+}
+
+model DirectPartnerCoupon {
+  id          Int           @id @default(autoincrement())
+  partnerId   Int
+  partner     DirectPartner @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  code        String        @db.VarChar(40)
+  highlight   String        @db.VarChar(16)
+  title       String        @db.VarChar(80)
+  description String        @db.VarChar(300)
+  /// string[] — condições de utilização
+  conditions  Json
+  validFrom   DateTime?
+  validUntil  DateTime
+  /// true: 1 resgate por associado; código só após "Resgatar"
+  singleUse   Boolean       @default(false)
+  isActive    Boolean       @default(true)
+  sortOrder   Int           @default(0)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  redemptions DirectPartnerCouponRedemption[]
+
+  @@unique([partnerId, code])
+  @@index([partnerId, isActive, validUntil])
+}
+
+/// Registro de uso do cupom pelo associado.
+/// singleUse=true → no máximo 1 linha por (couponId, userId), garantido pelo serviço em transação.
+/// singleUse=false → uma linha por uso declarado (métrica).
+model DirectPartnerCouponRedemption {
+  id         Int                 @id @default(autoincrement())
+  couponId   Int
+  coupon     DirectPartnerCoupon @relation(fields: [couponId], references: [id], onDelete: Cascade)
+  userId     Int
+  user       user                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// base do JWT no momento do resgate
+  baseOrigin String              @db.VarChar(40)
+  redeemedAt DateTime            @default(now())
+
+  @@index([couponId, userId])
+  @@index([userId, redeemedAt])
+}
+
+enum DirectPartnerCategory {
+  AUTOMOTIVO
+  ALIMENTACAO
+  SAUDE
+  SERVICOS
+  LAZER
+  OUTROS
+}
+
+enum DirectPartnerTone {
+  ACCENT
+  INFO
+  SUCCESS
+  WARNING
+  HIGHLIGHT
 }

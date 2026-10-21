@@ -27,6 +27,11 @@ export class FileUploadService {
     'uploads',
     'slider-photos',
   );
+  private readonly directPartnerLogoUploadPath = join(
+    process.cwd(),
+    'uploads',
+    'direct-partners',
+  );
   private readonly documentsUploadPath = join(process.cwd(), 'uploads');
 
   async uploadDocumentFile(file: Express.Multer.File): Promise<string> {
@@ -155,6 +160,42 @@ export class FileUploadService {
       await fs.unlink(filepath);
     } catch (error) {
       this.logger.warn(`Erro ao deletar foto: ${error.message}`);
+    }
+  }
+
+  /**
+   * Logo de parceiro direto: redimensiona para no máximo 512×512 (sem
+   * ampliar) e grava em WebP. Retorna o caminho público `/uploads/direct-partners/...`.
+   */
+  async uploadDirectPartnerLogo(
+    file: Express.Multer.File,
+    partnerId: number,
+  ): Promise<string> {
+    await this.ensureDirectory(this.directPartnerLogoUploadPath);
+
+    const filename = `${partnerId}-${Date.now()}.webp`;
+    const filepath = join(this.directPartnerLogoUploadPath, filename);
+
+    await sharp(file.buffer)
+      .rotate()
+      .resize(512, 512, {
+        fit: 'inside',
+        withoutEnlargement: true,
+      })
+      .webp({ quality: 85 })
+      .toFile(filepath);
+
+    return `/uploads/direct-partners/${filename}`;
+  }
+
+  async deleteDirectPartnerLogo(logoUrl: string): Promise<void> {
+    if (!logoUrl) return;
+
+    try {
+      const filepath = join(process.cwd(), logoUrl.replace(/^\/+/, ''));
+      await fs.unlink(filepath);
+    } catch (error) {
+      this.logger.warn(`Erro ao deletar logo de parceiro: ${error.message}`);
     }
   }
 
