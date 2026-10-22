@@ -50,9 +50,16 @@ async function bootstrap() {
   app.useGlobalFilters(new HttpExceptionFilter());
   app.setGlobalPrefix('api', { exclude: ['health'] });
 
-  // Serve static files from uploads directory
+  // Serve static files from uploads directory.
+  // O helmet() acima envia `Cross-Origin-Resource-Policy: same-origin` em toda
+  // resposta, o que faz o navegador bloquear <img src="/uploads/..."> quando a
+  // página está em outra origem (painel admin em domínio próprio). Os arquivos
+  // de /uploads são públicos, então aqui o CORP é relaxado para cross-origin.
   app.useStaticAssets(join(__dirname, '..', 'uploads'), {
     prefix: '/uploads/',
+    setHeaders: (res) => {
+      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    },
   });
 
   const config = new DocumentBuilder()
