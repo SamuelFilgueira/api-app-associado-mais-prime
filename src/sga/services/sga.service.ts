@@ -507,6 +507,7 @@ export class SgaService {
       codigo_associado: associado.codigoAssociado,
       codigo_regional: associado.codigoRegional,
       codigo_situacao: '2',
+      codigo_conta: 27,
       mes_referente: mesReferente,
       link_boleto: true,
       codigo_tipo_boleto: CODIGO_TIPO_BOLETO_REATIVACAO,
