@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -22,7 +23,11 @@ import { FileInterceptor } from '@nestjs/platform-express';
 interface RequestComUsuarioPainel {
   user?: { userId?: number | string; email?: string };
 }
-import { ReinspectionHinovaEnvioOrigem } from '@prisma/client';
+import {
+  ReinspectionHinovaEnvioOrigem,
+  ReinspectionStatus,
+} from '@prisma/client';
+import { BoletoReativacaoService } from 'src/sga/services/boleto-reativacao.service';
 import { JwtAuthGuard } from 'src/infra/guards/jwt-auth.guard';
 import { ReinspectionService } from 'src/reinspection/services/reinspection.service';
 import { ReinspectionHinovaService } from 'src/reinspection/services/reinspection-hinova.service';
@@ -61,6 +66,7 @@ export class ReinspectionController {
   constructor(
     private readonly reinspectionService: ReinspectionService,
     private readonly reinspectionHinovaService: ReinspectionHinovaService,
+    private readonly boletoReativacaoService: BoletoReativacaoService,
   ) {}
 
   // ── App ───────────────────────────────────────────────────────────────────
@@ -277,6 +283,47 @@ export class ReinspectionController {
     }
 
     return resultado;
+  }
+
+  // ── Painel: boleto de reativação ──────────────────────────────────────────
+
+  /**
+   * Revistorias aprovadas cujo boleto de reativação está aguardando retry
+   * ou falhou de vez.
+   */
+  @Get('boleto/pendentes')
+  @UseGuards(AdminPanelRoleGuard)
+  @AdminPanelRoles(AdminPanelRole.REVISTORIA, AdminPanelRole.COBRANCA)
+  @HttpCode(HttpStatus.OK)
+  listarPendentesBoleto() {
+    return this.boletoReativacaoService.listarPendentes();
+  }
+
+  /**
+   * Dispara agora uma tentativa de criação do boleto de reativação
+   * (mesma lógica do retry: adota boleto já existente no SGA ou cadastra).
+   * Só para revistoria APROVADA que já passou pelo fluxo automático
+   * (PENDENTE_RETRY/FALHA). Revistoria aprovada antes desta versão
+   * (NAO_GERADO) responde `pulado = true` e nunca gera boleto retroativo.
+   */
+  @Post(':id/boleto/gerar')
+  @UseGuards(AdminPanelRoleGuard)
+  @AdminPanelRoles(AdminPanelRole.REVISTORIA, AdminPanelRole.COBRANCA)
+  @HttpCode(HttpStatus.OK)
+  async gerarBoleto(
+    @Param('id', ParseIntPipe) id: number,
+    @Headers('x-debug-id') debugId?: string,
+  ) {
+    const reinspection = await this.reinspectionService.getById(id);
+    if (reinspection.status !== ReinspectionStatus.APROVADA) {
+      throw new BadRequestException(
+        'Somente revistorias APROVADA podem gerar boleto de reativação',
+      );
+    }
+    return this.boletoReativacaoService.processar(id, {
+      origem: 'MANUAL',
+      debugId,
+    });
   }
 
   // ── Painel: detalhe e avaliação ───────────────────────────────────────────

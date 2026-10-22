@@ -201,6 +201,61 @@ export class MailService {
     }
   }
 
+  /**
+   * Revistoria aprovada, mas o boleto de reativação não pôde ser gerado
+   * automaticamente (falha definitiva ou retry esgotado). Avisa a cobrança
+   * para gerar à mão no SGA.
+   */
+  async sendRevistoriaAprovadaSemBoletoEmail(
+    chassi: string,
+    plate: string | null,
+    motivo: string,
+    debugId?: string,
+  ): Promise<void> {
+    const safePlate = plate ?? 'N/A';
+    const motivoSeguro = motivo
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+
+    const mailOptions: nodemailer.SendMailOptions = {
+      from: `"${TENANT.appName}" <${process.env.GMAIL_USER}>`,
+      to: TENANT.mailCobranca,
+      subject: 'Revistoria Aprovada - boleto NÃO gerado automaticamente',
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 480px; margin: auto; padding: 24px; border: 1px solid #e0e0e0; border-radius: 8px;">
+          <h2 style="color: #e65100;">Revistoria Aprovada - boleto pendente</h2>
+          <p>A revistoria do veículo abaixo foi <strong>aprovada</strong>, mas o <strong>boleto de reativação não pôde ser gerado automaticamente</strong>. É necessário gerá-lo manualmente no SGA.</p>
+          <div style="background: #f4f4f4; border-radius: 6px; padding: 12px 20px; font-size: 22px; font-weight: bold; letter-spacing: 2px; text-align: center; color: #222;">
+            Chassi: ${chassi}<br />
+            Placa: ${safePlate}
+          </div>
+          <p style="margin-top: 20px; color: #555; font-size: 13px;"><strong>Motivo:</strong> ${motivoSeguro}</p>
+          <p style="color: #888; font-size: 12px;">Se o boleto for criado no SGA, o painel pode adotá-lo pelo botão "Gerar boleto" na revistoria.</p>
+        </div>
+      `,
+    };
+
+    try {
+      await this.transporter.sendMail(mailOptions);
+    } catch (error) {
+      this.logger.error(
+        debugLog(
+          MailService.name,
+          'Falha ao enviar e-mail de revistoria aprovada sem boleto',
+          debugId,
+          {
+            chassi,
+            plate: safePlate,
+            destino: TENANT.mailCobranca,
+            error: error instanceof Error ? error.message : String(error),
+          },
+        ),
+      );
+      throw error;
+    }
+  }
+
   async sendBoletoRevistoriaPago(
     chassi: string,
     plate: string | null,

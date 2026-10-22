@@ -7,6 +7,8 @@ export const FUEL_ECONOMY_QUEUE = 'fuel-economy';
 export const BOLETO_VERIFICACAO_QUEUE = 'boleto-verificacao';
 export const ANALYTICS_QUEUE = 'analytics-summaries';
 export const BOLETO_NOTIFICACAO_QUEUE = 'boleto-notificacao';
+/** Retry da criação do boleto de reativação após instabilidade do SGA. */
+export const BOLETO_REATIVACAO_RETRY_QUEUE = 'boleto-reativacao-retry';
 
 /**
  * Módulo global que configura o BullMQ com Redis.
@@ -49,6 +51,7 @@ const DEFAULT_JOB_RETENTION = {
       { name: BOLETO_VERIFICACAO_QUEUE },
       { name: ANALYTICS_QUEUE },
       { name: BOLETO_NOTIFICACAO_QUEUE },
+      { name: BOLETO_REATIVACAO_RETRY_QUEUE },
     ),
   ],
   exports: [BullModule],

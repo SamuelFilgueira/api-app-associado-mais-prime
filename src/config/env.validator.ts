@@ -74,6 +74,9 @@ const WARN_IF_MISSING = [
  *   BOLETO_VERIFICACAO_INTERVALO_APOS_7D_MIN / BOLETO_VERIFICACAO_ESPACAMENTO_MS:
  *   limites do poller de boleto de reativação (defaults e faixas em
  *   sga/config/boleto-verificacao.config.ts)
+ * - BOLETO_REATIVACAO_RETRY_INTERVALO_MIN / BOLETO_REATIVACAO_RETRY_MAX_HORAS /
+ *   BOLETO_REATIVACAO_JANELA_VENCIMENTO_DIAS: retry da criação do boleto de
+ *   reativação após instabilidade do SGA (sga/config/boleto-reativacao-retry.config.ts)
  * - MAIL_PASSWORD_RESET_PROVIDER: ses (default) | gmail — provedor do e-mail de
  *   redefinição de senha (mail.config.ts). Hertz usa gmail; Mais Prime, ses.
  * - EXPO_UPDATES_DIR / EXPO_UPDATES_PUBLIC_URL / EXPO_UPDATES_PRIVATE_KEY_PATH /

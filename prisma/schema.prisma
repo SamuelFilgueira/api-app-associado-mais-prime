@@ -375,23 +375,35 @@ model Notification {
 }
 
 model Reinspection {
-  id                  Int                           @id @default(autoincrement())
-  userVehicleId       Int
-  vehicleType         ReinspectionVehicleType
-  status              ReinspectionStatus            @default(PENDENTE)
-  createdAt           DateTime                      @default(now())
-  updatedAt           DateTime                      @updatedAt
-  codigoVeiculo       Int?
+  id                       Int                           @id @default(autoincrement())
+  userVehicleId            Int
+  vehicleType              ReinspectionVehicleType
+  status                   ReinspectionStatus            @default(PENDENTE)
+  createdAt                DateTime                      @default(now())
+  updatedAt                DateTime                      @updatedAt
+  codigoVeiculo            Int?
   /// Resultado consolidado do último envio de fotos à Hinova (eixo separado do `status`).
-  hinovaEnvioStatus   ReinspectionHinovaEnvioStatus @default(NAO_ENVIADA)
-  hinovaUltimoEnvioEm DateTime?
-  userVehicle         UserVehicle                   @relation(fields: [userVehicleId], references: [id], onDelete: Cascade, map: "Reinspection_userVehicleId_fkey")
-  photos              ReinspectionPhoto[]
-  hinovaEnvios        ReinspectionHinovaEnvio[]
+  hinovaEnvioStatus        ReinspectionHinovaEnvioStatus @default(NAO_ENVIADA)
+  hinovaUltimoEnvioEm      DateTime?
+  /// Boleto de reativação: consolidado da criação (eixo separado do `status`).
+  boletoStatus             ReinspectionBoletoStatus      @default(NAO_GERADO)
+  boletoTentativas         Int                           @default(0)
+  boletoUltimaTentativaEm  DateTime?
+  boletoProximaTentativaEm DateTime?
+  /// Início da janela de retry corrente (zera a cada entrada em PENDENTE_RETRY vinda de outro estado).
+  boletoRetryInicioEm      DateTime?
+  boletoUltimoErro         String?                       @db.VarChar(500)
+  boletoNossoNumero        String?                       @db.VarChar(50)
+  /// CRIADO_APP (cadastrado pela API) | ADOTADO_SGA (já existia no SGA, criado manualmente)
+  boletoOrigem             String?                       @db.VarChar(20)
+  userVehicle              UserVehicle                   @relation(fields: [userVehicleId], references: [id], onDelete: Cascade, map: "Reinspection_userVehicleId_fkey")
+  photos                   ReinspectionPhoto[]
+  hinovaEnvios             ReinspectionHinovaEnvio[]
 
   @@index([status], map: "Reinspection_status_idx")
   @@index([userVehicleId], map: "Reinspection_userVehicleId_idx")
   @@index([hinovaEnvioStatus], map: "Reinspection_hinovaEnvioStatus_idx")
+  @@index([boletoStatus], map: "Reinspection_boletoStatus_idx")
 }
 
 /// Uma linha por tentativa de envio de fotos de revistoria à Hinova
@@ -444,12 +456,15 @@ model ReinspectionPayment {
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
   cancelado      Boolean     @default(false)
+  /// Revistoria que originou o boleto (null nos registros anteriores a 2026-10-22).
+  reinspectionId Int?
   userVehicle    UserVehicle @relation(fields: [userVehicleId], references: [id], onDelete: Cascade, map: "ReinspectionPayment_userVehicleId_fkey")
 
   @@index([boletoCriadoEm], map: "ReinspectionPayment_boletoCriadoEm_idx")
   @@index([pago], map: "ReinspectionPayment_pago_idx")
   @@index([situacaoBoleto], map: "ReinspectionPayment_situacaoBoleto_idx")
   @@index([userVehicleId], map: "ReinspectionPayment_userVehicleId_idx")
+  @@index([reinspectionId], map: "ReinspectionPayment_reinspectionId_idx")
 }
 
 /// Execução da rotina diária de notificações de boleto (uma linha por
@@ -726,6 +741,14 @@ enum ReinspectionHinovaEnvioStatus {
 enum ReinspectionHinovaEnvioOrigem {
   APROVACAO
   REENVIO_MANUAL
+}
+
+/// Criação do boleto de reativação após a aprovação da revistoria.
+enum ReinspectionBoletoStatus {
+  NAO_GERADO
+  GERADO
+  PENDENTE_RETRY
+  FALHA
 }
 
 enum AdminPanelRole {

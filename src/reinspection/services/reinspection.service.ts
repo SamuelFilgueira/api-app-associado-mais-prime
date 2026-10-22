@@ -16,7 +16,7 @@ import { CreateReinspectionDto } from 'src/reinspection/dto/create-reinspection.
 import { AddPhotosDto } from 'src/reinspection/dto/add-photos.dto';
 import { UpsertTemplatePhotoDto } from 'src/reinspection/dto/upsert-template-photo.dto';
 import { MailService } from 'src/infra/mail/mail.service';
-import { SgaService } from 'src/sga/services/sga.service';
+import { BoletoReativacaoService } from 'src/sga/services/boleto-reativacao.service';
 import { ReinspectionHinovaService } from 'src/reinspection/services/reinspection-hinova.service';
 import { debugLog } from 'src/shared/debug-log.util';
 
@@ -34,7 +34,7 @@ export class ReinspectionService {
     private readonly prisma: PrismaService,
     private readonly mailService: MailService,
     private readonly fileUploadService: FileUploadService,
-    private readonly sgaService: SgaService,
+    private readonly boletoReativacaoService: BoletoReativacaoService,
     private readonly reinspectionHinovaService: ReinspectionHinovaService,
   ) {}
 
@@ -265,6 +265,13 @@ export class ReinspectionService {
         status: true,
         hinovaEnvioStatus: true,
         hinovaUltimoEnvioEm: true,
+        boletoStatus: true,
+        boletoTentativas: true,
+        boletoUltimaTentativaEm: true,
+        boletoProximaTentativaEm: true,
+        boletoUltimoErro: true,
+        boletoNossoNumero: true,
+        boletoOrigem: true,
         createdAt: true,
         updatedAt: true,
         userVehicle: {
@@ -371,6 +378,13 @@ export class ReinspectionService {
         status: true,
         hinovaEnvioStatus: true,
         hinovaUltimoEnvioEm: true,
+        boletoStatus: true,
+        boletoTentativas: true,
+        boletoUltimaTentativaEm: true,
+        boletoProximaTentativaEm: true,
+        boletoUltimoErro: true,
+        boletoNossoNumero: true,
+        boletoOrigem: true,
         createdAt: true,
         updatedAt: true,
         userVehicle: {
@@ -455,6 +469,13 @@ export class ReinspectionService {
         codigoVeiculo: true,
         hinovaEnvioStatus: true,
         hinovaUltimoEnvioEm: true,
+        boletoStatus: true,
+        boletoTentativas: true,
+        boletoUltimaTentativaEm: true,
+        boletoProximaTentativaEm: true,
+        boletoUltimoErro: true,
+        boletoNossoNumero: true,
+        boletoOrigem: true,
         createdAt: true,
         updatedAt: true,
         userVehicle: { select: { chassi: true, plate: true } },
@@ -685,29 +706,39 @@ export class ReinspectionService {
       });
     }
 
+    // Boleto de reativação + e-mail de aprovação (o e-mail só sai quando o
+    // boleto existe; em instabilidade do SGA entra o retry de 5 em 5 min e,
+    // em falha definitiva, a cobrança recebe e-mail para gerar à mão).
+    // Falhas aqui nunca desfazem a aprovação nem derrubam a resposta.
+    let boleto: {
+      status: string;
+      nossoNumero: string | null;
+      tentativas: number;
+      proximaTentativaEm: Date | null;
+      erro: string | null;
+    } | null = null;
     try {
-      await this.mailService.sendRevistoriaAprovadaEmail(
-        vehicle.chassi,
-        vehicle.plate,
-        debugId,
+      const resultado = await this.boletoReativacaoService.processar(
+        updated.id,
+        { origem: 'APROVACAO', debugId },
       );
-    } catch (emailError) {
-      this.error(debugId, 'Falha ao enviar e-mail de aprovação', {
+      boleto = {
+        status: resultado.status,
+        nossoNumero: resultado.nossoNumero,
+        tentativas: resultado.tentativas,
+        proximaTentativaEm: resultado.proximaTentativaEm,
+        erro: resultado.erro,
+      };
+    } catch (boletoError) {
+      this.error(debugId, 'Falha inesperada no boleto de reativação', {
         reinspectionId: updated.id,
-        chassi: vehicle.chassi,
-        plate: vehicle.plate ?? 'N/A',
+        userVehicleId: updated.userVehicleId,
         error:
-          emailError instanceof Error ? emailError.message : String(emailError),
+          boletoError instanceof Error
+            ? boletoError.message
+            : String(boletoError),
       });
     }
-
-    await this.tryCreateReinspectionBoleto(
-      updated.userVehicleId,
-      updated.id,
-      vehicle.plate,
-      'approve',
-      debugId,
-    );
 
     return {
       reinspectionId: updated.id,
@@ -715,79 +746,9 @@ export class ReinspectionService {
       status: updated.status,
       createdAt: updated.createdAt,
       updatedAt: updated.updatedAt,
+      // Campo aditivo: o painel atual ignora.
+      boleto,
     };
-  }
-
-  private async tryCreateReinspectionBoleto(
-    userVehicleId: number,
-    reinspectionId: number,
-    plate: string | null,
-    trigger: 'submit' | 'approve',
-    debugId?: string,
-  ) {
-    if (!plate) {
-      this.warn(
-        debugId,
-        'Boleto de reativação não criado: placa não disponível',
-        {
-          trigger,
-          reinspectionId,
-          userVehicleId,
-        },
-      );
-      return;
-    }
-
-    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
-    const existingOpenPayment = await this.prisma.reinspectionPayment.findFirst(
-      {
-        where: {
-          userVehicleId,
-          pago: false,
-          boletoCriadoEm: { gte: oneHourAgo },
-        },
-        orderBy: { boletoCriadoEm: 'desc' },
-        select: {
-          id: true,
-          nossoNumero: true,
-          situacaoBoleto: true,
-        },
-      },
-    );
-
-    if (existingOpenPayment) {
-      this.log(
-        debugId,
-        'Boleto de reativação já existente; nova criação ignorada',
-        {
-          trigger,
-          reinspectionId,
-          userVehicleId,
-          paymentId: existingOpenPayment.id,
-          nossoNumero: existingOpenPayment.nossoNumero ?? 'N/A',
-          situacao: existingOpenPayment.situacaoBoleto,
-        },
-      );
-      return;
-    }
-
-    try {
-      await this.sgaService.criarBoletoReativacao(
-        userVehicleId,
-        plate,
-        debugId,
-      );
-    } catch (boletoError) {
-      this.error(debugId, 'Falha ao criar boleto de reativação', {
-        trigger,
-        reinspectionId,
-        userVehicleId,
-        error:
-          boletoError instanceof Error
-            ? boletoError.message
-            : String(boletoError),
-      });
-    }
   }
 
   async getRejectedPhotos(userVehicleId: number) {
@@ -907,6 +868,13 @@ export class ReinspectionService {
         status: true,
         hinovaEnvioStatus: true,
         hinovaUltimoEnvioEm: true,
+        boletoStatus: true,
+        boletoTentativas: true,
+        boletoUltimaTentativaEm: true,
+        boletoProximaTentativaEm: true,
+        boletoUltimoErro: true,
+        boletoNossoNumero: true,
+        boletoOrigem: true,
         createdAt: true,
         updatedAt: true,
         userVehicle: {
