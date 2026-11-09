@@ -35,11 +35,48 @@ type SgaVeiculo = {
   chassi?: string;
   placa?: string;
   codigo_veiculo?: string | number;
+  situacao?: string | number;
+  descricao_situacao?: string;
 };
 
 type SgaAssociadoResponse = {
   veiculos?: SgaVeiculo[];
 };
+
+/** Situação do veículo no SGA que não deve ser exposta ao associado. */
+const SITUACAO_VEICULO_INATIVO = 'INATIVO';
+
+/**
+ * Indica se o veículo está INATIVO no SGA. A Hinova devolve a situação em
+ * `descricao_situacao` (texto) e, em alguns retornos, só em `situacao`;
+ * a comparação é feita em ambos, sem distinguir caixa/espaços.
+ */
+export function veiculoInativoNoSga(veiculo: SgaVeiculo | null | undefined) {
+  if (!veiculo) return false;
+  const normalizar = (valor: string | number | null | undefined) =>
+    String(valor ?? '')
+      .trim()
+      .toUpperCase();
+  return (
+    normalizar(veiculo.descricao_situacao) === SITUACAO_VEICULO_INATIVO ||
+    normalizar(veiculo.situacao) === SITUACAO_VEICULO_INATIVO
+  );
+}
+
+/**
+ * Remove do corpo do SGA os veículos INATIVOS, mantendo o restante do payload
+ * intacto. Não altera o objeto original (o mesmo corpo é compartilhado entre
+ * requisições em voo pelo SgaAuthService).
+ */
+export function removerVeiculosInativos<T>(data: T): T {
+  if (!data || typeof data !== 'object') return data;
+  const corpo = data as SgaAssociadoResponse;
+  if (!Array.isArray(corpo.veiculos)) return data;
+  return {
+    ...corpo,
+    veiculos: corpo.veiculos.filter((v) => !veiculoInativoNoSga(v)),
+  } as T;
+}
 
 @Injectable()
 export class SgaService {
@@ -168,7 +205,8 @@ export class SgaService {
         usuario,
         response.data,
       );
-      return response.data;
+      // Veículos INATIVOS no SGA não são expostos ao associado.
+      return removerVeiculosInativos(response.data);
     } catch (error: unknown) {
       if (axios.isAxiosError(error) && error.response?.data) {
         return error.response.data;
@@ -200,9 +238,13 @@ export class SgaService {
         response.data,
       );
 
-      // Persistência local dos veículos
+      // Persistência local dos veículos. Veículos INATIVOS no SGA são
+      // descartados aqui: não voltam ao app e, por não entrarem no upsert,
+      // ficam com isActive=false no updateMany abaixo.
       const data = response.data as SgaAssociadoResponse | null | undefined;
-      const veiculos = Array.isArray(data?.veiculos) ? data.veiculos : [];
+      const veiculos = (
+        Array.isArray(data?.veiculos) ? data.veiculos : []
+      ).filter((v) => !veiculoInativoNoSga(v));
       const now = new Date();
       const upsertedChassis = new Set<string>();
 

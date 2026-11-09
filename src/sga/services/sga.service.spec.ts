@@ -66,11 +66,38 @@ describe('SgaService', () => {
 
       const resultado = await service.consultarAssociado(42);
 
-      expect(resultado).toBe(associadoSga);
+      expect(resultado).toEqual(associadoSga);
       expect(sincronizacao.sincronizarEmSegundoPlano).toHaveBeenCalledTimes(1);
       expect(sincronizacao.sincronizarEmSegundoPlano).toHaveBeenCalledWith(
         expect.objectContaining({ id: 42, cpf: '52998224725' }),
         associadoSga,
+      );
+    });
+
+    it('omite veículos INATIVOS no SGA sem alterar o restante do corpo', async () => {
+      const inativo = {
+        chassi: '9BWZZZ377VT004252',
+        placa: 'DEF4G56',
+        descricao_situacao: 'INATIVO',
+      };
+      const corpoSga = {
+        ...associadoSga,
+        veiculos: [...associadoSga.veiculos, inativo],
+      };
+      sgaAuth.executeRequestWithAuth.mockResolvedValue({
+        status: 200,
+        data: corpoSga,
+      });
+
+      const resultado = await service.consultarAssociado(42);
+
+      expect(resultado).toEqual(associadoSga);
+      // O corpo original (compartilhado entre requisições em voo) não é mutado.
+      expect(corpoSga.veiculos).toHaveLength(2);
+      // A sincronização local continua recebendo o corpo bruto do SGA.
+      expect(sincronizacao.sincronizarEmSegundoPlano).toHaveBeenCalledWith(
+        expect.anything(),
+        corpoSga,
       );
     });
 
@@ -149,6 +176,43 @@ describe('SgaService', () => {
       expect(sincronizacao.sincronizarEmSegundoPlano).toHaveBeenCalledWith(
         expect.objectContaining({ id: 42, cpf: '52998224725' }),
         associadoSga,
+      );
+    });
+
+    it('não retorna nem persiste como ativo veículo INATIVO no SGA', async () => {
+      const ativo = {
+        chassi: '9BWZZZ377VT004251',
+        placa: 'ABC1D23',
+        descricao_situacao: 'ATIVO',
+      };
+      const inativoPorDescricao = {
+        chassi: '9BWZZZ377VT004252',
+        placa: 'DEF4G56',
+        descricao_situacao: 'Inativo ',
+      };
+      const inativoPorSituacao = {
+        chassi: '9BWZZZ377VT004253',
+        placa: 'GHI7J89',
+        situacao: 'INATIVO',
+      };
+      sgaAuth.executeRequestWithAuth.mockResolvedValue({
+        status: 200,
+        data: {
+          ...associadoSga,
+          veiculos: [ativo, inativoPorDescricao, inativoPorSituacao],
+        },
+      });
+
+      const resultado = await service.consultarVeiculosAssociado(42);
+
+      expect(resultado).toEqual([ativo]);
+      expect(prisma.userVehicle.upsert).toHaveBeenCalledTimes(1);
+      expect(prisma.userVehicle.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            chassi: { notIn: [ativo.chassi] },
+          }),
+        }),
       );
     });
 
