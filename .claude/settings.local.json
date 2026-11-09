@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(perl -0pi -e \"s/tokenBaseOrigin \\\\?\\\\? 'MAIS_PRIME'/tokenBaseOrigin ?? TENANT.defaultBase/g; s/\\\\{ baseOrigin: 'MAIS_PRIME', vehicleBelongsToUser: true \\\\}/{ baseOrigin: TENANT.defaultBase, vehicleBelongsToUser: true }/g\" src/sga/boleto/boleto.service.ts)",
+      "Bash(perl -0pi -e \"s/\\\\\\(reinspection\\\\.userVehicle\\\\?\\\\.user\\\\?\\\\.baseOrigin as BaseOrigin \\\\| null\\\\\\) \\\\?\\\\?\\\\n      'MAIS_PRIME';/\\(reinspection.userVehicle?.user?.baseOrigin as BaseOrigin | null\\) ??\\\\n      TENANT.defaultBase;/\" src/reinspection/reinspection.service.ts)",
+      "Bash(perl -0pi -e \"s/\\\\?\\\\? 'MAIS_PRIME';/?? TENANT.defaultBase;/g; s/let baseOrigin: BaseOrigin = 'MAIS_PRIME';/let baseOrigin: BaseOrigin = TENANT.defaultBase;/g\" src/sga/sga.service.ts)",
+      "Bash(perl -0pi -e \"s/'previa\\\\@maisprime\\\\.org\\\\.br'/TENANT.mailPrevia/g; s/'cobranca\\\\@maisprime\\\\.org\\\\.br'/TENANT.mailCobranca/g; s/\\\\`\\\\\"Mais Prime App\\\\\" <\\\\\\\\\\\\$\\\\{process\\\\.env\\\\.GMAIL_USER\\\\}>\\\\`/\\\\`\\\\\"\\\\\\\\\\\\${TENANT.appName}\\\\\" <\\\\\\\\\\\\${process.env.GMAIL_USER}>\\\\`/g\" src/common/services/mail.service.ts)",
+      "Bash(perl -0pi -e \"s{import \\\\{ SESv2Client, SendEmailCommand \\\\} from '\\\\@aws-sdk/client-sesv2';}{import { SESv2Client, SendEmailCommand } from '\\\\@aws-sdk/client-sesv2';\\\\nimport { TENANT } from 'src/config/tenant.config';}\" src/common/services/mail.service.ts)",
+      "Bash(perl -0pi -e 's{import puppeteer from '\\\\''puppeteer'\\\\'';}{import puppeteer from '\\\\''puppeteer'\\\\'';\\\\nimport { TENANT } from '\\\\''src/config/tenant.config'\\\\'';}' '$f')",
+      "Bash(perl -0pi -e 's{const logoPath = path.join\\\\\\(process.cwd\\\\\\(\\\\\\), '\\\\''assets'\\\\'', '\\\\''Logo.png'\\\\''\\\\\\);}{const logoPath = path.resolve\\(process.cwd\\(\\), TENANT.logoPath\\);}' '$f')",
+      "Bash(perl -0pi -e 's{Relat.rio gerado pelo sistema Mais Prime}{Relatório gerado pelo sistema \\\\${TENANT.reportName}}g' '$f')",
+      "Bash(perl \"C:/Users/leuma/AppData/Local/Temp/claude/C--Users-leuma-Desktop-Projetos-App-associado-beneficios-api/f89339e3-86b4-4dfc-bb91-a7e555167330/scratchpad/patch-pdf.pl\" src/rastreamento/m7/pdf/historico-pdf-m7.service.ts src/rastreamento/logica/pdf/trajeto-pdf-logica.service.ts src/rastreamento/softruck/pdf/historico-pdf-softruck.service.ts)",
+      "Bash(npx prisma *)",
+      "Bash(npx tsc *)",
+      "Bash(echo \"=== EXIT: $? ===\")",
+      "Bash(npx jest *)",
+      "Bash(node -e \"const p=require\\('./package.json'\\); console.log\\(JSON.stringify\\(p.jest,null,2\\)\\)\")",
+      "Bash(git check-ignore *)",
+      "Bash(git ls-tree)",
+      "Bash(echo \"TSC=$?\")",
+      "Bash(npx eslint *)",
+      "Bash(npm run *)",
+      "Bash(echo \"BUILD=$?\")",
+      "PowerShell(npx eslint --fix src/rastreamento/rastreamento-m7.ts)"
+    ]
+  }
+}

@@ -81,6 +81,30 @@ model AdminPanelUser {
   @@index([role], map: "AdminPanelUser_role_idx")
 }
 
+/// Auditoria de troca de senha de usuário do app: quem alterou (usuário do
+/// painel ou o próprio associado) a senha de qual usuário. Sem FK para
+/// preservar o histórico mesmo que o usuário seja removido.
+model UserPasswordChangeLog {
+  id                  Int      @id @default(autoincrement())
+  /// Usuário do app que teve a senha alterada.
+  userId              Int
+  userCpf             String   @db.VarChar(20)
+  userEmail           String?  @db.VarChar(150)
+  userName            String?  @db.VarChar(150)
+  /// PAINEL_ADMIN (reset pelo painel) | APP (associado trocou a própria senha)
+  origem              String   @db.VarChar(20)
+  adminPanelUserId    Int?
+  adminPanelUserEmail String?  @db.VarChar(150)
+  adminPanelUserRole  String?  @db.VarChar(30)
+  ipAddress           String?  @db.VarChar(45)
+  userAgent           String?  @db.VarChar(500)
+  createdAt           DateTime @default(now())
+
+  @@index([userId], map: "UserPasswordChangeLog_userId_idx")
+  @@index([adminPanelUserId], map: "UserPasswordChangeLog_adminPanelUserId_idx")
+  @@index([createdAt], map: "UserPasswordChangeLog_createdAt_idx")
+}
+
 model MarketingNotificationAuditLog {
   id                 Int            @id @default(autoincrement())
   adminPanelUserId   Int

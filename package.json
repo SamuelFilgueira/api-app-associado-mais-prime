@@ -9,8 +9,8 @@
     "build": "nest build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "start": "nest start",
-    "start:dev": "nest start --watch",
-    "start:debug": "nest start --debug --watch",
+    "start:dev": "node --env-file=.env node_modules/@nestjs/cli/bin/nest.js start --watch",
+    "start:debug": "node --env-file=.env node_modules/@nestjs/cli/bin/nest.js start --debug --watch",
     "start:prod": "node dist/main",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
     "lint:check": "eslint \"{src,apps,libs,test}/**/*.ts\"",
@@ -24,7 +24,8 @@
     "softruck:export-vehicles": "node scripts/export-softruck-vehicles.mjs",
     "prisma:generate": "prisma generate",
     "prisma:migrate:deploy": "prisma migrate deploy",
-    "prisma:seed": "ts-node -r tsconfig-paths/register prisma/seed.ts"
+    "prisma:seed": "ts-node -r tsconfig-paths/register prisma/seed.ts",
+    "start:prod:local": "node --env-file=.env dist/main"
   },
   "dependencies": {
     "@aws-sdk/client-sesv2": "^3.1056.0",
@@ -111,5 +112,18 @@
     ],
     "coverageDirectory": "../coverage",
     "testEnvironment": "node"
+  },
+  "allowScripts": {
+    "bcrypt": true,
+    "msgpackr-extract": true,
+    "prisma": true,
+    "@prisma/client": true,
+    "@prisma/engines": true,
+    "puppeteer": true,
+    "sharp": true,
+    "unrs-resolver": true,
+    "@scarf/scarf": false,
+    "@nestjs/core": false,
+    "ngrok": false
   }
 }

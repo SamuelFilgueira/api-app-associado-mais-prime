@@ -44,7 +44,16 @@ export class AssociadoService {
    * @param id ID do usuário
    * @param newPassword Nova senha
    */
-  async changePassword(id: number, newPassword: string) {
+  /**
+   * Troca a senha de um usuário do app. `ator` identifica quem pediu a troca
+   * (usuário do painel no reset, ou o próprio associado) e vai para a
+   * auditoria `UserPasswordChangeLog` + log estruturado.
+   */
+  async changePassword(
+    id: number,
+    newPassword: string,
+    ator?: PasswordChangeActor,
+  ) {
     const user = await this.prisma.user.findUnique({ where: { id } });
     if (!user) {
       throw new NotFoundException('Usuário não encontrado');
@@ -64,10 +73,78 @@ export class AssociadoService {
         updatedAt: new Date(),
       },
     });
+
+    await this.registrarTrocaDeSenha(
+      { id: user.id, cpf: user.cpf, email: user.email, name: user.name },
+      ator,
+    );
+
     return {
       message: 'Senha alterada com sucesso',
       primeiroLogin: false,
     };
+  }
+
+  /**
+   * Auditoria da troca de senha. Nunca lança: a senha já foi trocada e a
+   * falha de auditoria não pode desfazer nem esconder isso do chamador.
+   */
+  private async registrarTrocaDeSenha(
+    alvo: {
+      id: number;
+      cpf: string;
+      email: string | null;
+      name: string | null;
+    },
+    ator?: PasswordChangeActor,
+  ): Promise<void> {
+    const origem: PasswordChangeOrigem = ator?.adminRole
+      ? 'PAINEL_ADMIN'
+      : 'APP';
+    const doPainel = origem === 'PAINEL_ADMIN';
+    const adminPanelUserId =
+      doPainel && ator?.userId != null ? Number(ator.userId) || null : null;
+    const adminPanelUserEmail = doPainel ? (ator?.email ?? null) : null;
+    const adminPanelUserRole = doPainel ? (ator?.adminRole ?? null) : null;
+
+    const meta = JSON.stringify({
+      origem,
+      userId: alvo.id,
+      userCpf: maskCpf(alvo.cpf),
+      adminPanelUserId,
+      adminPanelUserEmail,
+      adminPanelUserRole,
+      ip: ator?.ipAddress ?? null,
+    });
+
+    this.logger.warn(
+      doPainel
+        ? `Senha de usuário do app redefinida pelo painel administrativo | ${meta}`
+        : `Senha alterada pelo próprio usuário do app | ${meta}`,
+    );
+
+    try {
+      await this.prisma.userPasswordChangeLog.create({
+        data: {
+          userId: alvo.id,
+          userCpf: alvo.cpf,
+          userEmail: alvo.email,
+          userName: alvo.name,
+          origem,
+          adminPanelUserId,
+          adminPanelUserEmail,
+          adminPanelUserRole,
+          ipAddress: ator?.ipAddress?.slice(0, 45) ?? null,
+          userAgent: ator?.userAgent?.slice(0, 500) ?? null,
+        },
+      });
+    } catch (error) {
+      this.logger.error(
+        `Falha ao gravar auditoria de troca de senha | ${meta} | erro=${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
   }
 
   async primeiroAcesso(rawCpf: string) {
@@ -543,4 +620,25 @@ export class AssociadoService {
 
     throw lastError;
   }
+}
+
+export type PasswordChangeOrigem = 'PAINEL_ADMIN' | 'APP';
+
+/** Quem pediu a troca de senha (extraído do JWT e da requisição). */
+export interface PasswordChangeActor {
+  /** `sub` do JWT: id do AdminPanelUser (painel) ou do usuário do app. */
+  userId?: number | string;
+  email?: string;
+  /** Presente só em tokens do painel administrativo. */
+  adminRole?: string;
+  ipAddress?: string;
+  userAgent?: string;
+}
+
+/** CPF mascarado para log (***.***.123-45). */
+function maskCpf(cpf: string): string {
+  const digitos = (cpf ?? '').replace(/\D/g, '');
+  return digitos.length === 11
+    ? `***.***.${digitos.slice(6, 9)}-${digitos.slice(9)}`
+    : '***';
 }
