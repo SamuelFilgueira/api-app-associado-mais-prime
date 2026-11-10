@@ -16,6 +16,12 @@ import { UpdateAssociadoDto } from 'src/associado/dto/update-associado.dto';
 import { BaseOrigin } from 'src/shared/token-resolver.service';
 import { TENANT } from 'src/config/tenant.config';
 import { SgaAuthService } from 'src/integrations/hinova/sga-auth.service';
+import {
+  algumVeiculoPermiteAcesso,
+  associadoPendenteDePagamento,
+  associadoPodeAcessarApp,
+  situacaoAssociadoPermiteAcesso,
+} from 'src/associado/helpers/acesso-app.helper';
 
 /** Campos da resposta do SGA usados para classificar instabilidade. */
 type RespostaSga = { status: number; data: unknown };
@@ -27,6 +33,10 @@ type RespostaSga = { status: number; data: unknown };
  */
 const MSG_SGA_INDISPONIVEL =
   'Não foi possível validar seus dados neste momento devido a uma indisponibilidade temporária do sistema. Por favor, tente novamente em alguns minutos.';
+
+/** Resposta atual do app para associado em situação sem acesso (403). */
+const MSG_ASSOCIADO_SEM_PERMISSAO =
+  'Associado sem permissão para acessar a aplicação';
 
 @Injectable()
 export class AssociadoService {
@@ -235,9 +245,7 @@ export class AssociadoService {
       data?.error?.some((msg: string) =>
         msg.includes('Associado não encontrado'),
       ) ||
-      !['ATIVO', 'INADIMPLENTE 20 DIAS', 'INADIMPLENTE'].includes(
-        data?.descricao_situacao,
-      )
+      !associadoPodeAcessarApp(data?.descricao_situacao, data?.veiculos)
     ) {
       throw new BadRequestException('Cpf de associado inválido para cadastro');
     }
@@ -398,22 +406,72 @@ export class AssociadoService {
 
     const data = response?.data;
 
-    if (
-      response.status >= 400 ||
-      data?.mensagem === 'Não aceitável' ||
-      !['ATIVO', 'INADIMPLENTE 20 DIAS', 'INADIMPLENTE'].includes(
-        data?.descricao,
-      )
-    ) {
-      throw new ForbiddenException(
-        'Associado sem permissão para acessar a aplicação',
+    if (response.status >= 400 || data?.mensagem === 'Não aceitável') {
+      throw new ForbiddenException(MSG_ASSOCIADO_SEM_PERMISSAO);
+    }
+
+    if (associadoPendenteDePagamento(data?.descricao)) {
+      // PENDENTE DE PAGAMENTO: só acessa se algum veículo estiver em situação
+      // que dá acesso ao app (o app restringe cada veículo pela situação dele).
+      const temVeiculoComAcesso = await this.pendenteTemVeiculoComAcesso(
+        baseOrigin,
+        cpf,
       );
+      if (!temVeiculoComAcesso) {
+        this.logger.warn(
+          `[VerificarSituacao] Associado PENDENTE DE PAGAMENTO sem veículo em situação com acesso ao app (CPF ${maskCpf(cpf)})`,
+        );
+        throw new ForbiddenException(MSG_ASSOCIADO_SEM_PERMISSAO);
+      }
+    } else if (!situacaoAssociadoPermiteAcesso(data?.descricao)) {
+      throw new ForbiddenException(MSG_ASSOCIADO_SEM_PERMISSAO);
     }
 
     return {
       situacao: data?.descricao,
       mensagem: data?.mensagem || 'Situação verificada com sucesso',
     };
+  }
+
+  /**
+   * Para associado PENDENTE DE PAGAMENTO: consulta os veículos no SGA e diz se
+   * ao menos um está em situação que dá acesso ao app. Instabilidade do SGA
+   * segue o mesmo contrato de `verificarSituacao` (500 em falha de rede, 403
+   * com mensagem neutra em bloqueio/corpo inesperado).
+   */
+  private async pendenteTemVeiculoComAcesso(
+    baseOrigin: BaseOrigin,
+    cpf: string,
+  ): Promise<boolean> {
+    let response;
+    try {
+      response = await this.callSgaWithRetry(
+        baseOrigin,
+        {
+          method: 'GET',
+          url: `${SGA_BASE_URL}/associado/buscar/${cpf}`,
+          validateStatus: () => true,
+          compartilharEmVoo: true,
+        },
+        `buscar veículos do associado pendente CPF=${maskCpf(cpf)}`,
+      );
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.error(
+        `[VerificarSituacao] Erro ao consultar veículos no SGA (CPF ${maskCpf(cpf)}): ${msg}`,
+      );
+      throw new InternalServerErrorException(MSG_SGA_INDISPONIVEL);
+    }
+
+    if (this.respostaSgaIndisponivel(response as RespostaSga)) {
+      this.logger.error(
+        `[VerificarSituacao] SGA respondeu HTTP ${response.status} (indisponibilidade/bloqueio) ao buscar veículos (CPF ${maskCpf(cpf)})`,
+      );
+      throw new ForbiddenException(MSG_SGA_INDISPONIVEL);
+    }
+
+    if (response.status >= 400) return false;
+    return algumVeiculoPermiteAcesso(response.data?.veiculos);
   }
 
   async findById(id: number) {
