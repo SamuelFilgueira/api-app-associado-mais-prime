@@ -77,6 +77,11 @@ const WARN_IF_MISSING = [
  * - BOLETO_REATIVACAO_RETRY_INTERVALO_MIN / BOLETO_REATIVACAO_RETRY_MAX_HORAS /
  *   BOLETO_REATIVACAO_JANELA_VENCIMENTO_DIAS: retry da criação do boleto de
  *   reativação após instabilidade do SGA (sga/config/boleto-reativacao-retry.config.ts)
+ * - ASSOCIADO_SORTE_AGENDADOR: `true` liga o job periódico do Associado da
+ *   Sorte (default DESLIGADO; associado-sorte/config/associado-sorte.config.ts)
+ * - ASSOCIADO_SORTE_PAINEL_URL (link do e-mail de retirada; vazio omite o botão) /
+ *   ASSOCIADO_SORTE_LEMBRETE_LOTE (pushes de lembrete por ciclo, padrão 500):
+ *   opcionais, lidos em associado-sorte/config/associado-sorte.config.ts
  * - MAIL_PASSWORD_RESET_PROVIDER: ses (default) | gmail — provedor do e-mail de
  *   redefinição de senha (mail.config.ts). Hertz usa gmail; Mais Prime, ses.
  * - EXPO_UPDATES_DIR / EXPO_UPDATES_PUBLIC_URL / EXPO_UPDATES_PRIVATE_KEY_PATH /

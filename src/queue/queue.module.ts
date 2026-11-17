@@ -9,6 +9,8 @@ export const ANALYTICS_QUEUE = 'analytics-summaries';
 export const BOLETO_NOTIFICACAO_QUEUE = 'boleto-notificacao';
 /** Retry da criação do boleto de reativação após instabilidade do SGA. */
 export const BOLETO_REATIVACAO_RETRY_QUEUE = 'boleto-reativacao-retry';
+/** Job periódico do Associado da Sorte (apuração, encerramento, lembretes). */
+export const ASSOCIADO_SORTE_QUEUE = 'associado-sorte';
 
 /**
  * Módulo global que configura o BullMQ com Redis.
@@ -52,6 +54,7 @@ const DEFAULT_JOB_RETENTION = {
       { name: ANALYTICS_QUEUE },
       { name: BOLETO_NOTIFICACAO_QUEUE },
       { name: BOLETO_REATIVACAO_RETRY_QUEUE },
+      { name: ASSOCIADO_SORTE_QUEUE },
     ),
   ],
   exports: [BullModule],

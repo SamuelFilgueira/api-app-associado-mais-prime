@@ -14,6 +14,11 @@ import { AssociadoSincronizacaoService } from 'src/sga/services/associado-sincro
 import { PrismaService } from 'src/database/prisma.service';
 import { BaseOrigin } from 'src/shared/token-resolver.service';
 import { TENANT } from 'src/config/tenant.config';
+import {
+  getRegraRevistoria,
+  resolverTemplateRevistoria,
+  situacaoExigeRevistoria,
+} from 'src/config/revistoria-regra.config';
 import { SgaAuthService } from 'src/integrations/hinova/sga-auth.service';
 import { debugLog } from 'src/shared/debug-log.util';
 import { formatDateBR } from 'src/shared/date.util';
@@ -293,8 +298,16 @@ export class SgaService {
         },
       });
 
-      // Retorna apenas o array de veículos (mantém resposta para frontend)
-      return veiculos;
+      // Retorna apenas o array de veículos (mantém resposta para frontend).
+      // `revistoria_obrigatoria` é aditivo: aplica a regra de revistoria da
+      // base do associado (src/config/revistoria-regra.config.ts).
+      return veiculos.map((v) => ({
+        ...v,
+        revistoria_obrigatoria: situacaoExigeRevistoria(
+          v.descricao_situacao ?? v.situacao,
+          usuario.baseOrigin,
+        ),
+      }));
     } catch (error: unknown) {
       if (axios.isAxiosError(error) && error.response?.data) {
         return error.response.data;
@@ -305,7 +318,11 @@ export class SgaService {
     }
   }
 
-  async consultarVeiculoInfo(chassi: string) {
+  /**
+   * `baseOrigin` (do JWT) define a regra de template da revistoria; sem ele,
+   * vale a base padrão do deploy.
+   */
+  async consultarVeiculoInfo(chassi: string, baseOrigin?: BaseOrigin | null) {
     const normalizedChassi = chassi?.trim();
 
     if (!normalizedChassi) {
@@ -336,6 +353,11 @@ export class SgaService {
         tipo: veiculo?.tipo ?? null,
         categoria: veiculo?.categoria ?? null,
         nome: veiculo?.nome ?? null,
+        // Template de fotos da revistoria para este tipo, pela regra da base.
+        template_revistoria: resolverTemplateRevistoria(
+          veiculo?.tipo,
+          baseOrigin,
+        ),
       }));
     } catch (error: unknown) {
       if (axios.isAxiosError(error) && error.response?.data) {
@@ -518,6 +540,8 @@ export class SgaService {
     const cpf = userVehicle.user.cpf.replace(/\D/g, '');
     const baseOrigin: BaseOrigin =
       (userVehicle.user.baseOrigin as BaseOrigin) ?? TENANT.defaultBase;
+    // Códigos do SGA que variam por empresa (conta, tipo, situações).
+    const regraBoleto = getRegraRevistoria(baseOrigin).boleto;
 
     // 2. Associado (codigo_associado, codigo_regional, nome, telefone)
     const associado = await this.buscarDadosAssociadoParaBoleto(
@@ -549,10 +573,10 @@ export class SgaService {
       codigo_associado: associado.codigoAssociado,
       codigo_regional: associado.codigoRegional,
       codigo_situacao: '2',
-      codigo_conta: 27,
+      codigo_conta: regraBoleto.codigoConta,
       mes_referente: mesReferente,
       link_boleto: true,
-      codigo_tipo_boleto: CODIGO_TIPO_BOLETO_REATIVACAO,
+      codigo_tipo_boleto: regraBoleto.codigoTipoBoleto,
       array_parcela: [{ valor: formattedValue, vencimento }],
       referencia: [
         {
@@ -620,17 +644,19 @@ export class SgaService {
       debugId,
     });
 
-    // 9. Situação do veículo → 20 (aguardando reativação)
-    if (produtos.codigoVeiculo) {
+    // 9. Situação do veículo após o boleto (Mais Prime: 20 — aguardando
+    // reativação; empresas sem equivalente: não altera).
+    const situacaoAposBoleto = regraBoleto.situacaoVeiculoAposBoleto;
+    if (produtos.codigoVeiculo && situacaoAposBoleto != null) {
       try {
         await this.alterarSituacaoVeiculo(
-          20,
+          situacaoAposBoleto,
           produtos.codigoVeiculo,
           baseOrigin,
         );
       } catch (alterarError) {
         this.logger.error(
-          `Falha ao alterar situação do veículo para 20 | codigo_veiculo=${produtos.codigoVeiculo}`,
+          `Falha ao alterar situação do veículo para ${situacaoAposBoleto} | codigo_veiculo=${produtos.codigoVeiculo}`,
           alterarError instanceof Error ? alterarError.stack : undefined,
         );
       }
@@ -805,6 +831,8 @@ export class SgaService {
           telefoneCelular: params.associado.telefoneCelular ?? '',
           templateId: process.env.suri_template_id,
           parametrosExtras: [params.linkBoleto],
+          contexto: 'boleto-reativacao',
+          debugId: params.debugId,
         });
         suriEnviada = true;
       } catch (suriError) {
@@ -850,8 +878,6 @@ function escalarParaString(valor: unknown): string | undefined {
   return undefined;
 }
 
-/** `codigo_tipo_boleto` usado no cadastro do boleto de reativação. */
-export const CODIGO_TIPO_BOLETO_REATIVACAO = 2;
 /** Timeout do `boleto/cadastrar` (gera boleto e link no SGA). */
 const SGA_BOLETO_TIMEOUT_MS = 60_000;
 

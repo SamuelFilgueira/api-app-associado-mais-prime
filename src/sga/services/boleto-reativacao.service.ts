@@ -8,14 +8,12 @@ import { SgaAuthService } from 'src/integrations/hinova/sga-auth.service';
 import { SGA_BASE_URL } from 'src/integrations/hinova/hinova.constants';
 import { BOLETO_REATIVACAO_RETRY_QUEUE } from 'src/queue/queue.module';
 import { TENANT } from 'src/config/tenant.config';
+import { getRegraRevistoria } from 'src/config/revistoria-regra.config';
 import { BaseOrigin } from 'src/shared/token-resolver.service';
 import { debugLog } from 'src/shared/debug-log.util';
 import { baseTag } from 'src/shared/log.util';
 import { formatDateBR, parseDateBR } from 'src/shared/date.util';
-import {
-  CODIGO_TIPO_BOLETO_REATIVACAO,
-  SgaService,
-} from 'src/sga/services/sga.service';
+import { SgaService } from 'src/sga/services/sga.service';
 import {
   BoletoReativacaoDefinitivoError,
   BoletoReativacaoInstabilidadeError,
@@ -476,7 +474,8 @@ export class BoletoReativacaoService {
 
   /**
    * Procura em `listar/boleto-associado-veiculo` um boleto do veículo que
-   * seja de reativação (`codigo_tipo_boleto = 2`), em ABERTO e com vencimento
+   * seja de reativação (`codigo_tipo_boleto` da regra da base — 2 na Mais
+   * Prime e na Hertz), em ABERTO e com vencimento
    * original de hoje até hoje + janela. O SGA não devolve data de criação,
    * então o critério "criado hoje" é aproximado por tipo + situação +
    * vencimento futuro. Boleto de mensalidade (outro tipo) nunca é adotado.
@@ -528,6 +527,7 @@ export class BoletoReativacaoService {
       return null;
     }
 
+    const { codigoTipoBoleto } = getRegraRevistoria(baseOrigin).boleto;
     const candidatos = (response.data as BoletoSgaItem[]).filter((item) => {
       if (!item || typeof item !== 'object' || item.nosso_numero == null) {
         return false;
@@ -540,7 +540,7 @@ export class BoletoReativacaoService {
       }
       if (
         item.codigo_tipo_boleto == null ||
-        Number(item.codigo_tipo_boleto) !== CODIGO_TIPO_BOLETO_REATIVACAO
+        Number(item.codigo_tipo_boleto) !== codigoTipoBoleto
       ) {
         return false;
       }

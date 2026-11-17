@@ -19,6 +19,7 @@ import { MailService } from 'src/infra/mail/mail.service';
 import { BoletoReativacaoService } from 'src/sga/services/boleto-reativacao.service';
 import { ReinspectionHinovaService } from 'src/reinspection/services/reinspection-hinova.service';
 import { debugLog } from 'src/shared/debug-log.util';
+import { comRetryEmConflito } from 'src/database/conflito-escrita.util';
 
 /** Usuário do painel que disparou a ação (para auditoria do envio à Hinova). */
 export interface ReinspectionActor {
@@ -1018,34 +1019,38 @@ export class ReinspectionService {
       photo.reinspection.vehicleType,
     );
 
-    const [updatedPhoto, updatedReinspection] = await this.prisma.$transaction([
-      this.prisma.reinspectionPhoto.update({
-        where: { id: photo.id },
-        data: {
-          status: ReinspectionPhotoStatus.REPROVADA,
-          templatePhotoId: templatePhotoIdToUse,
-        },
-        select: {
-          id: true,
-          reinspectionId: true,
-          nomeArquivo: true,
-          templatePhotoId: true,
-          status: true,
-        },
-      }),
-      this.prisma.reinspection.update({
-        where: { id: photo.reinspectionId },
-        data: {
-          status: 'REPROVADA',
-        },
-        select: {
-          id: true,
-          userVehicleId: true,
-          status: true,
-          updatedAt: true,
-        },
-      }),
-    ]);
+    // Reprovações simultâneas da mesma revistoria gravam a mesma linha
+    // `Reinspection`: repete em conflito de escrita (idempotente).
+    const [updatedPhoto, updatedReinspection] = await comRetryEmConflito(() =>
+      this.prisma.$transaction([
+        this.prisma.reinspectionPhoto.update({
+          where: { id: photo.id },
+          data: {
+            status: ReinspectionPhotoStatus.REPROVADA,
+            templatePhotoId: templatePhotoIdToUse,
+          },
+          select: {
+            id: true,
+            reinspectionId: true,
+            nomeArquivo: true,
+            templatePhotoId: true,
+            status: true,
+          },
+        }),
+        this.prisma.reinspection.update({
+          where: { id: photo.reinspectionId },
+          data: {
+            status: 'REPROVADA',
+          },
+          select: {
+            id: true,
+            userVehicleId: true,
+            status: true,
+            updatedAt: true,
+          },
+        }),
+      ]),
+    );
 
     this.logger.warn(
       `Foto reprovada e revistoria atualizada para REPROVADA | photoId=${updatedPhoto.id} | reinspectionId=${updatedReinspection.id} | templatePhotoId=${updatedPhoto.templatePhotoId ?? 'N/A'}`,
@@ -1101,16 +1106,26 @@ export class ReinspectionService {
 
     const reinspectionStatus = hasRejectedPhoto ? 'REPROVADA' : 'EM_ANALISE';
 
-    const updatedReinspection = await this.prisma.reinspection.update({
-      where: { id: photo.reinspectionId },
-      data: { status: reinspectionStatus },
-      select: {
-        id: true,
-        userVehicleId: true,
-        status: true,
-        updatedAt: true,
-      },
-    });
+    // O painel aprova todas as fotos em paralelo e cada aprovação grava a
+    // mesma linha `Reinspection`. `updateMany` é um UPDATE único (sem leitura
+    // prévia na transação), que não conflita sob `innodb_snapshot_isolation`
+    // do MariaDB; a leitura do retorno vem depois.
+    await comRetryEmConflito(() =>
+      this.prisma.reinspection.updateMany({
+        where: { id: photo.reinspectionId },
+        data: { status: reinspectionStatus },
+      }),
+    );
+    const updatedReinspection =
+      await this.prisma.reinspection.findUniqueOrThrow({
+        where: { id: photo.reinspectionId },
+        select: {
+          id: true,
+          userVehicleId: true,
+          status: true,
+          updatedAt: true,
+        },
+      });
 
     return {
       photo: updatedPhoto,

@@ -18,6 +18,7 @@ import {
   excedeuIdadeMaxima,
   getBoletoVerificacaoConfig,
 } from 'src/sga/config/boleto-verificacao.config';
+import { getRegraRevistoria } from 'src/config/revistoria-regra.config';
 
 interface BoletoVerificacaoJobData {
   userVehicleId: number;
@@ -428,7 +429,9 @@ export class BoletoVerificacaoProcessor
       );
     }
 
-    const alterarUrl = `${SGA_BASE_URL}/veiculo/alterar-situacao-para/1/${codigo_veiculo}`;
+    // Situações de reativação da regra da base (Mais Prime e Hertz: 1 ATIVO).
+    const regraBoleto = getRegraRevistoria(baseOrigin).boleto;
+    const alterarUrl = `${SGA_BASE_URL}/veiculo/alterar-situacao-para/${regraBoleto.situacaoVeiculoAposPagamento}/${codigo_veiculo}`;
 
     const alterarResponse = await this.sgaAuthService.executeRequestWithAuth(
       baseOrigin,
@@ -438,7 +441,7 @@ export class BoletoVerificacaoProcessor
     this.logger.log(
       debugLog(
         BoletoVerificacaoProcessor.name,
-        'Veículo reativado (situação 1)',
+        `Veículo reativado (situação ${regraBoleto.situacaoVeiculoAposPagamento})`,
         debugId,
         {
           codigoVeiculo: codigo_veiculo,
@@ -447,9 +450,9 @@ export class BoletoVerificacaoProcessor
       ),
     );
 
-    // Após confirmação de pagamento, reativar associado (situação 1)
+    // Após confirmação de pagamento, reativar associado (situação da regra)
     if (codigo_associado) {
-      const alterarAssociadoUrl = `${SGA_BASE_URL}/associado/alterar-situacao-para/1/${codigo_associado}`;
+      const alterarAssociadoUrl = `${SGA_BASE_URL}/associado/alterar-situacao-para/${regraBoleto.situacaoAssociadoAposPagamento}/${codigo_associado}`;
 
       const alterarAssociadoResponse =
         await this.sgaAuthService.executeRequestWithAuth(baseOrigin, {
@@ -462,7 +465,7 @@ export class BoletoVerificacaoProcessor
         this.logger.warn(
           debugLog(
             BoletoVerificacaoProcessor.name,
-            'Falha ao reativar associado (situação 1)',
+            `Falha ao reativar associado (situação ${regraBoleto.situacaoAssociadoAposPagamento})`,
             debugId,
             {
               codigoAssociado: codigo_associado,
@@ -496,6 +499,8 @@ export class BoletoVerificacaoProcessor
           nome,
           telefoneCelular: telefone_celular,
           templateId: process.env.suri_template_id_boleto_pago,
+          contexto: 'boleto-pago',
+          debugId,
         });
       } catch (suriError) {
         this.logger.error(

@@ -377,4 +377,66 @@ export class MailService {
       throw error;
     }
   }
+
+  /**
+   * Associado da Sorte: aviso de nova retirada (compra na Loja da Sorte) para
+   * a equipe. Chamado pelo job `sorte-email-retirada` (3 tentativas); lança
+   * em caso de falha para o job tentar de novo. Dados já mascarados.
+   */
+  async sendSorteNovaRetiradaEmail(
+    destinatarios: string[],
+    dados: {
+      produto: string;
+      tipoProduto: string;
+      codigoPedido: string;
+      creditos: number;
+      associadoNome: string;
+      cpfMascarado: string;
+      telefoneMascarado: string | null;
+      compradoEm: string;
+      linkPainel: string | null;
+    },
+  ): Promise<void> {
+    const esc = (v: string) =>
+      v
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    const linha = (rotulo: string, valor: string) =>
+      `<tr><td style="padding: 6px 12px 6px 0; color: #666;">${rotulo}</td><td style="padding: 6px 0; font-weight: bold; color: #222;">${esc(valor)}</td></tr>`;
+
+    const mailOptions: nodemailer.SendMailOptions = {
+      from: `"${TENANT.appName}" <${process.env.GMAIL_USER}>`,
+      to: destinatarios,
+      subject: `Associado da Sorte - nova retirada: ${dados.produto} (pedido ${dados.codigoPedido})`,
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 520px; margin: auto; padding: 24px; border: 1px solid #e0e0e0; border-radius: 8px;">
+          <h2 style="color: #333;">Nova retirada na Loja da Sorte</h2>
+          <p>Um associado comprou um produto com créditos. Chame-o no WhatsApp pelo painel para combinar a retirada.</p>
+          <table style="border-collapse: collapse; font-size: 14px;">
+            ${linha('Produto', dados.produto)}
+            ${linha('Tipo', dados.tipoProduto)}
+            ${linha('Código do pedido', dados.codigoPedido)}
+            ${linha('Créditos', String(dados.creditos))}
+            ${linha('Associado', dados.associadoNome)}
+            ${linha('CPF', dados.cpfMascarado)}
+            ${linha('Telefone', dados.telefoneMascarado ?? 'não informado (o associado confirma no app)')}
+            ${linha('Data da compra', dados.compradoEm)}
+          </table>
+          ${dados.linkPainel ? `<p style="margin-top: 20px;"><a href="${esc(dados.linkPainel)}" style="background: #D9251C; color: #fff; padding: 10px 16px; border-radius: 6px; text-decoration: none;">Abrir no painel</a></p>` : ''}
+          <p style="color: #888; font-size: 12px;">E-mail automático do Associado da Sorte.</p>
+        </div>
+      `,
+    };
+
+    try {
+      await this.transporter.sendMail(mailOptions);
+    } catch (error) {
+      this.logger.error(
+        `Falha ao enviar e-mail de nova retirada do Associado da Sorte (pedido ${dados.codigoPedido}): ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
+  }
 }

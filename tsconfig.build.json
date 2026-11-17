@@ -9,6 +9,8 @@
     "insight-hub",
     "insight-hub/**",
     "**/*spec.ts",
-    "prisma/seed.ts"
+    "src/**/testing/**",
+    "prisma/seed.ts",
+    "prisma/seed-associado-sorte-demo.ts"
   ]
 }

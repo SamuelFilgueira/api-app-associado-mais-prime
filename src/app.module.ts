@@ -27,6 +27,7 @@ import { AppVersionModule } from './app-version/app-version.module';
 import { BoletoNotificacaoModule } from './boleto-notificacao/boleto-notificacao.module';
 import { ExpoUpdatesModule } from './expo-updates/expo-updates.module';
 import { DirectPartnersModule } from './direct-partners/direct-partners.module';
+import { AssociadoSorteModule } from './associado-sorte/associado-sorte.module';
 
 @Module({
   imports: [
@@ -58,6 +59,7 @@ import { DirectPartnersModule } from './direct-partners/direct-partners.module';
     BoletoNotificacaoModule,
     ExpoUpdatesModule,
     DirectPartnersModule,
+    AssociadoSorteModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -30,8 +30,11 @@ export class SgaController {
   }
 
   @Get('veiculos-info/:chassi')
-  consultarVeiculoInfo(@Param('chassi') chassi: string) {
-    return this.sgaService.consultarVeiculoInfo(chassi);
+  consultarVeiculoInfo(
+    @Param('chassi') chassi: string,
+    @Req() req: { user?: { baseOrigin?: string } },
+  ) {
+    return this.sgaService.consultarVeiculoInfo(chassi, req.user?.baseOrigin);
   }
 
   @Patch('set-revistoria')

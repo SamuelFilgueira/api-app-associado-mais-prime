@@ -14,7 +14,11 @@ describe('SgaService', () => {
   let service: SgaService;
   let prisma: {
     user: { findUnique: jest.Mock };
-    userVehicle: { upsert: jest.Mock; updateMany: jest.Mock };
+    userVehicle: {
+      upsert: jest.Mock;
+      updateMany: jest.Mock;
+      findUnique: jest.Mock;
+    };
   };
   let sgaAuth: { executeRequestWithAuth: jest.Mock };
   let sincronizacao: { sincronizarEmSegundoPlano: jest.Mock };
@@ -43,6 +47,7 @@ describe('SgaService', () => {
       userVehicle: {
         upsert: jest.fn().mockResolvedValue({}),
         updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+        findUnique: jest.fn(),
       },
     };
     sgaAuth = { executeRequestWithAuth: jest.fn() };
@@ -170,7 +175,12 @@ describe('SgaService', () => {
 
       const resultado = await service.consultarVeiculosAssociado(42);
 
-      expect(resultado).toEqual(associadoSga.veiculos);
+      expect(resultado).toEqual(
+        associadoSga.veiculos.map((v) => ({
+          ...v,
+          revistoria_obrigatoria: false,
+        })),
+      );
       expect(prisma.userVehicle.upsert).toHaveBeenCalledTimes(1);
       expect(sincronizacao.sincronizarEmSegundoPlano).toHaveBeenCalledTimes(1);
       expect(sincronizacao.sincronizarEmSegundoPlano).toHaveBeenCalledWith(
@@ -205,7 +215,7 @@ describe('SgaService', () => {
 
       const resultado = await service.consultarVeiculosAssociado(42);
 
-      expect(resultado).toEqual([ativo]);
+      expect(resultado).toEqual([{ ...ativo, revistoria_obrigatoria: false }]);
       expect(prisma.userVehicle.upsert).toHaveBeenCalledTimes(1);
       expect(prisma.userVehicle.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -214,6 +224,33 @@ describe('SgaService', () => {
           }),
         }),
       );
+    });
+
+    it('marca revistoria_obrigatoria pela regra da base (Mais Prime: só INADIMPLENTE 20 DIAS)', async () => {
+      sgaAuth.executeRequestWithAuth.mockResolvedValue({
+        status: 200,
+        data: {
+          ...associadoSga,
+          veiculos: [
+            { chassi: 'C1', descricao_situacao: 'INADIMPLENTE 20 DIAS' },
+            { chassi: 'C2', descricao_situacao: 'INADIMPLENTE' },
+            { chassi: 'C3', situacao: 'ATIVO' },
+          ],
+        },
+      });
+
+      const resultado = (await service.consultarVeiculosAssociado(42)) as {
+        chassi: string;
+        revistoria_obrigatoria: boolean;
+      }[];
+
+      expect(
+        resultado.map((v) => [v.chassi, v.revistoria_obrigatoria]),
+      ).toEqual([
+        ['C1', true],
+        ['C2', false],
+        ['C3', false],
+      ]);
     });
 
     it('não sincroniza quando o SGA responde erro', async () => {
@@ -228,6 +265,97 @@ describe('SgaService', () => {
       expect(resultado).toBe(corpoErro);
       expect(sincronizacao.sincronizarEmSegundoPlano).not.toHaveBeenCalled();
       expect(prisma.userVehicle.upsert).not.toHaveBeenCalled();
+    });
+  });
+  describe('criarBoletoReativacao — códigos do SGA pela regra da base', () => {
+    /** Responde o SGA por rota e devolve o payload enviado ao boleto/cadastrar. */
+    function prepararSga() {
+      const chamadas: { url: string; data?: unknown }[] = [];
+      sgaAuth.executeRequestWithAuth.mockImplementation(
+        (_base: string, req: { url: string; data?: unknown }) => {
+          chamadas.push({ url: req.url, data: req.data });
+          if (req.url.includes('/associado/buscar/')) {
+            return Promise.resolve({
+              status: 200,
+              data: { codigo_associado: 10, codigo_regional: 3 },
+            });
+          }
+          if (req.url.includes('/produto-vinculado-veiculo/listar/')) {
+            return Promise.resolve({
+              status: 200,
+              data: {
+                valor_total_produtos_ativo_reais: 100,
+                taxa_administrativa: '-10.50',
+                codigo_veiculo: 555,
+              },
+            });
+          }
+          if (req.url.includes('/boleto/cadastrar')) {
+            return Promise.resolve({
+              status: 200,
+              data: [{ nosso_numero: 123, link_boleto: 'https://boleto' }],
+            });
+          }
+          return Promise.resolve({ status: 200, data: {} });
+        },
+      );
+      jest
+        .spyOn(service, 'registrarPagamentoBoleto')
+        .mockResolvedValue(undefined as never);
+      jest
+        .spyOn(service, 'concluirBoletoReativacao')
+        .mockResolvedValue({ pollerAgendado: true, suriEnviada: true });
+      return chamadas;
+    }
+
+    const payloadCadastro = (chamadas: { url: string; data?: unknown }[]) =>
+      chamadas.find((c) => c.url.endsWith('/boleto/cadastrar'))?.data as Record<
+        string,
+        unknown
+      >;
+    const alteracoesSituacao = (chamadas: { url: string }[]) =>
+      chamadas
+        .map((c) => c.url)
+        .filter((url) => url.includes('/veiculo/alterar-situacao-para/'));
+
+    it.each(['MAIS_PRIME', 'MAIS_PRIME_RS'])(
+      '%s: conta 27, tipo 2 e veículo para a situação 20 (regra vigente)',
+      async (base) => {
+        prisma.userVehicle.findUnique.mockResolvedValue({
+          user: { cpf: '529.982.247-25', baseOrigin: base },
+        });
+        const chamadas = prepararSga();
+
+        await service.criarBoletoReativacao(1, 'ABC1D23');
+
+        expect(payloadCadastro(chamadas)).toEqual(
+          expect.objectContaining({
+            codigo_conta: 27,
+            codigo_tipo_boleto: 2,
+            codigo_situacao: '2',
+            codigo_associado: 10,
+            codigo_regional: 3,
+          }),
+        );
+        expect(alteracoesSituacao(chamadas)).toEqual([
+          expect.stringMatching(/\/veiculo\/alterar-situacao-para\/20\/555$/),
+        ]);
+      },
+    );
+
+    it('HERTZ: conta 2, tipo 2 e não altera a situação do veículo', async () => {
+      prisma.userVehicle.findUnique.mockResolvedValue({
+        user: { cpf: '529.982.247-25', baseOrigin: 'HERTZ' },
+      });
+      const chamadas = prepararSga();
+
+      const criado = await service.criarBoletoReativacao(1, 'ABC1D23');
+
+      expect(payloadCadastro(chamadas)).toEqual(
+        expect.objectContaining({ codigo_conta: 2, codigo_tipo_boleto: 2 }),
+      );
+      expect(alteracoesSituacao(chamadas)).toEqual([]);
+      expect(criado.nossoNumero).toBe('123');
     });
   });
 });

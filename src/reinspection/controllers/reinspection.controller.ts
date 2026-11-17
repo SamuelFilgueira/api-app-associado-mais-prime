@@ -31,6 +31,7 @@ import { BoletoReativacaoService } from 'src/sga/services/boleto-reativacao.serv
 import { JwtAuthGuard } from 'src/infra/guards/jwt-auth.guard';
 import { ReinspectionService } from 'src/reinspection/services/reinspection.service';
 import { ReinspectionHinovaService } from 'src/reinspection/services/reinspection-hinova.service';
+import { RevistoriaRegraService } from 'src/reinspection/services/revistoria-regra.service';
 import { CreateReinspectionDto } from 'src/reinspection/dto/create-reinspection.dto';
 import { AddPhotosDto } from 'src/reinspection/dto/add-photos.dto';
 import { UpsertTemplatePhotoDto } from 'src/reinspection/dto/upsert-template-photo.dto';
@@ -56,7 +57,7 @@ import {
  *   revistoria, templates e o envio/reenvio à Hinova.
  *
  * A ordem das rotas importa: as rotas com segmento fixo (`all`, `totals`,
- * `template`, `status`, `search`, `rejected-photos`, `hinova/...`) ficam
+ * `template`, `regra`, `regras`, `status`, `search`, `rejected-photos`, `hinova/...`) ficam
  * antes de `:id` para o Express não capturá-las como id.
  */
 @UseGuards(JwtAuthGuard)
@@ -67,6 +68,7 @@ export class ReinspectionController {
     private readonly reinspectionService: ReinspectionService,
     private readonly reinspectionHinovaService: ReinspectionHinovaService,
     private readonly boletoReativacaoService: BoletoReativacaoService,
+    private readonly revistoriaRegraService: RevistoriaRegraService,
   ) {}
 
   // ── App ───────────────────────────────────────────────────────────────────
@@ -168,6 +170,26 @@ export class ReinspectionController {
   @HttpCode(HttpStatus.OK)
   getTemplatePhotos(@Query('vehicleType') vehicleType?: string) {
     return this.reinspectionService.getTemplatePhotos(vehicleType);
+  }
+
+  /**
+   * Regra de revistoria da base do usuário logado (JWT do app): situações do
+   * veículo que exigem revistoria e o template de fotos de cada tipo do SGA.
+   * Ver `src/config/revistoria-regra.config.ts`.
+   */
+  @Get('regra')
+  @HttpCode(HttpStatus.OK)
+  getRegra(@Req() req: { user?: { baseOrigin?: string } }) {
+    return this.revistoriaRegraService.getRegra(req.user?.baseOrigin);
+  }
+
+  /** Regras de revistoria de todas as bases deste deploy (painel). */
+  @Get('regras')
+  @UseGuards(AdminPanelRoleGuard)
+  @AdminPanelRoles(...ALL_ADMIN_PANEL_ROLES)
+  @HttpCode(HttpStatus.OK)
+  getRegras() {
+    return this.revistoriaRegraService.getRegras();
   }
 
   /**

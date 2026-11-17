@@ -7,5 +7,7 @@ import { BeneficiosVeiculoService } from 'src/sga/beneficios-veiculo/services/be
   imports: [HinovaModule],
   controllers: [BeneficiosVeiculoController],
   providers: [BeneficiosVeiculoService],
+  // Associado da Sorte consulta os produtos do veículo (inscrição).
+  exports: [BeneficiosVeiculoService],
 })
 export class BeneficiosVeiculoModule {}

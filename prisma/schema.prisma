@@ -37,6 +37,11 @@ model user {
   userVehicles                  UserVehicle[]
   fuelSessions                  FuelSession[]
   directPartnerRedemptions      DirectPartnerCouponRedemption[]
+  sorteCarteira                 SorteCarteira?
+  sorteParticipacoes            SorteParticipacao[]
+  sorteLembretes                SorteLembrete[]
+  sorteGanhadores               SorteGanhador[]
+  sorteInscricao                SorteInscricao?
 }
 
 model workshop {
@@ -937,4 +942,471 @@ enum DirectPartnerTone {
   SUCCESS
   WARNING
   HIGHLIGHT
+}
+
+// ---------------------------------------------------------------------------
+// Associado da Sorte (promoção gamificada: créditos diários + rodadas de prêmios)
+// Docs: docs/ASSOCIADO_DA_SORTE.md
+// ---------------------------------------------------------------------------
+
+/// Configuração da promoção. Uma linha por base (tenant).
+model SorteConfig {
+  id                      Int               @id @default(autoincrement())
+  /// MAIS_PRIME, MAIS_PRIME_RS... (validado por isTenantBase)
+  baseOrigin              String            @unique @db.VarChar(40)
+  ativa                   Boolean           @default(false)
+  titulo                  String            @default("Associado da Sorte") @db.VarChar(80)
+  subtitulo               String?           @db.VarChar(160)
+  regulamento             String?           @db.Text
+  regulamentoAtualizadoEm DateTime?
+  /// Só dígitos, com DDI (ex.: 5521999998888)
+  whatsappSuporte         String?           @db.VarChar(20)
+  fonteCreditoDiario      SorteFonteCredito @default(RASPADINHA)
+  /// { creditos: number, peso: number }[]
+  faixasRaspadinha        Json?
+  creditosCheckin         Int               @default(1)
+  /// { dias: number, bonus: number }[]
+  marcosSequencia         Json?
+  exibirGanhadores        Boolean           @default(true)
+  /// Dias sem poder ganhar de novo: voucher da raspadinha (v2) e SORTEIO/CORRIDA (0 desliga)
+  carenciaDias            Int               @default(0)
+  // ---- v2 (visão do marketing, 13/11/2026) ----
+  /// Produto do SGA que inscreve o associado (código e descrição precisam bater)
+  produtoSgaCodigo        String            @default("3677") @db.VarChar(20)
+  produtoSgaDescricao     String            @default("ASSOCIADO DA SORTE") @db.VarChar(120)
+  /// Validade da verificação de inscrição no SGA (cache em SorteInscricao)
+  inscricaoValidadeHoras  Int               @default(6)
+  raspadasPorDia          Int               @default(1)
+  intervaloMinimoMinutos  Int               @default(0)
+  /// Jornada de check-in (bônus por dias seguidos com raspada); marcos em marcosSequencia
+  jornadaAtiva            Boolean           @default(false)
+  lembretesAtivos         Boolean           @default(true)
+  /// "HH:MM" em Brasília
+  lembreteInicio          String            @default("08:00") @db.VarChar(5)
+  lembreteFim             String            @default("21:00") @db.VarChar(5)
+  /// Só dígitos, com DDI. Convite do não inscrito (wa.me)
+  whatsappConvite         String?           @db.VarChar(20)
+  mensagemConvite         String            @default("Olá, sou associado da Mais Prime e gostaria de saber sobre a promoção do associado da sorte") @db.VarChar(500)
+  /// E-mails da equipe avisados a cada compra (separados por vírgula)
+  emailNotificacoes       String            @default("marketing@teste.com.br") @db.VarChar(500)
+  /// Só dígitos, com DDI. Vazio: sem botão "Enviar no WhatsApp do marketing"
+  whatsappMarketing       String?           @db.VarChar(20)
+  /// Rodadas (SORTEIO/CORRIDA/RESGATE) e "Avise-me" no app
+  rodadasHabilitadas      Boolean           @default(false)
+  createdAt               DateTime          @default(now())
+  updatedAt               DateTime          @updatedAt
+}
+
+/// Saldo de créditos do associado. Toda alteração passa por SorteCreditoLancamento.
+model SorteCarteira {
+  id                Int       @id @default(autoincrement())
+  userId            Int       @unique
+  user              user      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// base do associado quando a carteira foi criada (indicadores do painel)
+  baseOrigin        String    @db.VarChar(40)
+  saldo             Int       @default(0)
+  totalGanho        Int       @default(0)
+  sequenciaDias     Int       @default(0)
+  ultimoDiaColetado DateTime? @db.Date
+  /// Liberação de raspada já avisada por push (nunca dois avisos para a mesma)
+  lembreteRaspadaEm DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([baseOrigin, saldo])
+}
+
+/// Extrato de créditos: só acrescenta, nunca edita.
+model SorteCreditoLancamento {
+  id         Int      @id @default(autoincrement())
+  userId     Int
+  baseOrigin String   @db.VarChar(40)
+  /// RASPADINHA, CHECKIN, BONUS_SEQUENCIA, AJUSTE_ADMIN, PARTICIPACAO_SORTEIO,
+  /// RESGATE, ESTORNO. String (e não enum) para criar fontes novas sem migration.
+  tipo       String   @db.VarChar(40)
+  /// Com sinal: positivo credita, negativo debita.
+  valor      Int
+  saldoApos  Int
+  rodadaId   Int?
+  descricao  String?  @db.VarChar(200)
+  /// Usuário do painel que lançou (AJUSTE_ADMIN / ESTORNO manual). Sem FK.
+  autorId    Int?
+  autorNome  String?  @db.VarChar(150)
+  createdAt  DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([baseOrigin, tipo, createdAt])
+  @@index([rodadaId])
+}
+
+/// Coleta do crédito diário. O índice único (userId, dia) garante uma por dia.
+model SorteColetaDiaria {
+  id         Int               @id @default(autoincrement())
+  userId     Int
+  baseOrigin String            @db.VarChar(40)
+  /// Data em America/Sao_Paulo
+  dia        DateTime          @db.Date
+  fonte      SorteFonteCredito
+  creditos   Int
+  bonus      Int               @default(0)
+  sequencia  Int
+  createdAt  DateTime          @default(now())
+
+  @@unique([userId, dia])
+  @@index([baseOrigin, dia])
+}
+
+/// Produto da Loja da Sorte (e prêmio de rodada), com estoque controlado.
+model SortePremio {
+  id                 Int              @id @default(autoincrement())
+  nome               String           @db.VarChar(120)
+  descricao          String?          @db.Text
+  imagemUrl          String?          @db.VarChar(500)
+  valorEstimado      Decimal?         @db.Decimal(10, 2)
+  estoque            Int              @default(0)
+  ativo              Boolean          @default(true)
+  tipo               SorteProdutoTipo @default(FISICO)
+  /// Preço na loja (1 crédito = R$ 1)
+  custoCreditos      Int              @default(0)
+  naLoja             Boolean          @default(false)
+  /// Compras por associado (0 = sem limite)
+  limitePorAssociado Int              @default(0)
+  /// Texto mostrado ao associado depois da compra
+  instrucoesRetirada String?          @db.Text
+  ordem              Int              @default(0)
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  deletedAt          DateTime?
+
+  movimentos SorteEstoqueMovimento[]
+  rodadas    SorteRodada[]
+  ganhadores SorteGanhador[]
+
+  @@index([ativo, deletedAt])
+  @@index([naLoja, ativo, deletedAt, ordem])
+}
+
+model SorteEstoqueMovimento {
+  id          Int                       @id @default(autoincrement())
+  premioId    Int
+  premio      SortePremio               @relation(fields: [premioId], references: [id], onDelete: Cascade)
+  tipo        SorteEstoqueMovimentoTipo
+  /// Com sinal: positivo entra, negativo sai.
+  quantidade  Int
+  estoqueApos Int
+  motivo      String?                   @db.VarChar(200)
+  rodadaId    Int?
+  ganhadorId  Int?
+  /// Usuário do painel; nulo quando foi o sistema (ganhador). Sem FK.
+  autorId     Int?
+  autorNome   String?                   @db.VarChar(150)
+  createdAt   DateTime                  @default(now())
+
+  @@index([premioId, createdAt])
+}
+
+/// Um prêmio em disputa numa data e hora, com uma mecânica.
+model SorteRodada {
+  id                 Int               @id @default(autoincrement())
+  premioId           Int
+  premio             SortePremio       @relation(fields: [premioId], references: [id])
+  titulo             String?           @db.VarChar(120)
+  mecanica           SorteMecanica
+  quantidade         Int
+  quantidadeRestante Int
+  custoCreditos      Int               @default(0)
+  modoCredito        SorteModoCredito  @default(CONSOME)
+  /// Só SORTEIO
+  bilhetesMaximos    Int               @default(1)
+  abertura           DateTime
+  encerramento       DateTime
+  estado             SorteRodadaEstado @default(RASCUNHO)
+  apuradaEm          DateTime?
+  /// Auditoria: { totalInscritos, totalBilhetes, ganhadores, ... }
+  resumoApuracao     Json?
+  lembreteEnviadoEm  DateTime?
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  bases         SorteRodadaBase[]
+  participacoes SorteParticipacao[]
+  lembretes     SorteLembrete[]
+  ganhadores    SorteGanhador[]
+
+  @@index([estado, abertura])
+  @@index([estado, encerramento])
+  @@index([premioId, estado])
+}
+
+/// Bases (tenants) em que a rodada é publicada. 1..N por rodada.
+model SorteRodadaBase {
+  rodadaId   Int
+  baseOrigin String      @db.VarChar(40)
+  rodada     SorteRodada @relation(fields: [rodadaId], references: [id], onDelete: Cascade)
+
+  @@id([rodadaId, baseOrigin])
+  @@index([baseOrigin])
+}
+
+/// Inscrição de um associado numa rodada de SORTEIO.
+model SorteParticipacao {
+  id             Int         @id @default(autoincrement())
+  rodadaId       Int
+  rodada         SorteRodada @relation(fields: [rodadaId], references: [id], onDelete: Cascade)
+  userId         Int
+  user           user        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  baseOrigin     String      @db.VarChar(40)
+  bilhetes       Int         @default(1)
+  creditosGastos Int         @default(0)
+  /// Preenchido quando a rodada foi cancelada e os créditos voltaram.
+  estornadoEm    DateTime?
+  createdAt      DateTime    @default(now())
+
+  @@unique([rodadaId, userId])
+  @@index([userId])
+}
+
+/// "Avise-me" de uma rodada.
+model SorteLembrete {
+  id        Int         @id @default(autoincrement())
+  rodadaId  Int
+  rodada    SorteRodada @relation(fields: [rodadaId], references: [id], onDelete: Cascade)
+  userId    Int
+  user      user        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime    @default(now())
+
+  @@unique([rodadaId, userId])
+}
+
+/// Quem levou uma unidade do prêmio: ganhador de rodada ou compra na loja (origem LOJA).
+model SorteGanhador {
+  id                   Int                   @id @default(autoincrement())
+  /// Nulo na compra da loja
+  rodadaId             Int?
+  rodada               SorteRodada?          @relation(fields: [rodadaId], references: [id])
+  premioId             Int
+  premio               SortePremio           @relation(fields: [premioId], references: [id])
+  userId               Int
+  user                 user                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  baseOrigin           String                @db.VarChar(40)
+  /// Código curto que a equipe usa para conferir a identidade.
+  codigo               String                @unique @db.VarChar(12)
+  /// Mecânica que gerou o ganhador, ou LOJA.
+  origem               SorteGanhadorOrigem
+  situacao             SorteGanhadorSituacao @default(AGUARDANDO_CONTATO)
+  /// Só dígitos, com DDI. Confirmado pelo ganhador no app.
+  telefoneContato      String?               @db.VarChar(20)
+  telefoneConfirmadoEm DateTime?
+  observacao           String?               @db.Text
+  creditosGastos       Int                   @default(0)
+  estoqueDevolvido     Boolean               @default(false)
+  entregueEm           DateTime?
+  canceladoEm          DateTime?
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+
+  @@index([rodadaId, userId])
+  @@index([userId, createdAt])
+  @@index([baseOrigin, situacao])
+  @@index([premioId])
+  @@index([premioId, userId])
+}
+
+/// Campanha: período + cronograma de momentos premiados, travado ao publicar.
+model SorteCampanha {
+  id                 Int                 @id @default(autoincrement())
+  baseOrigin         String              @db.VarChar(40)
+  nome               String              @db.VarChar(120)
+  inicio             DateTime
+  fim                DateTime
+  estado             SorteCampanhaEstado @default(RASCUNHO)
+  publicadaEm        DateTime?
+  publicadaPorId     Int?
+  publicadaPorNome   String?             @db.VarChar(150)
+  /// SHA-256 (hex) do cronograma no momento da publicação
+  hashCronograma     String?             @db.VarChar(64)
+  encerradaEm        DateTime?
+  encerradaPorId     Int?
+  encerradaPorNome   String?             @db.VarChar(150)
+  motivoEncerramento String?             @db.VarChar(300)
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  momentos SorteMomentoPremiado[]
+
+  @@index([baseOrigin, estado])
+}
+
+/// Voucher em créditos que sai para a primeira raspada a partir de `liberaEm`.
+model SorteMomentoPremiado {
+  id         Int           @id @default(autoincrement())
+  campanhaId Int
+  campanha   SorteCampanha @relation(fields: [campanhaId], references: [id], onDelete: Cascade)
+  liberaEm   DateTime
+  creditos   Int
+  descricao  String?       @db.VarChar(200)
+  userId     Int?
+  ganhoEm    DateTime?
+  raspadaId  Int?
+  createdAt  DateTime      @default(now())
+
+  @@index([campanhaId, userId, liberaEm])
+  @@index([campanhaId, liberaEm])
+}
+
+/// Histórico de raspadas (auditoria). O limite diário é contado na transação.
+model SorteRaspada {
+  id         Int                   @id @default(autoincrement())
+  userId     Int
+  baseOrigin String                @db.VarChar(40)
+  campanhaId Int
+  /// Data em America/Sao_Paulo
+  dia        DateTime              @db.Date
+  resultado  SorteRaspadaResultado
+  momentoId  Int?
+  /// Créditos do voucher (0 quando não ganhou)
+  creditos   Int                   @default(0)
+  /// Bônus da jornada creditado nesta raspada
+  bonus      Int                   @default(0)
+  createdAt  DateTime              @default(now())
+
+  @@index([userId, dia])
+  @@index([campanhaId, createdAt])
+  @@index([baseOrigin, dia])
+  @@index([userId, resultado, createdAt])
+}
+
+/// Cache da inscrição no produto "Associado da Sorte" do SGA (um associado = um participante).
+model SorteInscricao {
+  userId        Int                 @id
+  user          user                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  baseOrigin    String              @db.VarChar(40)
+  inscrito      Boolean
+  fonte         SorteInscricaoFonte
+  /// Veículo em que o produto foi encontrado (SGA)
+  codigoVeiculo String?             @db.VarChar(30)
+  verificadoEm  DateTime?
+  /// Marcação manual (fonte MANUAL)
+  autorId       Int?
+  autorNome     String?             @db.VarChar(150)
+  motivo        String?             @db.VarChar(300)
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  @@index([baseOrigin, inscrito])
+}
+
+/// Tentativa que falhou (raspar, comprar, acessar sem inscrição). Sem CPF nem telefone.
+model SorteTentativa {
+  id         Int                @id @default(autoincrement())
+  userId     Int
+  baseOrigin String             @db.VarChar(40)
+  acao       SorteTentativaAcao
+  codigo     String             @db.VarChar(60)
+  contexto   Json?
+  createdAt  DateTime           @default(now())
+
+  @@index([userId, createdAt])
+}
+
+/// Área de notificações do painel (nova retirada, estoque baixo/esgotado).
+model SorteNotificacaoAdmin {
+  id                 Int                       @id @default(autoincrement())
+  baseOrigin         String                    @db.VarChar(40)
+  tipo               SorteNotificacaoAdminTipo
+  titulo             String                    @db.VarChar(160)
+  mensagem           String                    @db.Text
+  ganhadorId         Int?
+  premioId           Int?
+  lidaEm             DateTime?
+  lidaPorId          Int?
+  lidaPorNome        String?                   @db.VarChar(150)
+  /// E-mail da retirada (job sorte-email-retirada)
+  emailDestinatarios String?                   @db.VarChar(500)
+  emailEnviadoEm     DateTime?
+  emailErro          String?                   @db.VarChar(300)
+  createdAt          DateTime                  @default(now())
+
+  @@index([lidaEm, createdAt])
+  @@index([baseOrigin, createdAt])
+}
+
+enum SorteProdutoTipo {
+  FISICO
+  SERVICO_MAIS_PRIME
+  CUPOM_PARCEIRO
+}
+
+enum SorteGanhadorOrigem {
+  SORTEIO
+  CORRIDA
+  RESGATE
+  LOJA
+}
+
+enum SorteCampanhaEstado {
+  RASCUNHO
+  PUBLICADA
+  ENCERRADA
+}
+
+enum SorteRaspadaResultado {
+  GANHOU
+  NAO_GANHOU
+}
+
+enum SorteInscricaoFonte {
+  SGA
+  MANUAL
+}
+
+enum SorteTentativaAcao {
+  RASPAR
+  COMPRAR
+  ACESSAR
+}
+
+enum SorteNotificacaoAdminTipo {
+  NOVA_RETIRADA
+  ESTOQUE_BAIXO
+  ESTOQUE_ESGOTADO
+}
+
+enum SorteFonteCredito {
+  RASPADINHA
+  CHECKIN
+  NENHUMA
+}
+
+enum SorteMecanica {
+  SORTEIO
+  CORRIDA
+  RESGATE
+}
+
+enum SorteModoCredito {
+  CONSOME
+  SALDO_MINIMO
+}
+
+enum SorteRodadaEstado {
+  RASCUNHO
+  PUBLICADA
+  APURANDO
+  ENCERRADA
+  CANCELADA
+}
+
+enum SorteEstoqueMovimentoTipo {
+  ENTRADA
+  SAIDA_GANHADOR
+  AJUSTE
+  ESTORNO
+}
+
+enum SorteGanhadorSituacao {
+  AGUARDANDO_CONTATO
+  EM_CONTATO
+  ENTREGUE
+  CANCELADO
 }

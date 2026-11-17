@@ -25,6 +25,7 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate:deploy": "prisma migrate deploy",
     "prisma:seed": "ts-node -r tsconfig-paths/register prisma/seed.ts",
+    "sorte:seed-demo": "ts-node -r tsconfig-paths/register prisma/seed-associado-sorte-demo.ts",
     "start:prod:local": "node --env-file=.env dist/main"
   },
   "dependencies": {

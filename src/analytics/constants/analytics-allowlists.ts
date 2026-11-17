@@ -24,6 +24,11 @@ export const ALLOWED_SCREENS: ReadonlySet<string> = new Set([
   'screen_revistoria_fotos',
   'screen_revistoria_status',
   'screen_perfil',
+  'screen_associado_sorte',
+  'screen_associado_sorte_rodada',
+  'screen_associado_sorte_premio',
+  'screen_associado_sorte_loja',
+  'screen_associado_sorte_loja_produto',
 ]);
 
 export const ALLOWED_ACTIONS: ReadonlySet<string> = new Set([
@@ -59,6 +64,17 @@ export const ALLOWED_ACTIONS: ReadonlySet<string> = new Set([
   'webview_pet_opened',
   'notification_opened',
   'drawer_opened',
+  'sorte_credito_diario_coletado',
+  'sorte_participar_success',
+  'sorte_participar_error',
+  'sorte_resgatar_success',
+  'sorte_resgatar_error',
+  'sorte_whatsapp_aberto',
+  'sorte_raspar_success',
+  'sorte_raspar_error',
+  'sorte_loja_comprar_success',
+  'sorte_loja_comprar_error',
+  'sorte_convite_whatsapp',
 ]);
 
 export const ALLOWED_FORMS: ReadonlySet<string> = new Set([

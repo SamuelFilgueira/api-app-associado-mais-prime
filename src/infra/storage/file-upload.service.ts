@@ -32,6 +32,11 @@ export class FileUploadService {
     'uploads',
     'direct-partners',
   );
+  private readonly sortePremioUploadPath = join(
+    process.cwd(),
+    'uploads',
+    'associado-sorte',
+  );
   private readonly documentsUploadPath = join(process.cwd(), 'uploads');
 
   async uploadDocumentFile(file: Express.Multer.File): Promise<string> {
@@ -196,6 +201,39 @@ export class FileUploadService {
       await fs.unlink(filepath);
     } catch (error) {
       this.logger.warn(`Erro ao deletar logo de parceiro: ${error.message}`);
+    }
+  }
+
+  /** Foto do prêmio do Associado da Sorte: WebP até 1024×1024. */
+  async uploadSortePremioImagem(
+    file: Express.Multer.File,
+    premioId: number,
+  ): Promise<string> {
+    await this.ensureDirectory(this.sortePremioUploadPath);
+
+    const filename = `premio-${premioId}-${Date.now()}.webp`;
+    const filepath = join(this.sortePremioUploadPath, filename);
+
+    await sharp(file.buffer)
+      .rotate()
+      .resize(1024, 1024, {
+        fit: 'inside',
+        withoutEnlargement: true,
+      })
+      .webp({ quality: 85 })
+      .toFile(filepath);
+
+    return `/uploads/associado-sorte/${filename}`;
+  }
+
+  async deleteSortePremioImagem(imagemUrl: string): Promise<void> {
+    if (!imagemUrl) return;
+
+    try {
+      const filepath = join(process.cwd(), imagemUrl.replace(/^\/+/, ''));
+      await fs.unlink(filepath);
+    } catch (error) {
+      this.logger.warn(`Erro ao deletar imagem de prêmio: ${error.message}`);
     }
   }
 

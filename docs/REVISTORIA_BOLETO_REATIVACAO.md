@@ -2,6 +2,8 @@
 
 Implementado em 2026-10-22, validado com cobrança/revistoria. Complementa `docs/REVISTORIA_HINOVA_ENVIO.md`.
 
+> Códigos do SGA que variam por empresa (conta, tipo de boleto, situação do veículo após o boleto e após o pagamento) vêm de `src/config/revistoria-regra.config.ts` — ver `docs/REVISTORIA_REGRAS_POR_EMPRESA.md`. Os valores citados abaixo são os da Mais Prime (perfil `PADRAO`).
+
 ## Problema
 Na aprovação da revistoria o boleto era criado dentro da mesma requisição e qualquer erro (instabilidade da Hinova, token bloqueado, placa inexistente) virava só `logger.error`. O e-mail "aprovada e boleto gerado" saía **antes** da criação, com texto fixo, então a cobrança acreditava que o boleto existia.
 

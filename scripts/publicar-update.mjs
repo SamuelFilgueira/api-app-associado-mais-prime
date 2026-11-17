@@ -159,10 +159,16 @@ function tentarBsdtar() {
   // bsdtar (tar.exe no Windows 10+, macOS, maioria das distros) gera zip com "/".
   // Ele interpreta "C:" em -f como host remoto → usar nome relativo com cwd.
   // No Windows, dentro do Git Bash o `tar` do PATH é o GNU → usar o do System32.
+  // No Linux o `tar` costuma ser o GNU (não gera zip) → preferir `bsdtar` se existir.
+  const temBsdtar =
+    process.platform !== 'win32' &&
+    spawnSync('bsdtar', ['--version'], { stdio: 'ignore' }).status === 0;
   const bin =
     process.platform === 'win32' && process.env.SystemRoot
       ? join(process.env.SystemRoot, 'System32', 'tar.exe')
-      : 'tar';
+      : temBsdtar
+        ? 'bsdtar'
+        : 'tar';
   if (process.platform === 'win32' && !existsSync(bin)) return false;
 
   const r = spawnSync(bin, ['-a', '-cf', basename(zipPath), '-C', DIST, '.'], {
