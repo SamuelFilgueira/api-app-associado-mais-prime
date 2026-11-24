@@ -9,6 +9,8 @@ export const ANALYTICS_QUEUE = 'analytics-summaries';
 export const BOLETO_NOTIFICACAO_QUEUE = 'boleto-notificacao';
 /** Retry da criação do boleto de reativação após instabilidade do SGA. */
 export const BOLETO_REATIVACAO_RETRY_QUEUE = 'boleto-reativacao-retry';
+/** Disparos de push de marketing agendados (job atrasado até a data/hora). */
+export const MARKETING_AGENDADA_QUEUE = 'marketing-agendada';
 /** Job periódico do Associado da Sorte (apuração, encerramento, lembretes). */
 export const ASSOCIADO_SORTE_QUEUE = 'associado-sorte';
 
@@ -55,6 +57,7 @@ const DEFAULT_JOB_RETENTION = {
       { name: BOLETO_NOTIFICACAO_QUEUE },
       { name: BOLETO_REATIVACAO_RETRY_QUEUE },
       { name: ASSOCIADO_SORTE_QUEUE },
+      { name: MARKETING_AGENDADA_QUEUE },
     ),
   ],
   exports: [BullModule],

@@ -111,26 +111,34 @@ model UserPasswordChangeLog {
 }
 
 model MarketingNotificationAuditLog {
-  id                 Int            @id @default(autoincrement())
-  adminPanelUserId   Int
-  title              String         @db.VarChar(255)
-  body               String         @db.Text
-  messagePayload     Json
-  status             String         @default("REQUESTED") @db.VarChar(20)
-  sentCount          Int?
-  skippedCount       Int?
-  errorMessage       String?        @db.VarChar(500)
-  normalizedAt       String         @db.VarChar(19)
-  normalizedTimezone String         @db.VarChar(64)
-  requestedAt        DateTime       @default(now())
-  processedAt        DateTime?
-  createdAt          DateTime       @default(now())
-  updatedAt          DateTime       @updatedAt
-  adminPanelUser     AdminPanelUser @relation(fields: [adminPanelUserId], references: [id], onDelete: Restrict, map: "MarketingNotificationAuditLog_adminPanelUserId_fkey")
+  id                         Int            @id @default(autoincrement())
+  adminPanelUserId           Int
+  title                      String         @db.VarChar(255)
+  body                       String         @db.Text
+  messagePayload             Json
+  status                     String         @default("REQUESTED") @db.VarChar(20)
+  sentCount                  Int?
+  skippedCount               Int?
+  errorMessage               String?        @db.VarChar(500)
+  normalizedAt               String         @db.VarChar(19)
+  normalizedTimezone         String         @db.VarChar(64)
+  requestedAt                DateTime       @default(now())
+  processedAt                DateTime?
+  createdAt                  DateTime       @default(now())
+  updatedAt                  DateTime       @updatedAt
+  /// Origem do disparo: MARKETING (painel) ou SITUACAO_CADASTRO (planilha).
+  tipo                       String         @default("MARKETING") @db.VarChar(30)
+  /// Disparo agendado: instante do envio. Nulo = envio imediato.
+  scheduledFor               DateTime?
+  canceledAt                 DateTime?
+  /// Usuário do painel que cancelou o agendamento (sem FK: preserva o histórico).
+  canceledByAdminPanelUserId Int?
+  adminPanelUser             AdminPanelUser @relation(fields: [adminPanelUserId], references: [id], onDelete: Restrict, map: "MarketingNotificationAuditLog_adminPanelUserId_fkey")
 
   @@index([adminPanelUserId], map: "MarketingNotificationAuditLog_adminPanelUserId_idx")
   @@index([requestedAt], map: "MarketingNotificationAuditLog_requestedAt_idx")
   @@index([status], map: "MarketingNotificationAuditLog_status_idx")
+  @@index([status, scheduledFor], map: "MarketingNotificationAuditLog_status_scheduledFor_idx")
 }
 
 model AnalyticsActionDaily {
@@ -698,6 +706,27 @@ model NotificationPopup {
   @@index([active, createdAt(sort: Desc)], map: "NotificationPopup_active_createdAt_idx")
 }
 
+/// Log de inclusão/alteração de pop-up: quem (usuário do painel) fez o quê e
+/// quando, com a foto do estado gravado. Sem FK para preservar o histórico
+/// mesmo que o pop-up ou o usuário sejam removidos.
+model NotificationPopupAuditLog {
+  id               Int      @id @default(autoincrement())
+  popupId          Int
+  /// CRIADO | ATUALIZADO
+  acao             String   @db.VarChar(20)
+  adminPanelUserId Int?
+  adminName        String?  @db.VarChar(150)
+  adminEmail       String?  @db.VarChar(150)
+  imageUrl         String?  @db.Text
+  linkUrl          String?  @db.Text
+  linkLabel        String?  @db.VarChar(191)
+  active           Boolean
+  createdAt        DateTime @default(now())
+
+  @@index([popupId], map: "NotificationPopupAuditLog_popupId_idx")
+  @@index([createdAt], map: "NotificationPopupAuditLog_createdAt_idx")
+}
+
 enum UserRole {
   USER
   ADMIN
@@ -993,6 +1022,13 @@ model SorteConfig {
   whatsappMarketing       String?           @db.VarChar(20)
   /// Rodadas (SORTEIO/CORRIDA/RESGATE) e "Avise-me" no app
   rodadasHabilitadas      Boolean           @default(false)
+  // ---- arte da raspadinha (marketing, 23/11/2026) — ver helpers/sorte-arte.helper.ts ----
+  /// Capa que o associado raspa (imagem estática). Vazio: capa padrão do app
+  arteCapaUrl             String?           @db.VarChar(255)
+  /// Fundo revelado quando ganha (estática ou animada)
+  arteGanhouUrl           String?           @db.VarChar(255)
+  /// Fundo revelado quando não ganha (estática ou animada)
+  arteNaoGanhouUrl        String?           @db.VarChar(255)
   createdAt               DateTime          @default(now())
   updatedAt               DateTime          @updatedAt
 }

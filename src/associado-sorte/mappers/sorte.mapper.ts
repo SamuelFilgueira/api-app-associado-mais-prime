@@ -73,11 +73,20 @@ export interface SorteConfigView {
   emailNotificacoes: string;
   whatsappMarketing: string | null;
   rodadasHabilitadas: boolean;
+  /** Arte da raspadinha (URLs em `/uploads/...`; `null` = visual padrão do app). */
+  artes: SorteArtesView;
   atualizadoEm: Date | null;
 }
 
 export const SORTE_MENSAGEM_CONVITE_PADRAO =
   'Olá, sou associado da Mais Prime e gostaria de saber sobre a promoção do associado da sorte';
+
+/** Arte da raspadinha: cada espaço é opcional e independente. */
+export interface SorteArtesView {
+  capaUrl: string | null;
+  ganhouUrl: string | null;
+  naoGanhouUrl: string | null;
+}
 
 /** Padrões dos campos v2 (sem linha gravada em `SorteConfig`). */
 export const SORTE_CONFIG_V2_PADRAO = {
@@ -128,6 +137,7 @@ export function toConfigView(
       exibirGanhadores: true,
       carenciaDias: 0,
       ...SORTE_CONFIG_V2_PADRAO,
+      artes: { capaUrl: null, ganhouUrl: null, naoGanhouUrl: null },
       atualizadoEm: null,
     };
   }
@@ -165,6 +175,11 @@ export function toConfigView(
     emailNotificacoes: config.emailNotificacoes,
     whatsappMarketing: config.whatsappMarketing,
     rodadasHabilitadas: config.rodadasHabilitadas,
+    artes: {
+      capaUrl: config.arteCapaUrl,
+      ganhouUrl: config.arteGanhouUrl,
+      naoGanhouUrl: config.arteNaoGanhouUrl,
+    },
     atualizadoEm: config.updatedAt,
   };
 }

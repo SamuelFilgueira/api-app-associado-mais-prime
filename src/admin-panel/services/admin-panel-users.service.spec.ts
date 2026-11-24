@@ -100,3 +100,72 @@ describe('AdminPanelUsersService — changeOwnPassword()', () => {
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 });
+
+describe('AdminPanelUsersService — proteções do perfil ADMIN', () => {
+  let service: AdminPanelUsersService;
+
+  const mockPrisma = {
+    adminPanelUser: {
+      findUnique: jest.fn(),
+      update: jest.fn(),
+      delete: jest.fn(),
+      count: jest.fn(),
+    },
+  };
+
+  const admin = { userId: 1, adminRole: 'ADMIN' };
+
+  beforeEach(async () => {
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        AdminPanelUsersService,
+        { provide: PrismaService, useValue: mockPrisma },
+        { provide: JwtService, useValue: { sign: jest.fn() } },
+      ],
+    }).compile();
+
+    service = module.get(AdminPanelUsersService);
+    jest.clearAllMocks();
+  });
+
+  it('não deixa o ADMIN excluir o próprio usuário', async () => {
+    mockPrisma.adminPanelUser.findUnique.mockResolvedValue({ id: 1, role: 'ADMIN' });
+
+    await expect(service.remove(1, admin)).rejects.toBeInstanceOf(BadRequestException);
+    expect(mockPrisma.adminPanelUser.delete).not.toHaveBeenCalled();
+  });
+
+  it('não deixa excluir o último ADMIN', async () => {
+    mockPrisma.adminPanelUser.findUnique.mockResolvedValue({ id: 2, role: 'ADMIN' });
+    mockPrisma.adminPanelUser.count.mockResolvedValue(1);
+
+    await expect(service.remove(2, admin)).rejects.toBeInstanceOf(BadRequestException);
+    expect(mockPrisma.adminPanelUser.delete).not.toHaveBeenCalled();
+  });
+
+  it('exclui outro ADMIN quando ainda sobra um', async () => {
+    mockPrisma.adminPanelUser.findUnique.mockResolvedValue({ id: 2, role: 'ADMIN' });
+    mockPrisma.adminPanelUser.count.mockResolvedValue(2);
+
+    await expect(service.remove(2, admin)).resolves.toMatchObject({ success: true });
+    expect(mockPrisma.adminPanelUser.delete).toHaveBeenCalledWith({ where: { id: 2 } });
+  });
+
+  it('não deixa o ADMIN tirar o próprio perfil Administrador', async () => {
+    mockPrisma.adminPanelUser.findUnique.mockResolvedValue({ id: 1, email: 'a@a.com', role: 'ADMIN' });
+
+    await expect(
+      service.update(1, { role: 'MARKETING' as any }, admin),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(mockPrisma.adminPanelUser.update).not.toHaveBeenCalled();
+  });
+
+  it('permite o ADMIN editar o próprio nome sem mexer no perfil', async () => {
+    mockPrisma.adminPanelUser.findUnique.mockResolvedValue({ id: 1, email: 'a@a.com', role: 'ADMIN' });
+    mockPrisma.adminPanelUser.update.mockResolvedValue({ id: 1 });
+
+    await service.update(1, { name: 'Novo nome' }, admin);
+    expect(mockPrisma.adminPanelUser.update).toHaveBeenCalled();
+    expect(mockPrisma.adminPanelUser.count).not.toHaveBeenCalled();
+  });
+});

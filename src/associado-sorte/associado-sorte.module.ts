@@ -14,6 +14,7 @@ import { SorteAleatorioService } from 'src/associado-sorte/services/sorte-aleato
 import { SorteAppService } from 'src/associado-sorte/services/sorte-app.service';
 import { SorteApuracaoService } from 'src/associado-sorte/services/sorte-apuracao.service';
 import { SorteCicloService } from 'src/associado-sorte/services/sorte-ciclo.service';
+import { SorteArteService } from 'src/associado-sorte/services/sorte-arte.service';
 import { SorteConfigService } from 'src/associado-sorte/services/sorte-config.service';
 import { SorteCreditosService } from 'src/associado-sorte/services/sorte-creditos.service';
 import { SorteDashboardService } from 'src/associado-sorte/services/sorte-dashboard.service';
@@ -68,6 +69,7 @@ import { BeneficiosVeiculoModule } from 'src/sga/beneficios-veiculo/beneficios-v
     // Regras
     SorteAleatorioService,
     SorteRateLimitService,
+    SorteArteService,
     SorteConfigService,
     SorteAcessoService,
     SorteCreditosService,

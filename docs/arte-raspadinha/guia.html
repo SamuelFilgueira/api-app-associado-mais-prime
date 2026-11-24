@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><title>Guia de arte da raspadinha</title>
+<style>
+  @page { size: A4; margin: 12mm 13mm; }
+  html, body { width: 184mm; }
+  * { box-sizing: border-box; }
+  body { font-family: "Inter", "Helvetica Neue", Arial, sans-serif; color: #1c1c1c; font-size: 9.3pt; line-height: 1.38; margin: 0; }
+  h1 { font-size: 18pt; margin: 0 0 2mm; letter-spacing: -0.3px; }
+  h1 span { color: #d9251c; }
+  h2 { font-size: 11.5pt; margin: 4.5mm 0 2mm; break-after: avoid; padding-bottom: 1.2mm; border-bottom: 1.5px solid #d9251c; }
+  p { margin: 0 0 2.2mm; }
+  .sub { color: #666; font-size: 8.8pt; margin-bottom: 3mm; }
+  .resposta { background: #fff4e0; border: 1.5px solid #f5a623; border-radius: 3mm; padding: 3mm 4mm; font-size: 10pt; }
+  .resposta p { margin: 0 0 1.5mm; } .resposta p:last-child { margin: 0; }
+  table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 8.6pt; break-inside: avoid; }
+  th, td { border: 1px solid #d8d8d8; padding: 1.3mm 2mm; overflow-wrap: anywhere; text-align: left; vertical-align: top; }
+  th { background: #f3f1ee; font-weight: 700; }
+  .sim { color: #0a7d3b; font-weight: 700; } .nao { color: #c0261d; font-weight: 700; }
+  .duas { display: flex; gap: 6mm; } .duas > div { flex: 1; min-width: 0; }
+  .fig { text-align: center; font-size: 8.5pt; color: #555; }
+  .fig svg { width: 100%; height: auto; display: block; margin-bottom: 1.5mm; }
+  ul { margin: 0 0 2mm; padding-left: 5mm; } li { margin-bottom: 1mm; }
+  .quebra { break-before: page; margin-top: 0; }
+  .bloco { break-inside: avoid; }
+  .nota { font-size: 9pt; color: #555; }
+  .check li { list-style: "☐  "; }
+  footer { margin-top: 6mm; font-size: 8.5pt; color: #777; border-top: 1px solid #ddd; padding-top: 2mm; }
+</style></head><body>
+
+<h1>Associado da <span>Sorte</span> · Guia de arte da raspadinha</h1>
+<p class="sub">Para a equipe de marketing e criação · versão de 23/11/2026 · Mais Prime</p>
+
+<div class="resposta">
+  <p><strong>Resposta rápida</strong></p>
+  <p><strong>Dimensões:</strong> 1200 × 600 px (proporção 2:1, horizontal), em RGB.</p>
+  <p><strong>GIF ou MP4?</strong> <span class="sim">GIF pode</span>, mas só nas artes de resultado ("ganhou" e "não ganhou"). <span class="nao">MP4 não é aceito.</span> A capa, que é a parte raspada com o dedo, precisa ser uma <strong>imagem parada</strong> (PNG ou JPG).</p>
+</div>
+
+<h2>1. São três artes, todas opcionais</h2>
+<p>A raspadinha tem três momentos. Cada um pode receber uma arte; o que não for enviado continua com o visual padrão do aplicativo.</p>
+<table>
+  <tr><th style="width:19%">Arte</th><th style="width:33%">Quando aparece</th><th style="width:24%">Tipo de arquivo</th><th>Observação</th></tr>
+  <tr><td><strong>1. Capa</strong></td><td>Antes de raspar. É a "tinta" que o associado remove com o dedo.</td><td>PNG ou JPG, <strong>sem animação</strong></td><td>Deve trazer a chamada (ex.: "Raspe aqui"). Com a capa enviada, o app deixa de escrever esse texto.</td></tr>
+  <tr><td><strong>2. Ganhou</strong></td><td>Revelada quando o associado ganha o voucher.</td><td>PNG, JPG <strong>ou GIF animado</strong></td><td>A mesma arte vale para todos os valores (R$ 120 e R$ 200). O app escreve o valor por cima, na parte de baixo.</td></tr>
+  <tr><td><strong>3. Não ganhou</strong></td><td>Revelada quando não foi dessa vez.</td><td>PNG, JPG <strong>ou GIF animado</strong></td><td>Tom leve, convidando a tentar de novo. O texto "Não foi dessa vez" já aparece logo abaixo da raspadinha.</td></tr>
+</table>
+
+<h2>2. Medidas e limites</h2>
+<table>
+  <tr><th style="width:26%"></th><th>Imagem parada (PNG, JPG)</th><th>Animação (GIF)</th></tr>
+  <tr><td><strong>Onde pode ser usada</strong></td><td>Capa, Ganhou, Não ganhou</td><td>Só em Ganhou e Não ganhou</td></tr>
+  <tr><td><strong>Tamanho recomendado</strong></td><td>1200 × 600 px</td><td>800 × 400 px</td></tr>
+  <tr><td><strong>Tamanho mínimo</strong></td><td>900 × 450 px</td><td>600 × 300 px</td></tr>
+  <tr><td><strong>Tamanho máximo</strong></td><td>livre (o sistema reduz para 1200 × 600)</td><td>1200 × 600 px</td></tr>
+  <tr><td><strong>Proporção</strong></td><td colspan="2">Sempre 2:1 — a largura é exatamente o dobro da altura. Fora disso o sistema recusa o arquivo.</td></tr>
+  <tr><td><strong>Peso máximo</strong></td><td>1 MB</td><td>3 MB</td></tr>
+  <tr><td><strong>Duração</strong></td><td>—</td><td>Até 120 quadros (cerca de 4 s a 30 quadros por segundo; 2 a 3 s é o ideal)</td></tr>
+  <tr><td><strong>Cor</strong></td><td colspan="2">RGB (sRGB). Não usar CMYK.</td></tr>
+</table>
+<p class="nota" style="margin-top:2mm">Também é aceito o formato WebP (parado ou animado), que costuma ficar bem mais leve que o GIF com a mesma qualidade. Não aceitos: MP4, MOV, PDF, PSD, AI, SVG.</p>
+
+<h2 class="quebra">3. Áreas seguras</h2>
+<p>A arte aparece com os cantos arredondados e pode perder uma pequena faixa nas bordas, conforme o tamanho da tela do celular. Mantenha textos e logotipos dentro da área segura.</p>
+<div class="duas">
+  <div class="fig">
+    <svg viewBox="0 0 1200 600" xmlns="http://www.w3.org/2000/svg">
+      <rect width="1200" height="600" rx="42" fill="#d9251c"/>
+      <rect x="72" y="36" width="1056" height="528" fill="none" stroke="#fff" stroke-width="5" stroke-dasharray="18 12"/>
+      <text x="600" y="285" font-size="64" font-weight="700" fill="#fff" text-anchor="middle" font-family="Arial">ÁREA SEGURA</text>
+      <text x="600" y="350" font-size="50" fill="#fff" text-anchor="middle" font-family="Arial">1056 × 528 px (centro)</text>
+      <text x="600" y="455" font-size="34" fill="#fff" text-anchor="middle" font-family="Arial">margem: 36 px em cima e embaixo, 72 px nas laterais</text>
+    </svg>
+    <strong>Capa e Não ganhou</strong> — 1200 × 600 px. Textos e logos dentro da linha tracejada.
+  </div>
+  <div class="fig">
+    <svg viewBox="0 0 1200 600" xmlns="http://www.w3.org/2000/svg">
+      <rect width="1200" height="600" rx="42" fill="#0a7d3b"/>
+      <rect x="72" y="36" width="1056" height="408" fill="none" stroke="#fff" stroke-width="5" stroke-dasharray="18 12"/>
+      <text x="600" y="235" font-size="64" font-weight="700" fill="#fff" text-anchor="middle" font-family="Arial">ÁREA SEGURA</text>
+      <text x="600" y="300" font-size="50" fill="#fff" text-anchor="middle" font-family="Arial">1056 × 408 px (parte de cima)</text>
+      <rect x="0" y="444" width="1200" height="156" fill="#000" opacity="0.28"/>
+      <rect x="430" y="478" width="340" height="88" rx="44" fill="#1c1c1c"/>
+      <text x="600" y="538" font-size="44" font-weight="700" fill="#fff" text-anchor="middle" font-family="Arial">+120 créditos</text>
+      <text x="40" y="535" font-size="34" fill="#fff" font-family="Arial">faixa do valor: 156 px</text>
+    </svg>
+    <strong>Ganhou</strong> — deixe os 156 px de baixo sem texto: é onde o app escreve o valor do voucher.
+  </div>
+</div>
+
+<h2>4. Recomendações de criação</h2>
+<ul>
+  <li><strong>Capa:</strong> prefira uma arte com bom contraste e a chamada bem visível. Evite textos pequenos: no celular a arte aparece com cerca de 6 a 7 cm de largura.</li>
+  <li><strong>Ganhou:</strong> não escreva o valor do prêmio na arte (ele muda entre R$ 120 e R$ 200 e o app já mostra). Uma mensagem como "Parabéns!" ou "Você ganhou!" funciona para todos os casos.</li>
+  <li><strong>Animação:</strong> ela toca sozinha e fica repetindo. Faça um ciclo que possa repetir sem "pulo", ou que termine num quadro final bonito e parado por alguns instantes. Sem som.</li>
+  <li><strong>Peso do GIF:</strong> se passar de 3 MB, reduza para 800 × 400 px, diminua a duração ou a quantidade de cores. GIFs leves abrem na hora; os pesados atrasam a revelação.</li>
+  <li><strong>Acessibilidade:</strong> quem usa a opção "reduzir movimento" do celular vê a animação parada no primeiro quadro. Garanta que o primeiro quadro já comunique o resultado.</li>
+  <li>Não é preciso arredondar os cantos nem aplicar sombra: o aplicativo faz isso.</li>
+</ul>
+
+<h2>5. Antes de enviar</h2>
+<ul class="check">
+  <li>O arquivo tem 1200 × 600 px (ou 800 × 400 px, se for GIF) e a largura é o dobro da altura.</li>
+  <li>A capa é PNG ou JPG, sem animação, e traz a chamada para raspar.</li>
+  <li>Imagem parada com até 1 MB; GIF com até 3 MB e no máximo 4 segundos.</li>
+  <li>Textos e logos estão dentro da área segura; na arte "Ganhou", a faixa de baixo está livre.</li>
+  <li>A arte "Ganhou" não cita valor.</li>
+  <li>Arquivos nomeados: <code>capa.png</code>, <code>ganhou.gif</code> (ou .png) e <code>nao-ganhou.gif</code> (ou .png).</li>
+</ul>
+
+<h2>6. Perguntas comuns</h2>
+<p class="bloco"><strong>Por que não MP4?</strong> O aplicativo atual não tem reprodutor de vídeo nessa tela. Incluir um exigiria publicar uma nova versão nas lojas (Google Play e App Store). GIF e WebP animados funcionam na versão atual.</p>
+<p class="bloco"><strong>Por que a capa não pode ser animada?</strong> A capa é "apagada" pelo dedo do associado, ponto a ponto. Esse efeito só funciona sobre uma imagem parada.</p>
+<p class="bloco"><strong>Dá para trocar a arte depois que a campanha começar?</strong> Sim. A arte não faz parte do cronograma de prêmios travado para a auditoria; pode ser trocada a qualquer momento (datas comemorativas, por exemplo) e passa a valer na próxima vez que o associado abrir a tela.</p>
+<p class="bloco"><strong>E se eu mandar só a capa?</strong> Funciona. Os outros dois momentos continuam com o visual padrão do aplicativo.</p>
+
+<footer>Associado da Sorte · Mais Prime · Dúvidas técnicas: Samuel (TI). As regras deste guia são as mesmas que o sistema confere no envio do arquivo.</footer>
+</body></html>

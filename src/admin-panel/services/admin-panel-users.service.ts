@@ -7,11 +7,17 @@ import {
 } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { JwtService } from '@nestjs/jwt';
-import { UserRole } from '@prisma/client';
+import { AdminPanelRole, UserRole } from '@prisma/client';
 import { PrismaService } from 'src/database/prisma.service';
 import { CreateAdminPanelUserDto } from 'src/admin-panel/dto/create-admin-panel-user.dto';
 import { UpdateAdminPanelUserDto } from 'src/admin-panel/dto/update-admin-panel-user.dto';
 import { AdminPanelLoginDto } from 'src/admin-panel/dto/admin-panel-login.dto';
+
+/** Quem está executando a ação (claims do JWT). */
+export interface AdminPanelActor {
+  userId: number;
+  adminRole?: string;
+}
 
 @Injectable()
 export class AdminPanelUsersService {
@@ -155,14 +161,32 @@ export class AdminPanelUsersService {
     });
   }
 
-  async update(id: number, data: UpdateAdminPanelUserDto) {
+  async update(
+    id: number,
+    data: UpdateAdminPanelUserDto,
+    actor?: AdminPanelActor,
+  ) {
     const existing = await this.prisma.adminPanelUser.findUnique({
       where: { id },
-      select: { id: true, email: true },
+      select: { id: true, email: true, role: true },
     });
 
     if (!existing) {
       throw new NotFoundException('Usuário administrativo não encontrado');
+    }
+
+    const perdeAdmin =
+      existing.role === AdminPanelRole.ADMIN &&
+      data.role !== undefined &&
+      data.role !== AdminPanelRole.ADMIN;
+
+    if (perdeAdmin) {
+      if (this.ehOProprio(id, actor)) {
+        throw new BadRequestException(
+          'Você não pode remover o perfil Administrador do seu próprio usuário',
+        );
+      }
+      await this.garantirOutroAdmin();
     }
 
     if (data.email && data.email !== existing.email) {
@@ -207,14 +231,22 @@ export class AdminPanelUsersService {
     });
   }
 
-  async remove(id: number) {
+  async remove(id: number, actor?: AdminPanelActor) {
     const existing = await this.prisma.adminPanelUser.findUnique({
       where: { id },
-      select: { id: true },
+      select: { id: true, role: true },
     });
 
     if (!existing) {
       throw new NotFoundException('Usuário administrativo não encontrado');
+    }
+
+    if (this.ehOProprio(id, actor)) {
+      throw new BadRequestException('Você não pode excluir o próprio usuário');
+    }
+
+    if (existing.role === AdminPanelRole.ADMIN) {
+      await this.garantirOutroAdmin();
     }
 
     await this.prisma.adminPanelUser.delete({ where: { id } });
@@ -223,5 +255,23 @@ export class AdminPanelUsersService {
       success: true,
       message: 'Usuário administrativo removido com sucesso',
     };
+  }
+
+  /** Só tokens do painel (com `adminRole`) identificam um AdminPanelUser pelo id. */
+  private ehOProprio(id: number, actor?: AdminPanelActor): boolean {
+    return !!actor?.adminRole && Number(actor.userId) === id;
+  }
+
+  /** Impede que o painel fique sem nenhum usuário Administrador. */
+  private async garantirOutroAdmin() {
+    const admins = await this.prisma.adminPanelUser.count({
+      where: { role: AdminPanelRole.ADMIN },
+    });
+
+    if (admins <= 1) {
+      throw new BadRequestException(
+        'O painel precisa ter pelo menos um usuário Administrador',
+      );
+    }
   }
 }

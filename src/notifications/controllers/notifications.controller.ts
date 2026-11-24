@@ -35,6 +35,8 @@ import { MarketingNotificationAuditService } from 'src/notifications/services/ma
 import { UpsertPopupDto } from 'src/notifications/dto/upsert-popup.dto';
 import { SendSituacaoCadastroNotificationDto } from 'src/notifications/dto/send-situacao-cadastro-notification.dto';
 import { SituacaoCadastroNotificationService } from 'src/notifications/services/situacao-cadastro-notification.service';
+import { MarketingAgendamentoService } from 'src/notifications/services/marketing-agendamento.service';
+import { PopupAuditService } from 'src/notifications/services/popup-audit.service';
 
 @Controller('notifications')
 export class NotificationsController {
@@ -51,6 +53,8 @@ export class NotificationsController {
     @InjectQueue(NOTIFICATION_QUEUE) private readonly notificationQueue: Queue,
     private readonly marketingNotificationAuditService: MarketingNotificationAuditService,
     private readonly situacaoCadastroNotificationService: SituacaoCadastroNotificationService,
+    private readonly marketingAgendamentoService: MarketingAgendamentoService,
+    private readonly popupAuditService: PopupAuditService,
   ) {}
 
   /**
@@ -261,6 +265,11 @@ export class NotificationsController {
     @Body() dto: SendMarketingNotificationDto,
     @Request() req: any,
   ) {
+    // Com `agendarPara`, só agenda; sem ele, envio imediato (fluxo original).
+    if (dto.agendarPara) {
+      return this.marketingAgendamentoService.agendar(dto, req.user?.userId);
+    }
+
     const auditId =
       await this.marketingNotificationAuditService.createRequestAudit(
         req.user?.userId,
@@ -292,13 +301,51 @@ export class NotificationsController {
   }
 
   /**
+   * GET /notifications/admin/marketing/historico
+   * Log dos disparos (imediatos, agendados e por planilha): quem pediu,
+   * quando, status e contagens.
+   */
+  @UseGuards(JwtAuthGuard, AdminRoleGuard, AdminPanelRoleGuard)
+  @AdminPanelRoles(AdminPanelRole.MARKETING, AdminPanelRole.ADMIN)
+  @Get('admin/marketing/historico')
+  listarHistoricoMarketing(@Query('limit') limit?: string) {
+    return this.marketingAgendamentoService.listarHistorico(Number(limit));
+  }
+
+  /**
+   * PATCH /notifications/admin/marketing/agendados/:id/cancelar
+   * Cancela um disparo agendado que ainda não começou a ser enviado.
+   */
+  @UseGuards(JwtAuthGuard, AdminRoleGuard, AdminPanelRoleGuard)
+  @AdminPanelRoles(AdminPanelRole.MARKETING, AdminPanelRole.ADMIN)
+  @Patch('admin/marketing/agendados/:id/cancelar')
+  @HttpCode(HttpStatus.OK)
+  cancelarMarketingAgendada(
+    @Param('id', ParseIntPipe) id: number,
+    @Request() req: any,
+  ) {
+    return this.marketingAgendamentoService.cancelar(id, req.user?.userId);
+  }
+
+  /**
+   * GET /notifications/admin/popup/historico
+   * Log de inclusão/alteração de pop-up: usuário, ação e horário.
+   */
+  @UseGuards(JwtAuthGuard, AdminRoleGuard, AdminPanelRoleGuard)
+  @AdminPanelRoles(AdminPanelRole.MARKETING, AdminPanelRole.ADMIN)
+  @Get('admin/popup/historico')
+  listarHistoricoPopup(@Query('limit') limit?: string) {
+    return this.popupAuditService.listar(Number(limit));
+  }
+
+  /**
    * POST /notifications/admin/situacao-cadastro
    * Envia notificacao push em massa para os CPFs de uma planilha Excel
    * (mudanca de situacao no cadastro — ex.: Ativo -> Inadimplente).
-   * Acesso restrito a usuarios com role ADMIN.
+   * Acesso: perfis MARKETING e ADMIN do painel.
    */
   @UseGuards(JwtAuthGuard, AdminRoleGuard, AdminPanelRoleGuard)
-  @AdminPanelRoles(AdminPanelRole.ADMIN)
+  @AdminPanelRoles(AdminPanelRole.MARKETING, AdminPanelRole.ADMIN)
   @Post('admin/situacao-cadastro')
   @UseInterceptors(
     FileInterceptor('file', { limits: { fileSize: 5 * 1024 * 1024 } }),
@@ -341,6 +388,7 @@ export class NotificationsController {
       await this.marketingNotificationAuditService.createRequestAudit(
         req.user?.userId,
         { title, body, data: dataPayload } as any,
+        { tipo: 'SITUACAO_CADASTRO' },
       );
 
     try {
@@ -389,12 +437,14 @@ export class NotificationsController {
     @UploadedFile() image: Express.Multer.File,
     @Request() req: any,
   ) {
-    return this.notificationsService.upsertPopup(
+    const popup = await this.notificationsService.upsertPopup(
       undefined,
       dto,
       req.user.userId,
       image,
     );
+    await this.popupAuditService.registrar('CRIADO', popup, req.user.userId);
+    return popup;
   }
 
   @Put('popup/:id')
@@ -408,11 +458,17 @@ export class NotificationsController {
     @UploadedFile() image: Express.Multer.File,
     @Request() req: any,
   ) {
-    return this.notificationsService.upsertPopup(
+    const popup = await this.notificationsService.upsertPopup(
       id,
       dto,
       req.user.userId,
       image,
     );
+    await this.popupAuditService.registrar(
+      'ATUALIZADO',
+      popup,
+      req.user.userId,
+    );
+    return popup;
   }
 }

@@ -115,8 +115,12 @@ export class FileUploadService {
     const filename = `popup-${timestamp}-${randomString}.jpg`;
     const filepath = join(popupUploadPath, filename);
 
+    // O app exibe o pop-up em formato "story" (vertical, tela cheia): o limite
+    // acompanha 1080x1920. `inside` mantém a proporção e `withoutEnlargement`
+    // não amplia imagens menores. `rotate()` aplica a orientação EXIF.
     await sharp(file.buffer)
-      .resize(800, 400, {
+      .rotate()
+      .resize(1080, 1920, {
         fit: 'inside',
         withoutEnlargement: true,
       })
@@ -222,6 +226,34 @@ export class FileUploadService {
       })
       .webp({ quality: 85 })
       .toFile(filepath);
+
+    return `/uploads/associado-sorte/${filename}`;
+  }
+
+  /**
+   * Arte da raspadinha do Associado da Sorte (já validada pelo módulo).
+   * Estática: vira WebP 1200×600 (corte central). Animada (GIF/WebP): os
+   * bytes são gravados como vieram, para não perder a animação.
+   */
+  async uploadSorteArte(
+    file: Express.Multer.File,
+    opcoes: { nome: string; animada: boolean; formato: string },
+  ): Promise<string> {
+    await this.ensureDirectory(this.sortePremioUploadPath);
+
+    const extensao = opcoes.animada ? opcoes.formato : 'webp';
+    const filename = `arte-${this.sanitizeFilename(opcoes.nome)}-${Date.now()}.${extensao}`;
+    const filepath = join(this.sortePremioUploadPath, filename);
+
+    if (opcoes.animada) {
+      await fs.writeFile(filepath, file.buffer);
+    } else {
+      await sharp(file.buffer)
+        .rotate()
+        .resize(1200, 600, { fit: 'cover', withoutEnlargement: true })
+        .webp({ quality: 88 })
+        .toFile(filepath);
+    }
 
     return `/uploads/associado-sorte/${filename}`;
   }

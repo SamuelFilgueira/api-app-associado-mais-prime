@@ -760,3 +760,33 @@ serviços no SGA, build nativo/OTA/deploy.
 
 Pendências com o marketing: e-mail real de `emailNotificacoes`, número do `whatsappMarketing` (e do
 convite), formato final da planilha do cronograma, texto do regulamento.
+
+## Arte da raspadinha (23/11/2026)
+
+O marketing pode trocar o visual da raspadinha por base, em três espaços opcionais e independentes
+(vazio = visual padrão do app). Regras em `helpers/sorte-arte.helper.ts` (fonte única, com testes);
+guia para a criação em [`docs/arte-raspadinha/`](./arte-raspadinha/) (PDF + HTML de origem).
+
+| Espaço (`slot`) | Uso | Aceita |
+|---|---|---|
+| `capa` | "tinta" raspada pelo dedo | só estática (PNG/JPG/WebP), até 1 MB, mín. 900×450 |
+| `ganhou` | fundo revelado ao ganhar (o app escreve o valor numa faixa na base) | estática, ou GIF/WebP animado até 3 MB, 600×300 a 1200×600, ≤ 120 quadros |
+| `naoGanhou` | fundo revelado ao não ganhar | idem `ganhou` |
+
+Proporção sempre **2:1** (tolerância de 2 %), recomendado 1200×600 px. Vídeo (MP4) não é aceito: o app
+não tem player e incluir um exigiria build nativo. Estática é regravada em WebP 1200×600; animada é
+gravada como veio. Arquivos em `/uploads/associado-sorte/arte-*`.
+
+Rotas do painel (MARKETING), em `/api/admin/associado-sorte`:
+
+| Rota | Função |
+|---|---|
+| `GET arte/especificacao` | medidas, formatos e limites (para a tela de upload) |
+| `POST config/:baseOrigin/arte/:slot` (multipart, campo `arte`) | grava e devolve `{ capaUrl, ganhouUrl, naoGanhouUrl }`; 422 `ARTE_INVALIDA` com a explicação |
+| `DELETE config/:baseOrigin/arte/:slot` | remove (volta ao padrão) e devolve o mesmo objeto |
+
+`GET config/:baseOrigin` passa a trazer `artes`, e o app recebe o mesmo objeto em
+`resumo.raspadinha.artes`. No app (`components/sorte/Raspadinha.tsx`), com qualquer arte a área passa
+de 136 dp de altura para a proporção 2:1; a capa entra no SVG mascarado (continua raspável) e os
+fundos usam `expo-image` (anima GIF/WebP). Falha ao carregar qualquer arte cai no visual padrão.
+A arte não entra no hash do cronograma e pode ser trocada com a campanha publicada.

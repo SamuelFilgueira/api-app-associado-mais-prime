@@ -115,6 +115,8 @@ export class SorteAppService {
       totalGanho: carteira?.totalGanho ?? 0,
       raspadinha: {
         ...estado.raspadinha,
+        /** Arte do marketing (capa/ganhou/não ganhou); `null` = visual padrão. */
+        artes: config.artes,
         /** Pode raspar agora: campanha no período e nenhum bloqueio. */
         disponivel: noPeriodo && estado.raspadinha.bloqueio === null,
         indisponivelMotivo: !campanha

@@ -2,6 +2,9 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from 'src/database/prisma.service';
 import { SendMarketingNotificationDto } from 'src/notifications/dto/send-marketing-notification.dto';
 
+/** Origem do disparo registrada no log. */
+export type TipoDisparo = 'MARKETING' | 'SITUACAO_CADASTRO';
+
 @Injectable()
 export class MarketingNotificationAuditService {
   private readonly logger = new Logger(MarketingNotificationAuditService.name);
@@ -30,9 +33,15 @@ export class MarketingNotificationAuditService {
     return `${map.year}-${map.month}-${map.day} ${map.hour}:${map.minute}:${map.second}`;
   }
 
+  /**
+   * Registra quem pediu o disparo e quando. `opcoes.tipo` identifica a origem
+   * (padrão `MARKETING`); `opcoes.agendarPara` grava o disparo como agendado
+   * (`SCHEDULED`) em vez de solicitado (`REQUESTED`).
+   */
   async createRequestAudit(
     adminUserId: number | undefined,
     payload: SendMarketingNotificationDto,
+    opcoes?: { tipo?: TipoDisparo; agendarPara?: Date },
   ): Promise<number | null> {
     if (!adminUserId) {
       this.logger.warn(
@@ -44,7 +53,7 @@ export class MarketingNotificationAuditService {
     try {
       const admin = await this.prisma.adminPanelUser.findUnique({
         where: { id: adminUserId },
-        select: { id: true },
+        select: { id: true, email: true },
       });
 
       if (!admin) {
@@ -62,10 +71,20 @@ export class MarketingNotificationAuditService {
           messagePayload: (payload.data ?? { type: 'marketing' }) as any,
           normalizedAt: this.getNormalizedTimestamp(),
           normalizedTimezone: this.timeZone,
-          status: 'REQUESTED',
+          status: opcoes?.agendarPara ? 'SCHEDULED' : 'REQUESTED',
+          tipo: opcoes?.tipo ?? 'MARKETING',
+          scheduledFor: opcoes?.agendarPara ?? null,
         },
-        select: { id: true },
+        select: { id: true, normalizedAt: true },
       });
+
+      this.logger.log(
+        `[MARKETING][AUDIT] disparo #${created.id} (${opcoes?.tipo ?? 'MARKETING'}) ${
+          opcoes?.agendarPara
+            ? `agendado para ${opcoes.agendarPara.toISOString()}`
+            : 'solicitado'
+        } por admin #${admin.id} (${admin.email}) em ${created.normalizedAt} ${this.timeZone}`,
+      );
 
       return created.id;
     } catch (error) {

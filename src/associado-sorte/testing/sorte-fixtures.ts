@@ -29,6 +29,7 @@ export function configDeTeste(
     exibirGanhadores: true,
     carenciaDias: 0,
     ...SORTE_CONFIG_V2_PADRAO,
+    artes: { capaUrl: null, ganhouUrl: null, naoGanhouUrl: null },
     atualizadoEm: null,
     ...extra,
   };

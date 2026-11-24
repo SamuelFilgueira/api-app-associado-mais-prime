@@ -76,6 +76,8 @@ import { SorteInscricaoService } from 'src/associado-sorte/services/sorte-inscri
 import { SorteNotificacoesAdminService } from 'src/associado-sorte/services/sorte-notificacoes-admin.service';
 import { SorteRaspadinhaService } from 'src/associado-sorte/services/sorte-raspadinha.service';
 import { SorteTentativaService } from 'src/associado-sorte/services/sorte-tentativa.service';
+import { SORTE_ARTE_ESPEC } from 'src/associado-sorte/helpers/sorte-arte.helper';
+import { SorteArteService } from 'src/associado-sorte/services/sorte-arte.service';
 import { SorteConfigService } from 'src/associado-sorte/services/sorte-config.service';
 import { SorteCreditosService } from 'src/associado-sorte/services/sorte-creditos.service';
 import { SorteDashboardService } from 'src/associado-sorte/services/sorte-dashboard.service';
@@ -108,6 +110,7 @@ export class AssociadoSorteAdminController {
   constructor(
     private readonly dashboardService: SorteDashboardService,
     private readonly config: SorteConfigService,
+    private readonly arte: SorteArteService,
     private readonly premios: SortePremiosService,
     private readonly rodadas: SorteRodadasService,
     private readonly apuracao: SorteApuracaoService,
@@ -153,6 +156,71 @@ export class AssociadoSorteAdminController {
     @Req() req: PanelRequest,
   ) {
     return this.config.salvar(baseOrigin, body, this.autor(req));
+  }
+
+  // -------------------------------------------------- arte da raspadinha
+
+  @Get('arte/especificacao')
+  @ApiOperation({
+    summary: 'Medidas, formatos e limites da arte da raspadinha',
+  })
+  especificacaoDaArte() {
+    return this.arte.especificacao();
+  }
+
+  @Post('config/:baseOrigin/arte/:slot')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Envia a arte da raspadinha (slot: capa | ganhou | naoGanhou; campo "arte"; 2:1, 1200×600 px; capa só estática; GIF/WebP animado só em ganhou/naoGanhou)',
+  })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: { arte: { type: 'string', format: 'binary' } },
+    },
+  })
+  @UseInterceptors(
+    FileInterceptor('arte', {
+      limits: { fileSize: SORTE_ARTE_ESPEC.uploadMaxBytes },
+      fileFilter: (_req, file, callback) => {
+        if (
+          !(SORTE_ARTE_ESPEC.mimeTypes as readonly string[]).includes(
+            file.mimetype,
+          )
+        ) {
+          callback(
+            new BadRequestException(
+              'A arte deve ser PNG, JPG, WebP ou GIF. Vídeo (MP4) não é aceito.',
+            ),
+            false,
+          );
+          return;
+        }
+        callback(null, true);
+      },
+    }),
+  )
+  salvarArte(
+    @Param('baseOrigin') baseOrigin: string,
+    @Param('slot') slot: string,
+    @Req() req: PanelRequest,
+    @UploadedFile() arte?: Express.Multer.File,
+  ) {
+    return this.arte.salvar(baseOrigin, slot, arte, this.autor(req));
+  }
+
+  @Delete('config/:baseOrigin/arte/:slot')
+  @ApiOperation({
+    summary: 'Remove a arte do espaço (o app volta ao visual padrão)',
+  })
+  removerArte(
+    @Param('baseOrigin') baseOrigin: string,
+    @Param('slot') slot: string,
+    @Req() req: PanelRequest,
+  ) {
+    return this.arte.remover(baseOrigin, slot, this.autor(req));
   }
 
   // ----------------------------------------------------------------- prêmios

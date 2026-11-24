@@ -21,4 +21,19 @@ export class SorteConfigRepository {
       update: data,
     });
   }
+
+  /** Grava só os campos informados (a linha da base precisa existir ou é criada com os padrões). */
+  atualizarParcial(
+    baseOrigin: string,
+    data: Prisma.SorteConfigUncheckedUpdateInput,
+  ): Promise<SorteConfig> {
+    return this.prisma.sorteConfig.upsert({
+      where: { baseOrigin },
+      create: {
+        ...(data as Prisma.SorteConfigUncheckedCreateInput),
+        baseOrigin,
+      },
+      update: data,
+    });
+  }
 }

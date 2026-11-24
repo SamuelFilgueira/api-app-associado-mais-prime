@@ -245,6 +245,16 @@ export class RastreamentoService {
       }
     }
 
+    // DEBUG temporário: identifica qual rastreadora respondeu ao frontend.
+    console.log(
+      `[RASTREAMENTO] chassi=${chassi} base=${baseContext.baseOrigin} ` +
+        `rastreadora_retornada=${selecionado.origem.toUpperCase()} ` +
+        `data_posicao=${new Date(selecionado.timestamp).toISOString()} | candidatos: ` +
+        candidatos
+          .map((c) => `${c.origem}=${new Date(c.timestamp).toISOString()}`)
+          .join(', '),
+    );
+
     return { ...payload, origem: selecionado.origem };
   }
 
