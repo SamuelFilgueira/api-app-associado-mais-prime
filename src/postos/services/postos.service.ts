@@ -1,6 +1,14 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from 'src/database/prisma.service';
-import { ClubgasClient } from 'src/integrations/clubgas/clubgas.client';
+import {
+  ClubgasClient,
+  postosRecusadosPelaPlaca,
+} from 'src/integrations/clubgas/clubgas.client';
+import { ClubgasErro } from 'src/integrations/clubgas/clubgas.erro';
+import {
+  ClubgasErroContexto,
+  ClubgasErroLogService,
+} from 'src/integrations/clubgas/clubgas-erro-log.service';
 import { BaseOrigin } from 'src/config/tenant.config';
 import { baseTag } from 'src/shared/log.util';
 
@@ -11,6 +19,7 @@ export class PostosService {
   constructor(
     private prisma: PrismaService,
     private readonly clubgasClient: ClubgasClient,
+    private readonly clubgasErros: ClubgasErroLogService,
   ) {}
 
   async buscarPostos(
@@ -29,9 +38,22 @@ export class PostosService {
       },
     });
 
+    const contexto: ClubgasErroContexto = {
+      userId,
+      baseOrigin,
+      chassi,
+      placa: vehicle?.plate ?? null,
+    };
+
     if (!vehicle?.plate) {
-      this.logger.warn(`Placa não encontrada para userId: ${userId}`);
-      throw new NotFoundException('Placa não encontrada para o usuário');
+      throw await this.clubgasErros.tratar(
+        new ClubgasErro({
+          operacao: 'POSTOS',
+          categoria: 'VEICULO_SEM_PLACA',
+          mensagem: 'Placa não encontrada para o usuário',
+        }),
+        contexto,
+      );
     }
 
     let data: Awaited<ReturnType<ClubgasClient['obterPostosMapa']>>;
@@ -41,24 +63,35 @@ export class PostosService {
         longitude,
         placa: vehicle.plate,
       });
-    } catch (error: unknown) {
-      const axiosError = error as {
-        message?: string;
-        response?: { data?: unknown };
-      };
-      this.logger.error(
-        `Erro ao chamar API de postos: ${axiosError.message ?? 'erro desconhecido'}`,
-        axiosError.response?.data,
-      );
-      throw error;
+    } catch (falha) {
+      // Grava em ClubgasErroLog e devolve ao app a mensagem do Clubgas.
+      throw await this.clubgasErros.tratar(falha, contexto);
     }
+
+    // Placa fora do formato aceito: o Clubgas não devolve erro, só uma lista
+    // vazia. A resposta ao app continua a mesma; a ocorrência fica registrada.
+    if (postosRecusadosPelaPlaca(data)) {
+      await this.clubgasErros.registrar(
+        new ClubgasErro({
+          operacao: 'POSTOS',
+          categoria: 'PLACA_INVALIDA',
+          mensagem:
+            'Clubgas devolveu a lista de postos vazia e sem paginação (placa fora do formato aceito)',
+          httpStatus: 200,
+          resposta: data,
+        }),
+        contexto,
+      );
+    }
+
     // Paginação local
+    const postos = Array.isArray(data.result) ? data.result : [];
     const pageSize = 5;
-    const totalElements = data.result.length;
+    const totalElements = postos.length;
     const totalPages = Math.ceil(totalElements / pageSize);
     const start = (page - 1) * pageSize;
     const end = start + pageSize;
-    const paginatedResult = data.result.slice(start, end);
+    const paginatedResult = postos.slice(start, end);
 
     const tag = `${baseTag(baseOrigin)} [postos]`;
     this.logger.log(
@@ -68,7 +101,7 @@ export class PostosService {
     );
     this.logger.log(
       `${tag} lista completa do Clubgas (${totalElements} postos, ${pageSize} por página):\n` +
-        data.result
+        postos
           .map((posto, i) =>
             this.descreverPosto(posto, i, pageSize, i >= start && i < end),
           )

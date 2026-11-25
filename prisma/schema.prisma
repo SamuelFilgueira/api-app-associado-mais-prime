@@ -391,6 +391,39 @@ model FuelSession {
   @@index([userId, status], map: "FuelSession_userId_status_idx")
 }
 
+/// Falhas no fluxo do Clubgas (postos, cartão virtual, total economizado): de
+/// qual usuário veio, o que foi enviado e o que o Clubgas respondeu. Sem FK
+/// para preservar o histórico mesmo que o usuário seja removido.
+/// Gravado por `ClubgasErroLogService` (src/integrations/clubgas).
+model ClubgasErroLog {
+  id            Int      @id @default(autoincrement())
+  /// Usuário do app que fez a chamada.
+  userId        Int
+  /// CPF/CNPJ enviado ao Clubgas (null quando a falha ocorre antes do envio).
+  userDocumento String?  @db.VarChar(20)
+  baseOrigin    String?  @db.VarChar(50)
+  /// POSTOS | CARTAO_VIRTUAL | TOTAL_ECONOMIZADO
+  operacao      String   @db.VarChar(30)
+  /// APP (requisição do associado) | JOB_ECONOMIA (verificação pós-abastecimento)
+  origem        String   @db.VarChar(20)
+  chassi        String?  @db.VarChar(100)
+  placa         String?  @db.VarChar(20)
+  /// Classificação da falha — ver `ClubgasErroCategoria` (clubgas.erro.ts).
+  categoria     String   @db.VarChar(30)
+  /// Status HTTP devolvido pelo Clubgas (null: timeout, sem conexão ou falha antes da chamada).
+  httpStatus    Int?
+  /// Mensagem do Clubgas ou do erro de rede, truncada.
+  mensagem      String   @db.VarChar(500)
+  /// Corpo devolvido pelo Clubgas, truncado.
+  resposta      Json?
+  duracaoMs     Int?
+  createdAt     DateTime @default(now())
+
+  @@index([userId, createdAt], map: "ClubgasErroLog_userId_createdAt_idx")
+  @@index([categoria, createdAt], map: "ClubgasErroLog_categoria_createdAt_idx")
+  @@index([createdAt], map: "ClubgasErroLog_createdAt_idx")
+}
+
 model Notification {
   id            Int       @id @default(autoincrement())
   userId        Int

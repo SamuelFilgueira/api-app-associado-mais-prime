@@ -5,6 +5,11 @@ import { PrismaService } from 'src/database/prisma.service';
 import { FuelSessionService } from 'src/fuel-session/services/fuel-session.service';
 import { FUEL_ECONOMY_QUEUE } from 'src/queue/queue.module';
 import { ClubgasClient } from 'src/integrations/clubgas/clubgas.client';
+import { ClubgasErro } from 'src/integrations/clubgas/clubgas.erro';
+import {
+  ClubgasErroContexto,
+  ClubgasErroLogService,
+} from 'src/integrations/clubgas/clubgas-erro-log.service';
 import { BaseOrigin } from 'src/config/tenant.config';
 
 @Injectable()
@@ -15,6 +20,7 @@ export class CartaoService {
     private prisma: PrismaService,
     private readonly fuelSessionService: FuelSessionService,
     private readonly clubgasClient: ClubgasClient,
+    private readonly clubgasErros: ClubgasErroLogService,
     @InjectQueue(FUEL_ECONOMY_QUEUE) private readonly fuelEconomyQueue: Queue,
   ) {}
 
@@ -35,14 +41,37 @@ export class CartaoService {
         isActive: true,
       },
     });
+    // O Clubgas só aceita o documento com dígitos (sem máscara nem espaços).
+    const documento = user.cpf.replace(/\D/g, '');
+    const contexto: ClubgasErroContexto = {
+      userId,
+      baseOrigin,
+      chassi,
+      placa: vehicle?.plate ?? null,
+      documento,
+    };
+
     if (!vehicle?.plate) {
-      throw new NotFoundException('Placa não encontrada para o usuário');
+      throw await this.clubgasErros.tratar(
+        new ClubgasErro({
+          operacao: 'CARTAO_VIRTUAL',
+          categoria: 'VEICULO_SEM_PLACA',
+          mensagem: 'Placa não encontrada para o usuário',
+        }),
+        contexto,
+      );
     }
 
-    const data = await this.clubgasClient.obterCartaoVirtual(baseOrigin, {
-      placa: vehicle.plate,
-      cpf: user.cpf,
-    });
+    let data: unknown;
+    try {
+      data = await this.clubgasClient.obterCartaoVirtual(baseOrigin, {
+        placa: vehicle.plate,
+        cpf: documento,
+      });
+    } catch (falha) {
+      // Grava em ClubgasErroLog e devolve ao app a mensagem do Clubgas.
+      throw await this.clubgasErros.tratar(falha, contexto);
+    }
 
     // Disparar verificação de economia em background (não bloqueia o fluxo)
     void this.triggerFuelEconomyCheck(userId);

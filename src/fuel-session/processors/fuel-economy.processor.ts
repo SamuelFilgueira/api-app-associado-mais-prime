@@ -63,6 +63,7 @@ export class FuelEconomyProcessor extends WorkerHost {
     // 3. Consultar API externa
     const response = await this.economiaService.consultarTotalEconomizado(
       session.userId,
+      'JOB_ECONOMIA',
     );
 
     if (response.errors?.length) {
