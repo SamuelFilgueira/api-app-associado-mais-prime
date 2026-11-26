@@ -261,30 +261,60 @@ export class DirectPartnersRepository {
    * Resgate de uso único: trava a linha do cupom (`SELECT ... FOR UPDATE`)
    * para serializar resgates concorrentes do mesmo par cupom+associado e
    * devolve o resgate existente (se houver) ou cria um novo.
+   *
+   * A trava é a primeira defesa; a última é o índice único sobre
+   * `chaveUsoUnico` (`<cupom>:<associado>`): se duas transações passarem pela
+   * leitura (isolamento por snapshot), a segunda gravação falha com P2002 e
+   * é tratada como "já resgatado".
    */
-  resgatarUsoUnico(params: {
+  async resgatarUsoUnico(params: {
     couponId: number;
     userId: number;
     baseOrigin: string;
   }): Promise<{ criado: boolean; redeemedAt: Date }> {
-    return this.prisma.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT id FROM DirectPartnerCoupon WHERE id = ${params.couponId} FOR UPDATE`;
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT id FROM DirectPartnerCoupon WHERE id = ${params.couponId} FOR UPDATE`;
 
-      const existente = await tx.$queryRaw<{ redeemedAt: Date }[]>`
-        SELECT redeemedAt FROM DirectPartnerCouponRedemption
-        WHERE couponId = ${params.couponId} AND userId = ${params.userId}
-        ORDER BY redeemedAt ASC LIMIT 1 FOR UPDATE`;
+        const existente = await tx.$queryRaw<{ redeemedAt: Date }[]>`
+          SELECT redeemedAt FROM DirectPartnerCouponRedemption
+          WHERE couponId = ${params.couponId} AND userId = ${params.userId}
+          ORDER BY redeemedAt ASC LIMIT 1 FOR UPDATE`;
 
-      if (existente.length > 0) {
-        return { criado: false, redeemedAt: new Date(existente[0].redeemedAt) };
-      }
+        if (existente.length > 0) {
+          return {
+            criado: false,
+            redeemedAt: new Date(existente[0].redeemedAt),
+          };
+        }
 
-      const criado = await tx.directPartnerCouponRedemption.create({
-        data: params,
-        select: { redeemedAt: true },
+        const criado = await tx.directPartnerCouponRedemption.create({
+          data: {
+            ...params,
+            chaveUsoUnico: `${params.couponId}:${params.userId}`,
+          },
+          select: { redeemedAt: true },
+        });
+        return { criado: true, redeemedAt: criado.redeemedAt };
       });
-      return { criado: true, redeemedAt: criado.redeemedAt };
-    });
+    } catch (erro) {
+      if (
+        erro instanceof Prisma.PrismaClientKnownRequestError &&
+        erro.code === 'P2002'
+      ) {
+        const existente =
+          await this.prisma.directPartnerCouponRedemption.findFirst({
+            where: { couponId: params.couponId, userId: params.userId },
+            orderBy: { redeemedAt: 'asc' },
+            select: { redeemedAt: true },
+          });
+        return {
+          criado: false,
+          redeemedAt: existente?.redeemedAt ?? new Date(),
+        };
+      }
+      throw erro;
+    }
   }
 
   // ------------------------------------------------------------------ app

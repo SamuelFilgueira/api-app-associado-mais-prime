@@ -5,19 +5,22 @@ import { associadoSorteConfig } from 'src/associado-sorte/config/associado-sorte
 import { SorteGanhadoresRepository } from 'src/associado-sorte/repositories/sorte-ganhadores.repository';
 import { SorteRodadasRepository } from 'src/associado-sorte/repositories/sorte-rodadas.repository';
 import { NotificationsService } from 'src/notifications/services/notifications.service';
-import { NOTIFICATION_QUEUE } from 'src/queue/queue.module';
+import {
+  PushAvulso,
+  emLotesDePush,
+} from 'src/notifications/domain/push-avulsos';
+import { comEnvelope } from 'src/queue/job-envelope';
+import { PUSH_MASSA_QUEUE } from 'src/queue/queue.module';
 import { baseTag } from 'src/shared/log.util';
-
-const OPCOES_DO_JOB = {
-  attempts: 3,
-  backoff: { type: 'exponential' as const, delay: 2000 },
-};
 
 /**
  * Push do Associado da Sorte. Sempre chamado DEPOIS do commit e nunca lança:
  * falha de push não desfaz a vitória (o associado vê o prêmio ao abrir a tela).
  *
  * O app passa `data.screen` por `toLowerCase()`, então a rota é minúscula.
+ *
+ * Os envios em lote vão para a fila de MASSA (`PUSH_MASSA_QUEUE`), em jobs
+ * de até 100 mensagens, com o retry padrão da fila.
  */
 @Injectable()
 export class SorteNotificacoesService {
@@ -27,12 +30,12 @@ export class SorteNotificacoesService {
     private readonly ganhadoresRepository: SorteGanhadoresRepository,
     private readonly rodadasRepository: SorteRodadasRepository,
     private readonly notifications: NotificationsService,
-    @InjectQueue(NOTIFICATION_QUEUE) private readonly fila: Queue,
+    @InjectQueue(PUSH_MASSA_QUEUE) private readonly fila: Queue,
   ) {}
 
   /**
    * Avisa os ganhadores. Um só: envio imediato. Vários (apuração de
-   * sorteio): enfileira na `NOTIFICATION_QUEUE` em vez de enviar em laço.
+   * sorteio): enfileira na `PUSH_MASSA_QUEUE` em vez de enviar em laço.
    */
   async avisarGanhadores(ganhadorIds: number[]): Promise<void> {
     if (ganhadorIds.length === 0) return;
@@ -82,12 +85,22 @@ export class SorteNotificacoesService {
         return;
       }
 
+      // Um job por base (o envelope leva a base dos ganhadores) e por grupo
+      // de 100. `addBulk` não passa pelo `ProdutorDeFilas`: o envelope é
+      // acrescentado aqui.
+      const porBase = new Map<string, PushAvulso[]>();
+      for (const { baseOrigin, ...dados } of mensagens) {
+        const daBase = porBase.get(baseOrigin);
+        if (daBase) daBase.push(dados);
+        else porBase.set(baseOrigin, [dados]);
+      }
       await this.fila.addBulk(
-        mensagens.map(({ baseOrigin: _base, ...dados }) => ({
-          name: 'sorte-ganhador',
-          data: dados,
-          opts: OPCOES_DO_JOB,
-        })),
+        [...porBase].flatMap(([baseOrigin, daBase]) =>
+          emLotesDePush(daBase).map((lote) => ({
+            name: 'sorte-ganhador',
+            data: comEnvelope({ mensagens: lote }, baseOrigin),
+          })),
+        ),
       );
     } catch (erro) {
       this.logger.error(
@@ -124,20 +137,22 @@ export class SorteNotificacoesService {
           Math.round((rodada.abertura.getTime() - agora.getTime()) / 60_000),
         );
         const titulo = rodada.titulo?.trim() || rodada.premio.nome;
+        const lembretes: PushAvulso[] = destinatarios.map((d) => ({
+          userId: d.user.id,
+          expoPushToken: d.user.expoPushToken as string,
+          title: 'Está quase na hora ⏰',
+          body: `"${titulo}" abre em ${minutos} min no Associado da Sorte. Prepare-se!`,
+          data: {
+            type: 'internal_route',
+            screen: `associado-da-sorte/rodada/${rodada.id}`,
+          },
+        }));
         await this.fila.addBulk(
-          destinatarios.map((d) => ({
+          emLotesDePush(lembretes).map((lote) => ({
             name: 'sorte-lembrete',
-            data: {
-              userId: d.user.id,
-              expoPushToken: d.user.expoPushToken as string,
-              title: 'Está quase na hora ⏰',
-              body: `"${titulo}" abre em ${minutos} min no Associado da Sorte. Prepare-se!`,
-              data: {
-                type: 'internal_route',
-                screen: `associado-da-sorte/rodada/${rodada.id}`,
-              },
-            },
-            opts: OPCOES_DO_JOB,
+            // Sem base: a consulta dos destinatários não traz a base do
+            // usuário; o envelope leva só os metadados de rastreio.
+            data: comEnvelope({ mensagens: lote }),
           })),
         );
         enfileirados += destinatarios.length;

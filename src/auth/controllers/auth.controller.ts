@@ -14,6 +14,8 @@ import { RegisterDto } from 'src/auth/dto/register.dto';
 import { JwtAuthGuard } from 'src/infra/guards/jwt-auth.guard';
 import { LoginDto } from 'src/auth/dto/login.dto';
 import { MailService } from 'src/infra/mail/mail.service';
+import { AdminTokenGuard } from 'src/infra/guards/admin-token.guard';
+import { LimiteDeTaxa } from 'src/infra/rate-limit/limite-de-taxa.decorator';
 
 @Controller('auth')
 export class AuthController {
@@ -22,6 +24,7 @@ export class AuthController {
     private mailService: MailService,
   ) {}
 
+  @LimiteDeTaxa('autenticacao')
   @Post('login')
   async login(@Body() body: LoginDto) {
     const user = await this.authService.validateUser(body.cpf, body.password);
@@ -46,6 +49,14 @@ export class AuthController {
     };
   }
 
+  /**
+   * Cadastro direto, sem validação no SGA. O app cria contas pelo primeiro
+   * acesso (`POST /associado/primeiro-acesso`); esta rota ficou só para
+   * integrações internas e exige o header `x-admin-token`. Aberta, permitia
+   * criar conta para qualquer CPF com senha, e-mail e base escolhidos por quem
+   * chamava.
+   */
+  @UseGuards(AdminTokenGuard)
   @Post('register')
   async register(@Body() data: RegisterDto) {
     return this.authService.register(data);
@@ -54,8 +65,9 @@ export class AuthController {
   /**
    * Reset de senha: gera uma nova senha aleatória e envia por e-mail
    * POST /auth/reset-password
-   * Body: { email: string }
+   * Body: { cpf: string }
    */
+  @LimiteDeTaxa('recuperacao_senha')
   @Post('reset-password')
   resetPassword(@Body() body: { cpf: string }) {
     return this.authService.resetPassword(body.cpf);

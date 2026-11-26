@@ -921,3 +921,20 @@ exibe estas definições nos hints dos cartões — mantenha os dois em sincroni
 
 Os contadores históricos de `AnalyticsSessionDaily` não foram recalculados —
 a regra nova vale das ingestões seguintes em diante.
+
+## Atualização (novembro de 2026)
+
+- **Estrutura.** `AnalyticsService` ficou só com a entrada (barreiras e enfileiramento). A regra pura
+  foi para `domain/` (`resumo-recebido`, `agregados-diarios`, `dashboard`), a ingestão para
+  `repositories/analytics-ingestao.repository.ts` e os dashboards para
+  `services/analytics-dashboard.service.ts`.
+- **Reenvio não soma em dobro.** O job usa `jobId = payloadHash` e o worker confere o recibo dentro da
+  transação: summary já aplicado é descartado.
+- **Ingestão em lote.** Um `INSERT ... ON DUPLICATE KEY UPDATE` por tabela agregada, em vez de um
+  `upsert` por linha.
+- **Limite de requisições** usa o limitador compartilhado (`LimitadorService`); o cliente ioredis
+  próprio do módulo foi removido (a seção 1.4 descreve o desenho anterior).
+- **Limpeza da jornada** roda na rotina diária de manutenção do worker (03:30), não mais em agendador
+  próprio na fila de analytics.
+- **Pendência de privacidade:** `forms[].screen` não passa por allowlist — texto livre de até 60
+  caracteres é persistido em `AnalyticsFormDaily.screen`.

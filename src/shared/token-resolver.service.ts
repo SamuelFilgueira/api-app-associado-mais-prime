@@ -1,9 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import {
   BaseOrigin,
   TenantTokenKind,
   tenantEnvName,
 } from '../config/tenant.config';
+import { TenantCredentialsRegistry } from 'src/shared/tenant/tenant-credentials.registry';
 
 /**
  * `BaseOrigin` passou a ser definido em `src/config/tenant.config.ts`.
@@ -20,21 +21,23 @@ export interface SgaAuthCredentials {
   baseToken: string;
 }
 
+/**
+ * Resolvedor de credenciais por base — API antiga, mantida para os
+ * chamadores existentes. Delega ao `TenantCredentialsRegistry`: código novo
+ * injeta o registry e pede só a credencial da própria integração.
+ *
+ * @deprecated use `TenantCredentialsRegistry`.
+ */
 @Injectable()
 export class TokenResolverService {
-  private readonly logger = new Logger(TokenResolverService.name);
-
-  private resolveEnv(name: string, base: BaseOrigin): string {
-    const val = process.env[name];
-    if (!val) {
-      this.logger.error(`Missing env var ${name} for base ${base}`);
-      throw new Error(`Environment variable ${name} is not configured`);
-    }
-    return val;
-  }
+  constructor(
+    // Opcional só para os specs antigos, que instanciam o service com `new`.
+    @Optional()
+    private readonly registry: TenantCredentialsRegistry = new TenantCredentialsRegistry(),
+  ) {}
 
   private resolve(base: BaseOrigin, kind: TenantTokenKind): string {
-    return this.resolveEnv(tenantEnvName(base, kind), base);
+    return this.registry.valor(base, kind);
   }
 
   resolveSgaUser(baseOrigin: BaseOrigin): string {
@@ -45,31 +48,9 @@ export class TokenResolverService {
     return this.resolve(baseOrigin, 'sgaPassword');
   }
 
-  /**
-   * Tokens de base do SGA disponíveis para a base, em ordem de preferência:
-   * `TOKEN_BASE_SGA_<BASE>`, `TOKEN_BASE_SGA_<BASE>1`, `TOKEN_BASE_SGA_<BASE>2`…
-   * (até 9). Mais de um token permite failover quando a Hinova bloqueia um
-   * deles temporariamente por "extração de dados" (ver SgaAuthService).
-   * Qualquer combinação vale: só o nome puro, só numerados, ou ambos.
-   */
+  /** Tokens de base do SGA da base (ver `TenantCredentialsRegistry`). */
   resolveSgaBaseTokens(baseOrigin: BaseOrigin): string[] {
-    const nomeBase = tenantEnvName(baseOrigin, 'sgaBaseToken');
-    const nomes = [
-      nomeBase,
-      ...Array.from({ length: 9 }, (_, i) => `${nomeBase}${i + 1}`),
-    ];
-    const tokens = nomes
-      .map((n) => process.env[n]?.trim())
-      .filter((v): v is string => !!v);
-    const unicos = [...new Set(tokens)];
-
-    if (unicos.length === 0) {
-      this.logger.error(
-        `Missing env var ${nomeBase} (ou ${nomeBase}1, ${nomeBase}2…) for base ${baseOrigin}`,
-      );
-      throw new Error(`Environment variable ${nomeBase} is not configured`);
-    }
-    return unicos;
+    return this.registry.tokensBaseSga(baseOrigin);
   }
 
   /** Primeiro token de base disponível (compatibilidade). */

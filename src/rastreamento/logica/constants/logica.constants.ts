@@ -1,4 +1,5 @@
-import { InternalServerErrorException } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
+import { erroInternoDeRastreamento } from 'src/rastreamento/helpers/erro-de-rastreamento';
 
 /**
  * Constantes e helpers da integração Lógica Soluções — antes duplicados
@@ -24,9 +25,11 @@ export function buildLogicaUrl(path: string): string {
   const baseUrl = process.env.LOGICA_API_BASE_URL;
 
   if (!baseUrl) {
-    throw new InternalServerErrorException(
+    // O nome da variável fica só no log; o app recebe mensagem neutra.
+    new Logger('Logica').error(
       'LOGICA_API_BASE_URL não definida nas variáveis de ambiente',
     );
+    throw erroInternoDeRastreamento('RASTREAMENTO_NAO_CONFIGURADO');
   }
 
   const normalized = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;

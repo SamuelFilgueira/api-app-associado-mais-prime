@@ -1,5 +1,6 @@
 import { BoletoNotificacaoService } from 'src/boleto-notificacao/services/boleto-notificacao.service';
 import { loadBoletoNotificacaoConfig } from 'src/boleto-notificacao/config/boleto-notificacao.config';
+import { montarRegua } from 'src/boleto-notificacao/testing/montar-regua';
 
 jest.mock('src/config/tenant.config', () => ({
   TENANT: {
@@ -44,9 +45,13 @@ describe('BoletoNotificacaoService (régua v2)', () => {
   let env: NodeJS.ProcessEnv;
   const config = { get: () => loadBoletoNotificacaoConfig(env) };
   const sgaClient = { listarAbertosPorVencimento: jest.fn() };
-  const queue = { add: jest.fn() };
+  const produtor = { enfileirar: jest.fn() };
   const prisma: any = {
-    boletoNotificacaoExecucao: { create: jest.fn(), update: jest.fn() },
+    boletoNotificacaoExecucao: {
+      create: jest.fn(),
+      update: jest.fn(),
+      updateMany: jest.fn(),
+    },
     boletoNotificacaoLog: {
       findMany: jest.fn(),
       create: jest.fn(),
@@ -66,6 +71,10 @@ describe('BoletoNotificacaoService (régua v2)', () => {
       Promise.resolve({ id: ++execId }),
     );
     prisma.boletoNotificacaoExecucao.update.mockResolvedValue({});
+    // As mudanças de estado conferem o número de linhas afetadas.
+    prisma.boletoNotificacaoExecucao.updateMany.mockResolvedValue({ count: 1 });
+    prisma.boletoNotificacaoLog.updateMany.mockResolvedValue({ count: 1 });
+    prisma.user.updateMany.mockResolvedValue({ count: 1 });
     prisma.boletoNotificacaoLog.findMany.mockResolvedValue([]);
     let logId = 0;
     prisma.boletoNotificacaoLog.create.mockImplementation(() =>
@@ -74,24 +83,22 @@ describe('BoletoNotificacaoService (régua v2)', () => {
     prisma.boletoNotificacaoLog.update.mockResolvedValue({});
     prisma.user.findMany.mockResolvedValue([]);
     prisma.notification.createMany.mockResolvedValue({ count: 0 });
-    queue.add.mockResolvedValue({ id: 'job' });
+    produtor.enfileirar.mockResolvedValue({ id: 'job-1' });
     sgaClient.listarAbertosPorVencimento.mockResolvedValue(consultaSga([]));
 
-    service = new BoletoNotificacaoService(
-      prisma,
-      config as any,
-      sgaClient as any,
-      queue as any,
-    );
-    // Evita chamadas reais ao Expo
-    (service as any).expo = {
+    const montagem = montarRegua({ prisma, config, sgaClient, produtor });
+    service = montagem.service;
+    // Evita chamadas reais ao Expo: o dublê é o SDK por baixo do gateway
+    // (`ExpoPushClient`), exposto aqui como `service.expo`.
+    Object.assign(montagem.expo, {
       chunkPushNotifications: (msgs: unknown[]) => [msgs],
       sendPushNotificationsAsync: jest.fn((msgs: unknown[]) =>
         Promise.resolve(
           msgs.map((_, i) => ({ status: 'ok', id: `ticket-${i}` })),
         ),
       ),
-    };
+    });
+    (service as any).expo = montagem.expo;
   });
 
   it('consulta todas as etapas todos os dias, com as janelas corretas de vencimento efetivo', async () => {
@@ -155,6 +162,22 @@ describe('BoletoNotificacaoService (régua v2)', () => {
       tipoMensagem: 'D0',
       dataVencimentoOriginal: '2026-09-10',
     });
+
+    // Houve envio: a verificação de receipts entra na fila com a base do tenant.
+    expect(produtor.enfileirar).toHaveBeenCalledTimes(1);
+    expect(produtor.enfileirar).toHaveBeenCalledWith(
+      'boleto-notificacao',
+      'verificar-receipts',
+      { execucaoId: 1, tentativa: 1 },
+      {
+        base: 'MAIS_PRIME',
+        opcoes: {
+          // tentativas, backoff e retenção vêm do padrão da fila
+          delay: config.get().receiptsDelayMinutos * 60_000,
+          jobId: 'boleto-notificacao-receipts-1-1',
+        },
+      },
+    );
   });
 
   it('DM5 renderiza {mes} e {data} do vencimento do próprio boleto dentro da janela', async () => {

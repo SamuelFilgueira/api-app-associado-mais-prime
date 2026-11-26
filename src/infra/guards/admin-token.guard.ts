@@ -4,6 +4,7 @@ import {
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
+import { segredosIguais } from 'src/infra/auth/comparacao-segura';
 
 @Injectable()
 export class AdminTokenGuard implements CanActivate {
@@ -16,7 +17,7 @@ export class AdminTokenGuard implements CanActivate {
       throw new UnauthorizedException('Token admin nao configurado');
     }
 
-    if (typeof provided !== 'string' || provided !== adminToken) {
+    if (!segredosIguais(provided, adminToken)) {
       throw new UnauthorizedException('Token admin invalido');
     }
 

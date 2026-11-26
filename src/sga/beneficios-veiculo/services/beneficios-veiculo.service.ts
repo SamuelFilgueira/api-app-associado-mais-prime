@@ -6,6 +6,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import axios from 'axios';
+import { HinovaClient } from 'src/integrations/hinova/hinova.client';
 import { SgaAuthService } from 'src/integrations/hinova/sga-auth.service';
 import { BaseOrigin } from 'src/shared/token-resolver.service';
 
@@ -40,11 +41,39 @@ export interface BeneficiosResponse {
 export class BeneficiosVeiculoService {
   private readonly logger = new Logger(BeneficiosVeiculoService.name);
 
-  constructor(private readonly sgaAuthService: SgaAuthService) {}
+  constructor(
+    private readonly sgaAuthService: SgaAuthService,
+    private readonly hinova: HinovaClient,
+  ) {}
 
-  async getBeneficiosVeiculo(
+  /**
+   * Produtos vinculados ao veículo, como o app consulta. Passa pelo cache do
+   * `HinovaClient` (horas): a lista muda raramente e era pedida à Hinova a
+   * cada abertura da tela.
+   */
+  getBeneficiosVeiculo(
     baseOrigin: BaseOrigin,
     codigoVeiculo: string,
+  ): Promise<BeneficiosResponse> {
+    return this.consultar(baseOrigin, codigoVeiculo, true);
+  }
+
+  /**
+   * Mesma consulta, sempre direto na Hinova. Para quem já guarda o resultado
+   * por conta própria (a inscrição do Associado da Sorte tem a sua tabela de
+   * 6 h): somar dois caches dobraria o atraso.
+   */
+  getBeneficiosVeiculoAtual(
+    baseOrigin: BaseOrigin,
+    codigoVeiculo: string,
+  ): Promise<BeneficiosResponse> {
+    return this.consultar(baseOrigin, codigoVeiculo, false);
+  }
+
+  private async consultar(
+    baseOrigin: BaseOrigin,
+    codigoVeiculo: string,
+    comCache: boolean,
   ): Promise<BeneficiosResponse> {
     const normalizedCodigoVeiculo = codigoVeiculo?.trim();
 
@@ -52,22 +81,24 @@ export class BeneficiosVeiculoService {
       throw new BadRequestException('codigoVeiculo é obrigatório');
     }
 
-    const baseUrl = `${SGA_BASE_URL}/produto-vinculado-veiculo/listar/${normalizedCodigoVeiculo}`;
-
     try {
-      const response =
-        await this.sgaAuthService.executeRequestWithAuth<BeneficiosResponse>(
-          baseOrigin,
-          {
-            method: 'GET',
-            url: baseUrl,
-            headers: {
-              'Content-Type': 'application/json',
+      const response = comCache
+        ? await this.hinova.listarProdutosDoVeiculo<BeneficiosResponse>(
+            baseOrigin,
+            normalizedCodigoVeiculo,
+          )
+        : await this.sgaAuthService.executeRequestWithAuth<BeneficiosResponse>(
+            baseOrigin,
+            {
+              method: 'GET',
+              url: `${SGA_BASE_URL}/produto-vinculado-veiculo/listar/${normalizedCodigoVeiculo}`,
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              validateStatus: () => true,
+              compartilharEmVoo: true,
             },
-            validateStatus: () => true,
-            compartilharEmVoo: true,
-          },
-        );
+          );
 
       if (response.status >= 400) {
         this.logger.error(

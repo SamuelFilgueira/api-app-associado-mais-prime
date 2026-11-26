@@ -5,7 +5,7 @@ import { SorteCampanhaService } from 'src/associado-sorte/services/sorte-campanh
 import { SorteConfigService } from 'src/associado-sorte/services/sorte-config.service';
 import { SorteLembreteRaspadaService } from 'src/associado-sorte/services/sorte-lembrete-raspada.service';
 import { configDeTeste } from 'src/associado-sorte/testing/sorte-fixtures';
-import { NOTIFICATION_QUEUE } from 'src/queue/queue.module';
+import { NOTIFICATION_QUEUE, PUSH_MASSA_QUEUE } from 'src/queue/queue.module';
 
 const sp = (texto: string) => new Date(`${texto}:00.000-03:00`);
 
@@ -18,6 +18,8 @@ describe('SorteLembreteRaspadaService', () => {
     lembreteRaspadaEm: Date | null;
   };
   const fila = { addBulk: jest.fn() };
+  /** Fila de alerta (ignição, âncora): os lembretes NÃO podem entrar nela. */
+  const filaDeAlerta = { add: jest.fn(), addBulk: jest.fn() };
   const config = { obter: jest.fn() };
   const campanhas = { publicadaDaBase: jest.fn() };
   const repository = {
@@ -52,8 +54,11 @@ describe('SorteLembreteRaspadaService', () => {
     ),
   };
 
+  /** Pushes enfileirados: cada job da fila de massa leva várias mensagens. */
   const pushes = () =>
-    fila.addBulk.mock.calls.flatMap((c: [unknown[]]) => c[0]).length;
+    fila.addBulk.mock.calls
+      .flatMap((c: [Array<{ data: { mensagens: unknown[] } }>]) => c[0])
+      .flatMap((job) => job.data.mensagens).length;
 
   beforeEach(async () => {
     jest.clearAllMocks();
@@ -79,7 +84,8 @@ describe('SorteLembreteRaspadaService', () => {
         { provide: SorteConfigService, useValue: config },
         { provide: SorteCampanhaService, useValue: campanhas },
         { provide: SorteRaspadasRepository, useValue: repository },
-        { provide: getQueueToken(NOTIFICATION_QUEUE), useValue: fila },
+        { provide: getQueueToken(PUSH_MASSA_QUEUE), useValue: fila },
+        { provide: getQueueToken(NOTIFICATION_QUEUE), useValue: filaDeAlerta },
       ],
     }).compile();
     service = module.get(SorteLembreteRaspadaService);
@@ -93,13 +99,54 @@ describe('SorteLembreteRaspadaService', () => {
     expect(await service.enviar(sp('2026-11-20T08:00'))).toBe(0);
     expect(await service.enviar(sp('2026-11-20T12:00'))).toBe(0);
     expect(pushes()).toBe(1);
-    expect(fila.addBulk.mock.calls[0][0][0]).toMatchObject({
+    // Vai para a fila de MASSA, num job em lote; a fila de alerta fica livre.
+    expect(filaDeAlerta.add).not.toHaveBeenCalled();
+    expect(filaDeAlerta.addBulk).not.toHaveBeenCalled();
+    const job = fila.addBulk.mock.calls[0][0][0];
+    expect(job).toMatchObject({
       name: 'sorte-lembrete-raspada',
       data: {
-        userId: 7,
-        data: { type: 'internal_route', screen: 'associado-da-sorte' },
+        mensagens: [
+          {
+            userId: 7,
+            expoPushToken: 'ExponentPushToken[x]',
+            data: { type: 'internal_route', screen: 'associado-da-sorte' },
+          },
+        ],
+        // Envelope do job: base da campanha e metadados de rastreio.
+        baseOrigin: 'MAIS_PRIME',
+        _meta: { v: 1, criadoEm: expect.any(String) },
       },
     });
+    // Sem opções no job: vale o retry padrão da fila de massa.
+    expect(job.opts).toBeUndefined();
+  });
+
+  it('250 lembretes no mesmo ciclo: três jobs de até 100 mensagens na fila de massa', async () => {
+    repository.listarCandidatosLembrete.mockResolvedValueOnce(
+      Array.from({ length: 250 }, (_, i) => ({
+        userId: i + 1,
+        expoPushToken: `ExponentPushToken[u${i + 1}]`,
+        raspadasHoje: 0,
+        ultimaRaspadaHojeEm: null,
+        lembreteRaspadaEm: null,
+      })),
+    );
+    // `Once`: a implementação com estado continua valendo nos outros casos.
+    for (let i = 0; i < 250; i++) {
+      repository.reivindicarLembrete.mockResolvedValueOnce(true);
+    }
+
+    expect(await service.enviar(sp('2026-11-20T08:00'))).toBe(250);
+
+    const jobs = fila.addBulk.mock.calls[0][0] as Array<{
+      name: string;
+      data: { mensagens: Array<{ userId: number }> };
+    }>;
+    expect(jobs.map((j) => j.data.mensagens.length)).toEqual([100, 100, 50]);
+    expect(jobs.every((j) => j.name === 'sorte-lembrete-raspada')).toBe(true);
+    expect(jobs[2].data.mensagens[49].userId).toBe(250);
+    expect(filaDeAlerta.addBulk).not.toHaveBeenCalled();
   });
 
   it('nova liberação depois do intervalo gera um novo aviso, uma vez', async () => {

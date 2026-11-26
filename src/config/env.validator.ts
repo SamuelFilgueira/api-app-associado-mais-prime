@@ -84,6 +84,41 @@ const WARN_IF_MISSING = [
  *   opcionais, lidos em associado-sorte/config/associado-sorte.config.ts
  * - MAIL_PASSWORD_RESET_PROVIDER: ses (default) | gmail — provedor do e-mail de
  *   redefinição de senha (mail.config.ts). Hertz usa gmail; Mais Prime, ses.
+ * - APP_ROLE: papel do processo — api | worker | pdf | all (default `all`,
+ *   processo único). Valor inválido derruba o boot (config/app.config.ts)
+ * - LOG_FORMAT (json | text; json em produção) / LOG_LEVEL / LOG_REDIGIR_PII:
+ *   formato, nível e redação de CPF/token nas linhas de log
+ * - TRUST_PROXY: `trust proxy` do Express (nº de proxies, lista de faixas ou
+ *   false). Default: confia no X-Forwarded-For só vindo de rede interna
+ * - CORS_ORIGINS: origens do painel aceitas no CORS, separadas por vírgula.
+ *   Sem ela o CORS segue aberto (aviso no boot em produção)
+ * - SWAGGER_ENABLED: sobe `/docs` (default: só fora de produção)
+ * - METRICS_ENABLED / METRICS_TOKEN: `/metrics` do Prometheus. Sem token,
+ *   responde só a rede interna; com token, exige Bearer
+ * - RATE_LIMIT_ENABLED / RATE_LIMIT_ENFORCE_ALL: liga o limitador e aplica
+ *   também as políticas que nascem em observação (infra/rate-limit)
+ * - BODY_LIMIT_PADRAO (1mb) / BODY_LIMIT_GRANDE (20mb): teto do corpo JSON;
+ *   o grande vale só nas rotas listadas em config/app.config.ts
+ * - PDF_CONCORRENCIA / PDF_PRAZO_MS: renderizações simultâneas do processo
+ *   `pdf` e quanto a API espera o job antes de responder 504
+ * - REDIS_PASSWORD / REDIS_USERNAME / REDIS_DB: conexão do Redis
+ *   (config/redis.config.ts). Senha ausente gera aviso em produção
+ * - PDF_TMP_DIR: diretório de troca de arquivos entre a API e o processo
+ *   `pdf` (config/app.config.ts; no compose é o volume `pdf-tmp`)
+ * - HINOVA_CACHE_ASSOCIADO_SEG / HINOVA_CACHE_BOLETOS_SEG /
+ *   HINOVA_CACHE_PRODUTOS_SEG / HINOVA_CACHE_ANTIGO_SEG: prazos do cache das
+ *   leituras da Hinova; HINOVA_ORCAMENTO_POR_MINUTO: orçamento de chamadas
+ *   por token de base; HINOVA_SGA_BASE_URL: servidor simulado, só para
+ *   testes (config/integracoes.config.ts)
+ * - ALLOYAL_CACHE_CATEGORIAS_SEG / ALLOYAL_CACHE_DESTAQUES_SEG /
+ *   ALLOYAL_CACHE_ORGANIZACOES_SEG: prazos do cache do catálogo da Alloyal;
+ *   0 desliga o cache daquele recurso (config/integracoes.config.ts)
+ * - M7_REV_GEOCODE_MAX_CONSULTAS: teto global de consultas simultâneas ao
+ *   Nominatim; padrão derivado de PRISMA_CONNECTION_LIMIT
+ * - RETENCAO_NOTIFICACOES_DIAS / RETENCAO_WEBHOOK_EVENTOS_DIAS /
+ *   RETENCAO_VERSAO_LOG_DIAS / RETENCAO_ANALYTICS_RECIBOS_DIAS (0 = não
+ *   expurga) e RETENCAO_OUTBOX_DIAS / RETENCAO_PUSH_ENTREGAS_DIAS: política
+ *   do expurgo diário (config/retencao.config.ts)
  * - EXPO_UPDATES_DIR / EXPO_UPDATES_PUBLIC_URL / EXPO_UPDATES_PRIVATE_KEY_PATH /
  *   EXPO_UPDATES_PRIVATE_KEY_BASE64 / EXPO_UPDATES_KEY_ID /
  *   EXPO_UPDATES_UPLOAD_LIMIT_MB: servidor OTA self-hosted (expo-updates.config.ts
@@ -143,6 +178,15 @@ export function validateEnvOrThrow() {
   if (warned.length) {
     logger.warn(
       `Variáveis de ambiente não configuradas (funcionalidades podem estar indisponíveis): ${warned.join(', ')}`,
+    );
+  }
+
+  // Em produção o Redis guarda filas, sessões de vendor e limites: não deve
+  // aceitar conexão anônima. Aviso (e não erro) para não derrubar quem ainda
+  // roda o Redis só em rede interna.
+  if (process.env.NODE_ENV === 'production' && !process.env.REDIS_PASSWORD) {
+    logger.warn(
+      'REDIS_PASSWORD não definida: configure `requirepass` no Redis e informe a senha.',
     );
   }
 

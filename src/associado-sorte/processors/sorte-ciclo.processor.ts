@@ -1,4 +1,4 @@
-import { Processor, WorkerHost } from '@nestjs/bullmq';
+import { Processor } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
 import {
@@ -14,6 +14,8 @@ import {
   CicloResultado,
   SorteCicloService,
 } from 'src/associado-sorte/services/sorte-ciclo.service';
+import { FilaDeMortosService } from 'src/queue/fila-de-mortos.service';
+import { ProcessadorBase } from 'src/queue/processador-base';
 import { ASSOCIADO_SORTE_QUEUE } from 'src/queue/queue.module';
 
 /**
@@ -22,17 +24,21 @@ import { ASSOCIADO_SORTE_QUEUE } from 'src/queue/queue.module';
  * execuções do ciclo não se sobreporem.
  */
 @Processor(ASSOCIADO_SORTE_QUEUE, { concurrency: 1 })
-export class SorteCicloProcessor extends WorkerHost {
-  private readonly logger = new Logger(SorteCicloProcessor.name);
+export class SorteCicloProcessor extends ProcessadorBase<
+  unknown,
+  CicloResultado | null
+> {
+  protected readonly logger = new Logger(SorteCicloProcessor.name);
 
   constructor(
     private readonly ciclo: SorteCicloService,
     private readonly notificacoesAdmin: SorteNotificacoesAdminService,
+    filaDeMortos: FilaDeMortosService,
   ) {
-    super();
+    super(filaDeMortos);
   }
 
-  async process(job: Job): Promise<CicloResultado | null> {
+  protected async executar(job: Job<unknown>): Promise<CicloResultado | null> {
     if (job.name === SORTE_CICLO_JOB) {
       // Agendador desligado (padrão): execução residual no Redis é descartada
       // em silêncio — nenhum lembrete, apuração ou alerta.

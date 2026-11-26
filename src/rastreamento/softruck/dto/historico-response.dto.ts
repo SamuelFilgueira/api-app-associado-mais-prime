@@ -131,6 +131,13 @@ export interface HistoricoRotasResponseDto {
     /** Eventos relevantes filtrados e deduplicados (type: ALARM) */
     alarmFeatures: SoftruckGeomFeature[];
   };
+  /**
+   * Campo aditivo: `true` quando a consulta de algum dia falhou e o período
+   * pode estar incompleto. Ausente em respostas antigas = `false`.
+   */
+  parcial?: boolean;
+  /** Campo aditivo: dias (`yyyy-mm-dd`) cuja consulta falhou. */
+  diasComFalha?: string[];
 }
 
 // ============================================================

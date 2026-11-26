@@ -5,10 +5,10 @@
  * simulado (pagamento/cancelamento) e verifica-se EXATAMENTE quais pushes
  * sairiam em cada dia. Nenhuma chamada real (Expo e SGA mockados).
  */
-import { Prisma } from '@prisma/client';
-import { BoletoNotificacaoService } from 'src/boleto-notificacao/services/boleto-notificacao.service';
 import { SgaBoletoPeriodoClient } from 'src/boleto-notificacao/services/sga-boleto-periodo.client';
 import { loadBoletoNotificacaoConfig } from 'src/boleto-notificacao/config/boleto-notificacao.config';
+import { montarRegua } from 'src/boleto-notificacao/testing/montar-regua';
+import { PrismaDaReguaEmMemoria } from 'src/boleto-notificacao/testing/prisma-da-regua-em-memoria';
 import { addDays, formatDateISO, parseDateSga } from 'src/shared/date.util';
 
 jest.mock('src/config/tenant.config', () => ({
@@ -145,76 +145,23 @@ function criarHarness(env: NodeJS.ProcessEnv = {}) {
     ),
   };
 
-  // Prisma em memória com a unique de idempotência de verdade
-  const logs: any[] = [];
-  let seq = 0;
-  const usuarios: any[] = [];
-  const prisma: any = {
-    boletoNotificacaoExecucao: {
-      create: jest.fn(() => Promise.resolve({ id: ++seq })),
-      update: jest.fn(() => Promise.resolve({})),
-    },
-    boletoNotificacaoLog: {
-      findMany: jest.fn(({ where }: any) =>
-        Promise.resolve(
-          logs.filter(
-            (l) =>
-              l.tenant === where.tenant &&
-              l.tipoMensagem === where.tipoMensagem &&
-              where.dataVencimentoOriginal.in.some(
-                (d: Date) => d.getTime() === l.dataVencimentoOriginal.getTime(),
-              ) &&
-              where.codigoAssociado.in.includes(l.codigoAssociado),
-          ),
-        ),
-      ),
-      create: jest.fn(({ data }: any) => {
-        const duplicado = logs.some(
-          (l) =>
-            l.tenant === data.tenant &&
-            l.codigoAssociado === data.codigoAssociado &&
-            l.tipoMensagem === data.tipoMensagem &&
-            l.dataVencimentoOriginal.getTime() ===
-              data.dataVencimentoOriginal.getTime(),
-        );
-        if (duplicado) {
-          return Promise.reject(
-            new Prisma.PrismaClientKnownRequestError('unique', {
-              code: 'P2002',
-              clientVersion: 'test',
-            }),
-          );
-        }
-        const row = { id: ++seq, ...data };
-        logs.push(row);
-        return Promise.resolve({ id: row.id });
-      }),
-      update: jest.fn(() => Promise.resolve({})),
-      updateMany: jest.fn(() => Promise.resolve({})),
-    },
-    user: {
-      findMany: jest.fn(({ where }: any) =>
-        Promise.resolve(
-          usuarios.filter((u) => u.isActive && where.cpf.in.includes(u.cpf)),
-        ),
-      ),
-      updateMany: jest.fn(() => Promise.resolve({})),
-    },
-    notification: { createMany: jest.fn(() => Promise.resolve({ count: 0 })) },
-  };
+  // Prisma em memória com a unique de idempotência e os estados do log de
+  // verdade (ENFILEIRADO → ENVIADO), sobre os repositórios reais.
+  const prisma = new PrismaDaReguaEmMemoria();
+  const logs = prisma.logs;
+  const usuarios = prisma.usuarios;
 
-  const service = new BoletoNotificacaoService(
+  const { service, expo } = montarRegua({
     prisma,
-    { get: () => loadBoletoNotificacaoConfig(env) } as any,
-    sgaClient as any,
-    { add: jest.fn(() => Promise.resolve({ id: 'job' })) } as any,
-  );
+    config: { get: () => loadBoletoNotificacaoConfig(env) },
+    sgaClient,
+  });
 
   // Expo mockado: captura em vez de enviar
   const pushes: PushCapturado[] = [];
   let diaAtual = '';
   const tokenPorCpf = new Map<string, string>();
-  (service as any).expo = {
+  Object.assign(expo, {
     chunkPushNotifications: (msgs: unknown[]) => [msgs],
     sendPushNotificationsAsync: jest.fn((msgs: any[]) => {
       msgs.forEach((m) => {
@@ -233,7 +180,7 @@ function criarHarness(env: NodeJS.ProcessEnv = {}) {
         msgs.map((_, i) => ({ status: 'ok', id: `t${i}` })),
       );
     }),
-  };
+  });
 
   return {
     boletosSga,

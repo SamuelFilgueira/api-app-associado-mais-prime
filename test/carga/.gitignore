@@ -1,0 +1,6 @@
+# Usuários reais de homologação e resultados de execução não são versionados.
+usuarios.json
+usuarios.*.json
+!usuarios.exemplo.json
+resultados/
+*.summary.json

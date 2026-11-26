@@ -23,6 +23,7 @@ import {
   AdminPanelRole,
   ALL_ADMIN_PANEL_ROLES,
 } from 'src/infra/enums/admin-panel-role.enum';
+import { LIMITE_DOCUMENTO } from 'src/infra/storage/limites-de-upload';
 
 @UseGuards(JwtAuthGuard)
 @Controller('documentos')
@@ -32,7 +33,7 @@ export class DocumentosController {
   @UseGuards(AdminRoleGuard, AdminPanelRoleGuard)
   @AdminPanelRoles(AdminPanelRole.EVENTOS)
   @Post()
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(FileInterceptor('file', LIMITE_DOCUMENTO))
   create(
     @Body() data: CreateDocumentDto,
     @UploadedFile() file?: Express.Multer.File,

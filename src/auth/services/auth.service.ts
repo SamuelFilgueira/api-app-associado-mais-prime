@@ -3,6 +3,9 @@ import {
   BadRequestException,
   NotFoundException,
   InternalServerErrorException,
+  Logger,
+  ServiceUnavailableException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { RegisterDto } from 'src/auth/dto/register.dto';
 import { JwtService } from '@nestjs/jwt';
@@ -10,9 +13,35 @@ import * as bcrypt from 'bcrypt';
 import { PrismaService } from 'src/database/prisma.service';
 import { Prisma } from '@prisma/client';
 import { MailService } from 'src/infra/mail/mail.service';
+import { randomInt } from 'crypto';
+
+const LETRAS_MAIUSCULAS = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+const LETRAS_MINUSCULAS = 'abcdefghijkmnopqrstuvwxyz';
+const DIGITOS = '23456789';
+
+/**
+ * Senha temporária de 10 caracteres (5 maiúsculos + 5 minúsculos, letras e
+ * números), sorteada com o gerador criptográfico do Node. `Math.random()` é
+ * previsível e não serve para credencial. O alfabeto deixa de fora os
+ * caracteres que se confundem na leitura do e-mail (0/O, 1/I/l).
+ */
+export function gerarSenhaTemporaria(): string {
+  const sortear = (alfabeto: string, quantidade: number): string =>
+    Array.from(
+      { length: quantidade },
+      () => alfabeto[randomInt(alfabeto.length)],
+    ).join('');
+
+  return (
+    sortear(LETRAS_MAIUSCULAS + DIGITOS, 5) +
+    sortear(LETRAS_MINUSCULAS + DIGITOS, 5)
+  );
+}
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private prisma: PrismaService,
     private jwtService: JwtService,
@@ -131,12 +160,29 @@ export class AuthService {
       throw new NotFoundException('Nenhuma conta encontrada com este CPF');
     }
 
-    // Gera senha aleatória de 10 caracteres (letras + números)
-    const newPassword =
-      Math.random().toString(36).slice(-5).toUpperCase() +
-      Math.random().toString(36).slice(-5);
+    if (!user.email?.trim()) {
+      throw new UnprocessableEntityException(
+        'Esta conta não tem e-mail cadastrado. Entre em contato com a associação para atualizar seu cadastro.',
+      );
+    }
+
+    const newPassword = gerarSenhaTemporaria();
 
     const passwordHash = await bcrypt.hash(newPassword, 10);
+
+    // O e-mail vai ANTES de gravar a senha: se o envio falhar, a senha atual
+    // continua valendo. Na ordem inversa, uma falha do provedor trocava a
+    // senha por uma que o usuário nunca recebeu e o deixava sem acesso.
+    try {
+      await this.mailService.sendPasswordReset(user.email, newPassword);
+    } catch (error) {
+      this.logger.error(
+        `Redefinição de senha não concluída (userId=${user.id}): falha no envio do e-mail — senha mantida. ${error instanceof Error ? `${error.name}: ${error.message}` : String(error)}`,
+      );
+      throw new ServiceUnavailableException(
+        'Não foi possível enviar o e-mail de recuperação de senha. Tente novamente em alguns minutos.',
+      );
+    }
 
     await this.prisma.user.update({
       where: { cpf },
@@ -146,8 +192,6 @@ export class AuthService {
         updatedAt: new Date(),
       },
     });
-
-    await this.mailService.sendPasswordReset(user.email, newPassword);
 
     return {
       message: 'Nova senha enviada para o e-mail informado',

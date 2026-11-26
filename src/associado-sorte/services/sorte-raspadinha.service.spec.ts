@@ -211,6 +211,31 @@ describe('SorteRaspadinhaService', () => {
   describe('limite diário e intervalo (dia em São Paulo)', () => {
     beforeEach(() => montar({ raspadasPorDia: 2, intervaloMinimoMinutos: 60 }));
 
+    it('o 409 de intervalo e de limite traz a última raspada do dia (quem perdeu a resposta vê o resultado)', async () => {
+      const r1 = await raspar(7, sp('2026-11-20T21:00'));
+
+      const intervalo = await raspar(7, sp('2026-11-20T21:30')).catch(
+        (e: { getResponse: () => Record<string, unknown> }) => e.getResponse(),
+      );
+      expect(intervalo).toMatchObject({
+        code: 'INTERVALO',
+        ultimaRaspada: {
+          raspadaId: r1.raspadaId,
+          resultado: r1.resultado,
+          creditos: r1.creditos,
+        },
+      });
+
+      const r2 = await raspar(7, sp('2026-11-20T22:00'));
+      const limite = await raspar(7, sp('2026-11-20T23:30')).catch(
+        (e: { getResponse: () => Record<string, unknown> }) => e.getResponse(),
+      );
+      expect(limite).toMatchObject({
+        code: 'LIMITE_DIARIO',
+        ultimaRaspada: { raspadaId: r2.raspadaId },
+      });
+    });
+
     it('INTERVALO antes de 60 min, LIMITE_DIARIO na terceira e volta a 2 à 00:00', async () => {
       const r1 = await raspar(7, sp('2026-11-20T21:00'));
       expect(r1).toMatchObject({

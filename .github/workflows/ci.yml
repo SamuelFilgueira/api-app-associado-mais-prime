@@ -1,0 +1,278 @@
+# ══════════════════════════════════════════════════════════════════
+# CI da Benefícios API
+#
+# Em todo PR e em todo push na main:
+#   verificacao  typecheck + testes unitários + build
+#   lint         linha de base (não bloqueia — ver comentário no job)
+#   migrations   aplica as migrations num MariaDB vazio e confere se o
+#                schema.prisma e as migrations dizem a mesma coisa
+#   integracao   `npm run test:integration`, se o script existir
+# Só na main, depois dos jobs acima:
+#   imagem       build + push para o ghcr.io e varredura de vulnerabilidades
+#
+# Actions fixadas por versão major. O trivy-action não publica tag major e
+# teve as tags reescritas num ataque de cadeia de suprimentos (03/2026); por
+# isso está fixado pelo SHA do commit da versão indicada ao lado.
+#
+# Nenhum segredo neste arquivo: o push usa o GITHUB_TOKEN do próprio job e as
+# senhas dos bancos são de containers descartáveis, visíveis só dentro do job.
+# ══════════════════════════════════════════════════════════════════
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Permissão mínima por padrão; o job `imagem` pede `packages: write`.
+permissions:
+  contents: read
+
+# Um push novo no mesmo PR cancela a execução anterior. Na main nada é
+# cancelado: cada commit precisa da sua imagem.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  NODE_VERSION: "24"
+  # O Chromium só existe na imagem de produção; no CI o Puppeteer não baixa o dele.
+  PUPPETEER_SKIP_DOWNLOAD: "true"
+  # A aplicação fixa este fuso no boot (src/main.ts). Os testes de data
+  # (régua de boletos, dia de Brasília) precisam do mesmo; o runner é UTC.
+  TZ: America/Sao_Paulo
+  # Sem telemetria do Prisma no CI.
+  CHECKPOINT_DISABLE: "1"
+
+jobs:
+  verificacao:
+    name: Typecheck, arquitetura, testes e build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Gerar o Prisma Client
+        run: npx prisma generate
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      # Regras de dependência (process.env só em config, axios só em
+      # integrations, domain/ puro...). Diferente do lint geral, este bloqueia.
+      - name: Regras de arquitetura
+        run: npm run lint:arquitetura
+
+      - name: Testes unitários
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+  lint:
+    name: Lint (linha de base, não bloqueia)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # O código legado tem uma linha de base de erros de lint ainda a zerar.
+    # Enquanto ela existir, o job roda e mostra o resultado, mas não reprova
+    # o PR. Quando `npm run lint:check` passar limpo na main, remova esta
+    # linha para o lint passar a bloquear.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Instalar dependências
+        run: npm ci
+
+      # As regras com informação de tipo precisam dos tipos do Prisma Client.
+      - name: Gerar o Prisma Client
+        run: npx prisma generate
+
+      - name: Lint (sem --fix)
+        run: npm run lint:check
+
+  migrations:
+    name: Migrations em banco vazio + divergência de schema
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      mariadb:
+        image: mariadb:11.8
+        env:
+          # Credencial descartável: o container nasce e morre com o job.
+          MARIADB_ROOT_PASSWORD: ci
+          MARIADB_DATABASE: beneficios_ci
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+    env:
+      DATABASE_URL: mysql://root:ci@127.0.0.1:3306/beneficios_ci
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Instalar dependências
+        run: npm ci
+
+      # O mesmo comando do deploy, contra um banco vazio: pega migration que
+      # só funciona em cima de um banco já existente.
+      - name: Aplicar todas as migrations
+        run: npx prisma migrate deploy
+
+      # Compara o banco recém-migrado com o schema.prisma. Sai com código 2
+      # (e reprova) se alguém mudou o schema sem criar a migration, ou editou
+      # uma migration sem refletir no schema. O SQL que falta aparece no log.
+      - name: Schema e migrations dizem a mesma coisa
+        run: >-
+          npx prisma migrate diff
+          --from-url "$DATABASE_URL"
+          --to-schema-datamodel prisma/schema.prisma
+          --exit-code
+
+  integracao:
+    name: Testes de integração (MariaDB + Redis)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      mariadb:
+        image: mariadb:11.8
+        env:
+          # Credencial descartável: o container nasce e morre com o job.
+          MARIADB_ROOT_PASSWORD: ci
+          MARIADB_DATABASE: beneficios_ci
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=20
+    env:
+      DATABASE_URL: mysql://root:ci@127.0.0.1:3306/beneficios_ci
+      REDIS_HOST: 127.0.0.1
+      REDIS_PORT: "6379"
+      # Sem REDIS_PASSWORD: o container de serviço não aceita `--requirepass`
+      # (o GitHub não permite trocar o comando do serviço) e a aplicação só
+      # envia senha quando a variável existe.
+      #
+      # É por estas duas que a suíte encontra os serviços
+      # (test/integracao/ambiente.ts). Sem elas os testes são PULADOS, não
+      # falham — o job ficaria verde sem ter testado nada.
+      TEST_DATABASE_URL: mysql://root:ci@127.0.0.1:3306/beneficios_ci
+      TEST_REDIS_URL: redis://127.0.0.1:6379/0
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Gerar o Prisma Client
+        run: npx prisma generate
+
+      - name: Preparar o banco
+        run: npx prisma migrate deploy
+
+      # --if-present: enquanto o script `test:integration` não existir no
+      # package.json, o passo termina com sucesso sem rodar nada.
+      - name: Testes de integração
+        run: npm run test:integration --if-present
+
+  imagem:
+    name: Imagem Docker (ghcr.io) + Trivy
+    # Só publica o que passou em tudo que bloqueia, e só a partir da main.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [verificacao, migrations, integracao]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+
+      # O ghcr.io só aceita nome de repositório em minúsculas.
+      - name: Nome da imagem
+        id: img
+        run: echo "nome=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Duas tags: o SHA completo do commit (é o que o ops/deploy.sh recebe —
+      # imutável, dá para voltar a qualquer versão) e `latest`.
+      - name: Tags e rótulos
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ steps.img.outputs.nome }}
+          tags: |
+            type=raw,value=${{ github.sha }}
+            type=raw,value=latest
+
+      - name: Build e push
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Varredura da imagem recém-publicada (pelo digest, não pela tag).
+      # `exit-code: 0`: nesta primeira versão o resultado só aparece no log e
+      # NÃO reprova o build — a imagem carrega o Chromium e as bibliotecas do
+      # Debian, e ainda não há linha de base nem lista de exceções. Depois de
+      # tratar o que aparecer, troque para "1" para bloquear HIGH/CRITICAL.
+      - name: Varredura de vulnerabilidades (Trivy)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.img.outputs.nome }}@${{ steps.build.outputs.digest }}
+          format: table
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "0"
+        env:
+          TRIVY_USERNAME: ${{ github.actor }}
+          TRIVY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}

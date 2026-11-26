@@ -60,8 +60,59 @@ npm run start:dev
 npm run build && npm run dev
 ```
 
-## Pendências conhecidas (não feitas por decisão de não alterar contratos/fluxo)
-- Rotas do app não validam se o `userVehicle` pertence ao usuário do JWT (IDOR); idem `PATCH /sga/set-revistoria`.
-- `submit` não muda o status (o app chama `PATCH /status` em seguida); `create` permite nova revistoria com outra aberta; ações por `userVehicleId` atuam na última revistoria do veículo.
-- Transições de status não são validadas (`aprovar` aceita `PENDENTE`, `approvePhoto` rebaixa `APROVADA` para `EM_ANALISE` etc.).
+## O que mudou em novembro de 2026
+
+As pendências que este documento listava foram tratadas no plano de arquitetura (fases 0, 4 e 5).
+O módulo foi quebrado em casos de uso (`services/reinspection-*.service.ts`), com a regra pura em
+`domain/` e as escritas em `repositories/`; `ReinspectionService` ficou como fachada.
+
+**Posse.** As rotas do app (`POST /reinspection`, `POST /:id/photos`, `POST /:id/submit`, `GET/PATCH
+/status`, `GET /rejected-photos`, `PATCH /finalizar`, `PATCH /photos/:photoId/resend`) só atendem o dono
+do veículo; token ADMIN (painel) é isento. `PATCH /sga/set-revistoria` segue sem posse.
+
+**Transições validadas.** `Reinspection.status` é gravado em um ponto só
+(`ReinspectionRepository.transicionar`, `UPDATE ... WHERE status IN (...)`), pela tabela de
+`src/reinspection/domain/revistoria-transicoes.ts`:
+
+| De | Para |
+|---|---|
+| PENDENTE | EM_ANALISE, APROVADA, REPROVADA, FINALIZADA |
+| EM_ANALISE | APROVADA, REPROVADA, FINALIZADA |
+| REPROVADA | EM_ANALISE, FINALIZADA |
+| APROVADA | REPROVADA (foto reprovada depois da aprovação), FINALIZADA |
+| FINALIZADA | — (terminal) |
+
+Transição fora da tabela responde 409 `REVISTORIA_TRANSICAO_INVALIDA` (com `statusAtual` e
+`statusPretendido`). Três comportamentos antigos deixaram de existir, e cada um é uma linha da tabela se
+for preciso voltar atrás:
+
+- reprovar foto de revistoria `FINALIZADA` não a reabre mais (409; a foto não muda);
+- aprovar foto de revistoria `APROVADA` ou `FINALIZADA` aprova a foto e **não** rebaixa a revistoria
+  para `EM_ANALISE`;
+- `PATCH /status` em revistoria `APROVADA` ou `FINALIZADA` responde 409 em vez de rebaixar (só acontece
+  se o painel aprovar entre o envio das fotos e essa chamada do app).
+
+**Corridas fechadas.** Aprovar e reprovar foto rodam com a linha da revistoria travada; duas aprovações
+simultâneas geram um boleto e um envio; `submit` repetido manda um e-mail só; `create` repetido em até
+2 minutos (mesmo veículo e tipo, ainda sem foto) devolve a revistoria já aberta.
+
+**Aprovação repetida.** Responde 200 com `repetida: true` e não refaz os efeitos — exceto quando a
+revistoria já estava `APROVADA` e o boleto nunca teve tentativa (`NAO_GERADO`, processo que caiu no
+meio): aí os efeitos são retomados.
+
+**Envio à Hinova sob lease.** `hinovaEnvioLeaseAte` é reivindicado antes de qualquer chamada: dois
+envios simultâneos não postam a mesma foto. Reenvio manual com outro em curso responde 409
+`REVISTORIA_HINOVA_ENVIO_EM_ANDAMENTO`. Sem resposta da Hinova (timeout, conexão derrubada), o erro
+gravado avisa que o resultado é indeterminado — as fotos podem ter sido gravadas no SGA; confira antes
+de reenviar.
+
+**Campos aditivos nas respostas:** `PATCH /aprovar` → `repetida`, `hinovaEnvio`, `falhas[]`;
+`POST /:id/submit` → `notificacao`; `PATCH /photos/:id/resend` → `notificacao`.
+
+## Pendências que continuam
+
 - `FINALIZADA` depende de o app abrir a Home após o veículo voltar a ATIVO.
+- Revistorias `PENDENTE` órfãs se acumulam quando o upload falha e o app recomeça.
+- Foto gravada na Hinova cuja resposta se perdeu pode ser postada de novo no reenvio (não há consulta
+  de fotos do lado deles).
+- As rotas por `userVehicleId` atuam na última revistoria do veículo.

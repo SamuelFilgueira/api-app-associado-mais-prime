@@ -1,5 +1,4 @@
 /* eslint-disable @typescript-eslint/no-unsafe-argument -- spec com dublês em memória: registros soltos, conferidos pelas asserções */
-import { getQueueToken } from '@nestjs/bullmq';
 import { Test } from '@nestjs/testing';
 import { SORTE_EMAIL_RETIRADA_JOB } from 'src/associado-sorte/config/associado-sorte.config';
 import { SorteCreditosRepository } from 'src/associado-sorte/repositories/sorte-creditos.repository';
@@ -20,6 +19,7 @@ import { SorteTentativaService } from 'src/associado-sorte/services/sorte-tentat
 import { configDeTeste } from 'src/associado-sorte/testing/sorte-fixtures';
 import { SorteTxMemoria } from 'src/associado-sorte/testing/sorte-tx.memoria';
 import { MailService } from 'src/infra/mail/mail.service';
+import { ProdutorDeFilas } from 'src/queue/produtor-de-filas.service';
 import { ASSOCIADO_SORTE_QUEUE } from 'src/queue/queue.module';
 
 describe('SorteLojaService', () => {
@@ -34,7 +34,7 @@ describe('SorteLojaService', () => {
   const rateLimit = { verificar: jest.fn() };
   const notificacoes = { avisarGanhadores: jest.fn() };
   const tentativas = { registrarErro: jest.fn() };
-  const fila = { add: jest.fn() };
+  const produtor = { enfileirar: jest.fn() };
   const creditosRepository = { garantirCarteira: jest.fn() };
 
   const premiosRepository = {
@@ -105,7 +105,7 @@ describe('SorteLojaService', () => {
       }),
     });
     notificacoes.avisarGanhadores.mockResolvedValue(undefined);
-    fila.add.mockResolvedValue(undefined);
+    produtor.enfileirar.mockResolvedValue({ id: 'job-1' });
 
     const module = await Test.createTestingModule({
       providers: [
@@ -128,7 +128,7 @@ describe('SorteLojaService', () => {
         { provide: SorteTentativaService, useValue: tentativas },
         { provide: SorteConfigService, useValue: {} },
         { provide: MailService, useValue: {} },
-        { provide: getQueueToken(ASSOCIADO_SORTE_QUEUE), useValue: fila },
+        { provide: ProdutorDeFilas, useValue: produtor },
       ],
     }).compile();
     service = module.get(SorteLojaService);
@@ -178,10 +178,20 @@ describe('SorteLojaService', () => {
       }),
     ]);
     await new Promise((resolve) => setImmediate(resolve));
-    expect(fila.add).toHaveBeenCalledWith(
+    expect(produtor.enfileirar).toHaveBeenCalledWith(
+      ASSOCIADO_SORTE_QUEUE,
       SORTE_EMAIL_RETIRADA_JOB,
       { notificacaoId: tx.notificacoesAdmin[0].id },
-      expect.objectContaining({ attempts: 3 }),
+      {
+        // A base do job é a da notificação (a da compra).
+        base: 'MAIS_PRIME',
+        opcoes: {
+          attempts: 3,
+          backoff: { type: 'exponential', delay: 30_000 },
+          removeOnComplete: true,
+          removeOnFail: 50,
+        },
+      },
     );
   });
 

@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import { AuthService } from 'src/auth/services/auth.service';
 import { FileUploadService } from 'src/infra/storage/file-upload.service';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from 'src/database/prisma.service';
 import { UpdateAssociadoDto } from 'src/associado/dto/update-associado.dto';
 import { BaseOrigin } from 'src/shared/token-resolver.service';
@@ -37,6 +38,9 @@ const MSG_SGA_INDISPONIVEL =
 /** Resposta atual do app para associado em situação sem acesso (403). */
 const MSG_ASSOCIADO_SEM_PERMISSAO =
   'Associado sem permissão para acessar a aplicação';
+
+/** Nenhuma resposta da API serializa o hash da senha. */
+const SEM_HASH_DE_SENHA = { passwordHash: true } as const;
 
 @Injectable()
 export class AssociadoService {
@@ -477,6 +481,7 @@ export class AssociadoService {
   async findById(id: number) {
     const associado = await this.prisma.user.findUnique({
       where: { id },
+      omit: SEM_HASH_DE_SENHA,
     });
 
     if (!associado) {
@@ -497,6 +502,7 @@ export class AssociadoService {
       where: {
         OR: [{ cpf }, { cpf: rawCpf }],
       },
+      omit: SEM_HASH_DE_SENHA,
     });
 
     if (!associado) {
@@ -558,6 +564,14 @@ export class AssociadoService {
       throw new NotFoundException('Associado não encontrado');
     }
 
+    // Só os campos do DTO chegam ao banco: nada de CPF, papel, base ou hash
+    // vindos do cliente.
+    const alteracoes: Prisma.userUpdateInput = {};
+    if (data.name !== undefined) alteracoes.name = data.name;
+    if (data.email !== undefined) alteracoes.email = data.email;
+    if (data.cep !== undefined) alteracoes.cep = data.cep;
+    if (data.address !== undefined) alteracoes.address = data.address;
+
     // Se uma nova foto foi enviada, processa e salva
     if (profilePhoto) {
       // Remove a foto antiga se existir
@@ -567,15 +581,15 @@ export class AssociadoService {
         );
       }
 
-      // Salva a nova foto e obtém o caminho
-      const photoUrl =
+      // Salva a nova foto e obtém o caminho (definido pelo servidor)
+      alteracoes.profilePhotoUrl =
         await this.fileUploadService.uploadProfilePhoto(profilePhoto);
-      data.profilePhotoUrl = photoUrl;
     }
 
     return this.prisma.user.update({
       where: { id },
-      data,
+      data: alteracoes,
+      omit: SEM_HASH_DE_SENHA,
     });
   }
 

@@ -37,9 +37,11 @@ Em produção: `npx prisma migrate deploy`.
 - **Categorias da Alloyal no formulário (§5.0)**: a API da Alloyal só devolve `/categories` com
   sessão de usuário final (uid/client/access-token), que o painel não possui. Por isso
   `AlloyalCategoriesCacheService` (exportado por `AlloyalApiModule`) guarda em Redis, por base,
-  a lista `{ id, title }` sempre que um associado chama `GET /alloyal/categories`
-  (TTL 7 dias, chave `alloyal:categorias:<base>`). Base sem cache devolve `[]`.
-  A injeção no `AlloyalApiController` é `@Optional()` para manter o contract spec verde sem edição.
+  a lista `{ id, title }` sempre que as categorias são buscadas na Alloyal para um associado
+  (TTL 7 dias, pelo `CacheService`, chave `alloyal:catalogo:categorias_painel` prefixada pela base).
+  Base sem valor guardado devolve `[]`. A chave é própria do painel, separada da que responde ao app
+  (`alloyal:catalogo:categorias`, 6 h): logo depois de um deploy que troque a chave, o formulário
+  fica sem categorias até o primeiro associado da base abrir o clube.
 - **Uso único**: `DirectPartnersRepository.resgatarUsoUnico` roda em transação com
   `SELECT ... FOR UPDATE` na linha do cupom e leitura travada do par (cupom, associado), garantindo
   um único registro mesmo com chamadas simultâneas. Cupom reutilizável grava uma linha por uso (métrica).

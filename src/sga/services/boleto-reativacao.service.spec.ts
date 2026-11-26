@@ -1,15 +1,20 @@
 import { NotFoundException } from '@nestjs/common';
-import { Queue } from 'bullmq';
 import { PrismaService } from 'src/database/prisma.service';
 import { MailService } from 'src/infra/mail/mail.service';
+import { HinovaClient } from 'src/integrations/hinova/hinova.client';
 import { SgaAuthService } from 'src/integrations/hinova/sga-auth.service';
-import { SgaService } from 'src/sga/services/sga.service';
 import { BoletoReativacaoService } from 'src/sga/services/boleto-reativacao.service';
 import {
   BoletoReativacaoDefinitivoError,
   BoletoReativacaoInstabilidadeError,
 } from 'src/sga/errors/boleto-reativacao.error';
-import { JOB_ID_PREFIXO_RETRY_BOLETO } from 'src/sga/config/boleto-reativacao-retry.config';
+import { BoletoReativacaoRepository } from 'src/sga/repositories/boleto-reativacao.repository';
+import { BoletoAdocaoService } from 'src/sga/services/boleto-adocao.service';
+import { BoletoCriacaoService } from 'src/sga/services/boleto-criacao.service';
+import { BoletoDesfechoService } from 'src/sga/services/boleto-desfecho.service';
+import { BoletoObtencaoService } from 'src/sga/services/boleto-obtencao.service';
+import { GerarBoletoReativacaoService } from 'src/sga/services/gerar-boleto-reativacao.service';
+import { SgaBoletoClient } from 'src/sga/services/sga-boleto.client';
 
 const HORA_MS = 3_600_000;
 
@@ -41,11 +46,17 @@ function amanhaBR(): string {
   return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
 }
 
+/**
+ * Caracterização do boleto de reativação pela fachada usada pelo módulo de
+ * revistoria. As dependências reais (caso de uso, repositório, adoção e
+ * client do SGA) são montadas sobre os mesmos mocks de sempre: `prisma`,
+ * `sgaAuth` (chamadas HTTP ao SGA), `mail` e `sgaService` — este no papel do
+ * `BoletoCriacaoService`, que herdou os métodos de boleto do `SgaService`.
+ */
 describe('BoletoReativacaoService', () => {
   let prisma: {
     reinspection: {
       findUnique: jest.Mock;
-      update: jest.Mock;
       updateMany: jest.Mock;
       findMany: jest.Mock;
     };
@@ -61,14 +72,12 @@ describe('BoletoReativacaoService', () => {
     sendRevistoriaAprovadaEmail: jest.Mock;
     sendRevistoriaAprovadaSemBoletoEmail: jest.Mock;
   };
-  let queue: { add: jest.Mock };
   let service: BoletoReativacaoService;
 
   beforeEach(() => {
     prisma = {
       reinspection: {
         findUnique: jest.fn(),
-        update: jest.fn().mockResolvedValue({}),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
         findMany: jest.fn().mockResolvedValue([]),
       },
@@ -92,22 +101,37 @@ describe('BoletoReativacaoService', () => {
         .fn()
         .mockResolvedValue(undefined),
     };
-    queue = { add: jest.fn().mockResolvedValue({}) };
-    service = new BoletoReativacaoService(
-      prisma as unknown as PrismaService,
-      sgaService as unknown as SgaService,
+    const client = new SgaBoletoClient(
       sgaAuth as unknown as SgaAuthService,
-      mail as unknown as MailService,
-      queue as unknown as Queue,
+      {} as HinovaClient,
+    );
+    jest
+      .spyOn(client, 'buscarDadosAssociadoParaBoleto')
+      .mockImplementation(sgaService.buscarDadosAssociadoParaBoleto);
+    const criacao = sgaService as unknown as BoletoCriacaoService;
+    const revistorias = new BoletoReativacaoRepository(
+      prisma as unknown as PrismaService,
+    );
+    service = new BoletoReativacaoService(
+      new GerarBoletoReativacaoService(
+        revistorias,
+        new BoletoObtencaoService(
+          new BoletoAdocaoService(client, criacao),
+          criacao,
+        ),
+        new BoletoDesfechoService(revistorias, mail as unknown as MailService),
+      ),
+      revistorias,
     );
   });
 
   const semBoletoNoSga = () =>
     sgaAuth.executeRequestWithAuth.mockResolvedValue({ status: 200, data: [] });
 
+  /** Gravação do desfecho (a primeira `updateMany` é a reivindicação do lease). */
   const ultimoUpdate = () =>
-    prisma.reinspection.update.mock.calls[
-      prisma.reinspection.update.mock.calls.length - 1
+    prisma.reinspection.updateMany.mock.calls[
+      prisma.reinspection.updateMany.mock.calls.length - 1
     ][0].data;
 
   it('lança 404 quando a revistoria não existe', async () => {
@@ -126,7 +150,7 @@ describe('BoletoReativacaoService', () => {
     expect(r.nossoNumero).toBe('123');
     expect(sgaAuth.executeRequestWithAuth).not.toHaveBeenCalled();
     expect(sgaService.criarBoletoReativacao).not.toHaveBeenCalled();
-    expect(prisma.reinspection.update).not.toHaveBeenCalled();
+    expect(prisma.reinspection.updateMany).not.toHaveBeenCalled();
   });
 
   it.each(['RETRY', 'MANUAL'] as const)(
@@ -140,23 +164,12 @@ describe('BoletoReativacaoService', () => {
       expect(r.status).toBe('NAO_GERADO');
       expect(r.erro).toContain('antes do fluxo');
       expect(prisma.reinspection.updateMany).not.toHaveBeenCalled();
-      expect(prisma.reinspection.update).not.toHaveBeenCalled();
       expect(sgaAuth.executeRequestWithAuth).not.toHaveBeenCalled();
       expect(sgaService.criarBoletoReativacao).not.toHaveBeenCalled();
-      expect(queue.add).not.toHaveBeenCalled();
       expect(mail.sendRevistoriaAprovadaEmail).not.toHaveBeenCalled();
       expect(mail.sendRevistoriaAprovadaSemBoletoEmail).not.toHaveBeenCalled();
     },
   );
-
-  it('reconciliarPendentes ignora NAO_GERADO e FALHA: só PENDENTE_RETRY entra na fila', async () => {
-    await service.reconciliarPendentes();
-    expect(prisma.reinspection.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { boletoStatus: 'PENDENTE_RETRY' },
-      }),
-    );
-  });
 
   it('tentativa concorrente perde o lock e sai sem tocar o SGA', async () => {
     prisma.reinspection.findUnique.mockResolvedValue(revistoria());
@@ -173,7 +186,8 @@ describe('BoletoReativacaoService', () => {
     );
     expect(sgaAuth.executeRequestWithAuth).not.toHaveBeenCalled();
     expect(sgaService.criarBoletoReativacao).not.toHaveBeenCalled();
-    expect(prisma.reinspection.update).not.toHaveBeenCalled();
+    // Só a tentativa de reivindicar o lease: nenhum desfecho gravado.
+    expect(prisma.reinspection.updateMany).toHaveBeenCalledTimes(1);
   });
 
   it('placa ausente é falha definitiva: FALHA, e-mail para a cobrança, sem retry', async () => {
@@ -186,7 +200,7 @@ describe('BoletoReativacaoService', () => {
     expect(ultimoUpdate().boletoStatus).toBe('FALHA');
     expect(mail.sendRevistoriaAprovadaSemBoletoEmail).toHaveBeenCalledTimes(1);
     expect(mail.sendRevistoriaAprovadaEmail).not.toHaveBeenCalled();
-    expect(queue.add).not.toHaveBeenCalled();
+    expect(ultimoUpdate().boletoProximaTentativaEm).toBeNull();
   });
 
   it('cadastra pela API quando o SGA não tem boleto de reativação aberto e manda o e-mail de aprovação', async () => {
@@ -229,7 +243,7 @@ describe('BoletoReativacaoService', () => {
       'ABC1D23',
       'dbg',
     );
-    expect(queue.add).not.toHaveBeenCalled();
+    expect(ultimoUpdate().boletoProximaTentativaEm).toBeNull();
   });
 
   it('adota boleto de reativação em aberto já criado no SGA em vez de cadastrar outro', async () => {
@@ -290,7 +304,7 @@ describe('BoletoReativacaoService', () => {
     expect(mail.sendRevistoriaAprovadaEmail).toHaveBeenCalledTimes(1);
   });
 
-  it('instabilidade do SGA na consulta: PENDENTE_RETRY e job agendado para daqui a 5 min', async () => {
+  it('instabilidade do SGA na consulta: PENDENTE_RETRY com a próxima tentativa gravada para daqui a 5 min', async () => {
     prisma.reinspection.findUnique.mockResolvedValue(revistoria());
     sgaAuth.executeRequestWithAuth.mockResolvedValue({
       status: 503,
@@ -309,13 +323,11 @@ describe('BoletoReativacaoService', () => {
     const update = ultimoUpdate();
     expect(update.boletoStatus).toBe('PENDENTE_RETRY');
     expect(update.boletoRetryInicioEm).toBeInstanceOf(Date);
-    expect(queue.add).toHaveBeenCalledTimes(1);
-    const [nome, data, opts] = queue.add.mock.calls[0];
-    expect(nome).toBe('retry-boleto-reativacao');
-    expect(data).toEqual({ reinspectionId: 10, debugId: undefined });
-    expect(opts.jobId).toBe(`${JOB_ID_PREFIXO_RETRY_BOLETO}10-2`);
-    expect(opts.delay).toBeGreaterThan(4 * 60_000);
-    expect(opts.delay).toBeLessThanOrEqual(5 * 60_000);
+    // O retry não é mais um job atrasado por revistoria: a varredura lê
+    // `boletoProximaTentativaEm` (e o lease é solto para ela poder tentar).
+    expect(update.boletoProximaTentativaEm).toEqual(r.proximaTentativaEm);
+    expect(update.boletoLeaseAte).toBeNull();
+    expect(update.boletoLeaseDono).toBeNull();
     expect(mail.sendRevistoriaAprovadaEmail).not.toHaveBeenCalled();
     expect(mail.sendRevistoriaAprovadaSemBoletoEmail).not.toHaveBeenCalled();
   });
@@ -331,7 +343,7 @@ describe('BoletoReativacaoService', () => {
     );
     const r = await service.processar(10, { origem: 'APROVACAO' });
     expect(r.status).toBe('PENDENTE_RETRY');
-    expect(queue.add).toHaveBeenCalledTimes(1);
+    expect(ultimoUpdate().boletoProximaTentativaEm).toBeInstanceOf(Date);
   });
 
   it('retry mantém a janela: continua PENDENTE_RETRY enquanto não esgotar', async () => {
@@ -351,9 +363,7 @@ describe('BoletoReativacaoService', () => {
     expect(r.status).toBe('PENDENTE_RETRY');
     expect(r.tentativas).toBe(25);
     expect(ultimoUpdate().boletoRetryInicioEm).toEqual(inicio);
-    expect(queue.add.mock.calls[0][2].jobId).toBe(
-      `${JOB_ID_PREFIXO_RETRY_BOLETO}10-26`,
-    );
+    expect(ultimoUpdate().boletoTentativas).toBe(25);
   });
 
   it('janela de retry esgotada: FALHA, e-mail para a cobrança e sem novo job', async () => {
@@ -376,7 +386,7 @@ describe('BoletoReativacaoService', () => {
       boletoRetryInicioEm: null,
     });
     expect(mail.sendRevistoriaAprovadaSemBoletoEmail).toHaveBeenCalledTimes(1);
-    expect(queue.add).not.toHaveBeenCalled();
+    expect(ultimoUpdate().boletoProximaTentativaEm).toBeNull();
   });
 
   it('tentativa manual reinicia a janela mesmo com retry antigo esgotado', async () => {
@@ -392,7 +402,7 @@ describe('BoletoReativacaoService', () => {
     const r = await service.processar(10, { origem: 'MANUAL' });
 
     expect(r.status).toBe('PENDENTE_RETRY');
-    expect(queue.add).toHaveBeenCalledTimes(1);
+    expect(ultimoUpdate().boletoStatus).toBe('PENDENTE_RETRY');
   });
 
   it('erro definitivo do cadastro (ex.: placa inexistente no SGA): FALHA + e-mail, sem retry', async () => {
@@ -416,7 +426,7 @@ describe('BoletoReativacaoService', () => {
       expect.stringContaining('HTTP 404'),
       undefined,
     );
-    expect(queue.add).not.toHaveBeenCalled();
+    expect(ultimoUpdate().boletoStatus).toBe('FALHA');
   });
 
   it('404 na listagem de boletos é "nenhum boleto", não instabilidade', async () => {
@@ -446,22 +456,24 @@ describe('BoletoReativacaoService', () => {
     expect(sgaService.criarBoletoReativacao).toHaveBeenCalledTimes(1);
   });
 
-  it('reconciliarPendentes garante um job para cada PENDENTE_RETRY', async () => {
+  it('listarPendentes devolve PENDENTE_RETRY e FALHA com chassi e placa', async () => {
     prisma.reinspection.findMany.mockResolvedValue([
       {
         id: 1,
-        boletoTentativas: 2,
-        boletoProximaTentativaEm: new Date(Date.now() + 60_000),
+        boletoStatus: 'FALHA',
+        userVehicle: { chassi: 'C1', plate: 'P1' },
       },
-      { id: 2, boletoTentativas: 0, boletoProximaTentativaEm: null },
     ]);
-    const r = await service.reconciliarPendentes();
-    expect(r).toEqual({ pendentes: 2, agendados: 2 });
-    expect(queue.add.mock.calls[0][2].jobId).toBe(
-      `${JOB_ID_PREFIXO_RETRY_BOLETO}1-3`,
+
+    const pendentes = await service.listarPendentes();
+
+    expect(prisma.reinspection.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { boletoStatus: { in: ['PENDENTE_RETRY', 'FALHA'] } },
+      }),
     );
-    expect(queue.add.mock.calls[1][2].jobId).toBe(
-      `${JOB_ID_PREFIXO_RETRY_BOLETO}2-1`,
-    );
+    expect(pendentes).toEqual([
+      { id: 1, boletoStatus: 'FALHA', chassi: 'C1', plate: 'P1' },
+    ]);
   });
 });

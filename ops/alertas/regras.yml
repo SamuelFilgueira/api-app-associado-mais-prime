@@ -1,0 +1,372 @@
+# ══════════════════════════════════════════════════════════════════
+# Benefícios API — regras de alerta (formato Prometheus / compatíveis)
+#
+# Como carregar e quais alertas de infraestrutura dependem de exporters
+# externos: ops/alertas/README.md.
+#
+# Convenções:
+#  - As métricas vêm do GET /metrics de cada processo (api-1, api-2, worker,
+#    pdf). O coletor precisa usar `job="beneficios-api"` (exemplo de scrape
+#    no README). O rótulo `role` (api | worker | pdf | all) já vem da própria
+#    aplicação em todas as séries; as regras de memória e heap dependem dele
+#    e não cobrem o deploy de processo único (`role="all"`).
+#  - `severity: critical` = alguém precisa agir agora (usuário afetado ou
+#    dado em risco). `severity: warning` = olhar no mesmo dia.
+#  - Os limites são pontos de partida, a calibrar com a linha de base de
+#    carga (test/carga). Valide qualquer mudança com
+#    `promtool check rules ops/alertas/regras.yml`.
+# ══════════════════════════════════════════════════════════════════
+groups:
+  # ────────────────────────────────────────────────────────────────
+  - name: beneficios-api.http
+    rules:
+      - alert: ApiTaxaDeErro5xxAlta
+        # Sondas e métricas ficam fora da conta. O piso de tráfego evita
+        # disparo de madrugada por 1 erro em 10 requisições.
+        expr: |
+          (
+              sum(rate(http_requests_total{status=~"5..", route!~".*/(health|metrics).*"}[5m]))
+            /
+              sum(rate(http_requests_total{route!~".*/(health|metrics).*"}[5m]))
+          ) > 0.02
+          and
+          sum(rate(http_requests_total{route!~".*/(health|metrics).*"}[5m])) > 0.2
+        for: 5m
+        labels:
+          severity: critical
+          servico: beneficios-api
+        annotations:
+          summary: "API com mais de 2% de respostas 5xx"
+          description: >-
+            {{ $value | humanizePercentage }} das requisições terminaram em
+            5xx nos últimos 5 minutos. Veja quais rotas e códigos em
+            http_requests_total e, se for 502/503/504, os alertas de vendor.
+
+      - alert: ApiLatenciaP95Alta
+        # PDFs e relatórios ficam fora: são lentos por natureza e têm o
+        # próprio prazo (PDF_PRAZO_MS).
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (
+              rate(http_request_duration_seconds_bucket{route!~".*/(health|metrics|pdf|relatorio).*"}[5m])
+            )
+          ) > 2
+        for: 10m
+        labels:
+          severity: warning
+          servico: beneficios-api
+        annotations:
+          summary: "p95 da API acima de 2 s"
+          description: >-
+            O p95 de latência está em {{ $value | humanizeDuration }} há 10
+            minutos. Confira o atraso do event loop, o pool do Prisma e a
+            latência dos vendors (vendor_request_duration_seconds_bucket).
+
+  # ────────────────────────────────────────────────────────────────
+  - name: beneficios-api.processo
+    rules:
+      - alert: AlvoForaDoAr
+        # Sem isto, um processo morto silencia todos os outros alertas dele.
+        expr: up{job="beneficios-api"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          servico: beneficios-api
+        annotations:
+          summary: "{{ $labels.instance }} não responde ao /metrics"
+          description: >-
+            O coletor não consegue ler /metrics de {{ $labels.instance }} há
+            2 minutos: processo parado, travado ou inalcançável.
+
+      - alert: EventLoopAtrasado
+        expr: nodejs_eventloop_lag_p99_seconds > 0.2
+        for: 5m
+        labels:
+          severity: warning
+          servico: beneficios-api
+        annotations:
+          summary: "Event loop com p99 acima de 200 ms em {{ $labels.instance }}"
+          description: >-
+            Atraso p99 de {{ $value | humanizeDuration }} há 5 minutos (papel
+            {{ $labels.role }}). Algo síncrono está segurando o processo:
+            montagem de PDF/planilha, JSON grande, laço em memória.
+
+      # Memória residente acima de 85% do teto do container (mem_limit do
+      # docker-compose.escala.yml). Valores absolutos por papel — se mudar o
+      # mem_limit, mude aqui:
+      #   api      1,0 GiB -> 0,85 * 1024^3
+      #   worker   1,5 GiB -> 0,85 * 1,5 * 1024^3
+      - alert: MemoriaDoProcessoAlta
+        expr: |
+          process_resident_memory_bytes{role="api"} > 0.85 * 1024 * 1024 * 1024
+          or
+          process_resident_memory_bytes{role="worker"} > 0.85 * 1.5 * 1024 * 1024 * 1024
+        for: 10m
+        labels:
+          severity: warning
+          servico: beneficios-api
+        annotations:
+          summary: "{{ $labels.instance }} acima de 85% do teto de memória"
+          description: >-
+            Memória residente em {{ $value | humanize1024 }}B (papel
+            {{ $labels.role }}). Acima do teto o container é morto pelo
+            kernel (OOM) e reinicia.
+
+      # No papel `pdf` o teto do container é 3 GiB, mas quase tudo é do
+      # Chromium, que NÃO entra em process_resident_memory_bytes (a métrica
+      # é só do processo Node). Aqui o limite é a parte do Node: 85% de
+      # 1 GiB (heap de 768 MB + folga). O container inteiro (Node + Chromium)
+      # só se mede com cAdvisor — expressão no README.
+      - alert: MemoriaDoProcessoAltaPdf
+        expr: process_resident_memory_bytes{role="pdf"} > 0.85 * 1024 * 1024 * 1024
+        for: 10m
+        labels:
+          severity: warning
+          servico: beneficios-api
+        annotations:
+          summary: "Processo Node do papel pdf com memória alta"
+          description: >-
+            O Node de {{ $labels.instance }} está em
+            {{ $value | humanize1024 }}B, fora o Chromium. Indica PDFs sendo
+            acumulados em memória; some o uso do Chromium antes de concluir
+            quanto falta para o teto de 3 GiB.
+
+      # Heap usado acima de 85% do --max-old-space-size (NODE_OPTIONS do
+      # docker-compose.escala.yml: api 768 MB, worker 1152 MB, pdf 768 MB). Passando
+      # do limite o V8 derruba o processo com "heap out of memory".
+      - alert: HeapDoNodeAlto
+        expr: |
+          nodejs_heap_size_used_bytes{role=~"api|pdf"} > 0.85 * 768 * 1024 * 1024
+          or
+          nodejs_heap_size_used_bytes{role="worker"} > 0.85 * 1152 * 1024 * 1024
+        for: 10m
+        labels:
+          severity: warning
+          servico: beneficios-api
+        annotations:
+          summary: "Heap do Node acima de 85% do limite em {{ $labels.instance }}"
+          description: >-
+            Heap usado em {{ $value | humanize1024 }}B (papel
+            {{ $labels.role }}) há 10 minutos. Vazamento ou carga acima do
+            dimensionado.
+
+      - alert: ProcessoReiniciando
+        expr: changes(process_start_time_seconds[15m]) > 2
+        for: 0m
+        labels:
+          severity: critical
+          servico: beneficios-api
+        annotations:
+          summary: "{{ $labels.instance }} reiniciou mais de 2 vezes em 15 min"
+          description: >-
+            O processo (papel {{ $labels.role }}) está em ciclo de reinício:
+            falta de memória (OOM), erro no boot ou dependência fora. Veja
+            `docker compose logs` e `docker inspect` do container.
+
+  # ────────────────────────────────────────────────────────────────
+  - name: beneficios-api.filas
+    rules:
+      # `max by (queue)`: mais de um processo publica a mesma fila.
+      - alert: FilaCriticaParada
+        expr: max by (queue) (queue_oldest_waiting_age_seconds{queue=~"webhook-events|notifications"}) > 120
+        for: 2m
+        labels:
+          severity: critical
+          servico: beneficios-api
+        annotations:
+          summary: "Fila {{ $labels.queue }} sem consumo há mais de 2 min"
+          description: >-
+            O job mais antigo aguardando em {{ $labels.queue }} tem
+            {{ $value | humanizeDuration }}. Worker parado, travado ou sem
+            dar conta. Veja queue_jobs{queue="{{ $labels.queue }}"} e o log
+            do serviço worker.
+
+      - alert: FilaParada
+        expr: max by (queue) (queue_oldest_waiting_age_seconds{queue!~"webhook-events|notifications"}) > 600
+        for: 5m
+        labels:
+          severity: warning
+          servico: beneficios-api
+        annotations:
+          summary: "Fila {{ $labels.queue }} sem consumo há mais de 10 min"
+          description: >-
+            O job mais antigo aguardando em {{ $labels.queue }} tem
+            {{ $value | humanizeDuration }}. Para pdf-render, veja o serviço
+            pdf; para as demais, o worker.
+
+      - alert: JobNaFilaDeMortos
+        expr: sum by (queue) (increase(dlq_jobs_total[10m])) > 0
+        for: 0m
+        labels:
+          severity: critical
+          servico: beneficios-api
+        annotations:
+          summary: "Job esgotou as tentativas na fila {{ $labels.queue }}"
+          description: >-
+            {{ $value | printf "%.0f" }} job(s) de {{ $labels.queue }} foram
+            para a fila de mortos nos últimos 10 minutos. O trabalho NÃO foi
+            feito: investigue a causa e reprocesse.
+
+      # Complemento do alerta acima: `increase` não enxerga o primeiro
+      # incremento de um contador que ainda não existia, e este aqui continua
+      # lembrando enquanto houver job morto sem tratamento.
+      - alert: FilaDeMortosComPendencia
+        expr: max by (queue) (dlq_size) > 0
+        for: 30m
+        labels:
+          severity: warning
+          servico: beneficios-api
+        annotations:
+          summary: "Fila de mortos de {{ $labels.queue }} com jobs pendentes"
+          description: >-
+            Há {{ $value | printf "%.0f" }} job(s) mortos de
+            {{ $labels.queue }} sem reprocessar nem descartar há 30 minutos.
+
+  # ────────────────────────────────────────────────────────────────
+  - name: beneficios-api.vendors
+    rules:
+      - alert: VendorTaxaDeErroAlta
+        # Erro = tudo que não é "ok" (erro, timeout, circuito_aberto). O piso
+        # evita disparo com meia dúzia de chamadas.
+        expr: |
+          (
+              sum by (vendor, base) (rate(vendor_requests_total{resultado!="ok"}[5m]))
+            /
+              sum by (vendor, base) (rate(vendor_requests_total[5m]))
+          ) > 0.20
+          and
+          sum by (vendor, base) (rate(vendor_requests_total[5m])) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          servico: beneficios-api
+        annotations:
+          summary: "{{ $labels.vendor }} ({{ $labels.base }}) com mais de 20% de falhas"
+          description: >-
+            {{ $value | humanizePercentage }} das chamadas a
+            {{ $labels.vendor }} na base {{ $labels.base }} falharam nos
+            últimos 5 minutos. Veja a divisão por `operacao` e `resultado`
+            em vendor_requests_total.
+
+      - alert: VendorCircuitoAberto
+        # 1 = aberto (0 fechado, 0.5 meio-aberto). `max`: cada processo tem o
+        # seu circuito.
+        expr: max by (vendor, base) (vendor_circuit_state) == 1
+        for: 5m
+        labels:
+          severity: critical
+          servico: beneficios-api
+        annotations:
+          summary: "Circuito de {{ $labels.vendor }} ({{ $labels.base }}) aberto há 5 min"
+          description: >-
+            A API parou de chamar {{ $labels.vendor }} na base
+            {{ $labels.base }} e está respondendo com falha rápida. As
+            telas que dependem desse vendor estão indisponíveis.
+
+  # ────────────────────────────────────────────────────────────────
+  - name: beneficios-api.hinova
+    rules:
+      - alert: HinovaFalhaDeAutenticacao
+        expr: sum by (base) (increase(sga_auth_falhas_total[5m])) > 0
+        for: 0m
+        labels:
+          severity: critical
+          servico: beneficios-api
+        annotations:
+          summary: "Falha de autenticação no SGA/Hinova ({{ $labels.base }})"
+          description: >-
+            {{ $value | printf "%.0f" }} falha(s) de login no SGA para a base
+            {{ $labels.base }} em 5 minutos. Sem token_usuario, associado,
+            veículos e boletos ficam indisponíveis nessa base. Confira
+            usuário/senha e se o token da base não foi bloqueado.
+
+      - alert: HinovaTokenBloqueado
+        expr: sum by (base) (increase(hinova_token_bloqueado_total[5m])) > 0
+        for: 0m
+        labels:
+          severity: critical
+          servico: beneficios-api
+        annotations:
+          summary: "Hinova bloqueou o token da base {{ $labels.base }}"
+          description: >-
+            A Hinova respondeu com bloqueio de token (extração de
+            dados/comportamento agressivo) para a base {{ $labels.base }}.
+            Passos em docs/HINOVA_BLOQUEIO_TOKEN_PROTECOES.md.
+
+  # ────────────────────────────────────────────────────────────────
+  - name: beneficios-api.rotinas
+    rules:
+      - alert: ReguaDeBoletosNaoExecutou
+        # 93600 s = 26 h: a rotina é diária, com 2 h de folga. O `> 0`
+        # descarta o valor zero de um processo recém-iniciado. Só faz sentido
+        # onde BOLETO_NOTIFICACAO_ENABLED=true.
+        expr: time() - max by (base) (boleto_regua_ultima_execucao_timestamp_seconds > 0) > 93600
+        for: 10m
+        labels:
+          severity: critical
+          servico: beneficios-api
+        annotations:
+          summary: "Régua de boletos da base {{ $labels.base }} não roda há mais de 26 h"
+          description: >-
+            Última execução há {{ $value | humanizeDuration }}. Os
+            associados da base {{ $labels.base }} não receberam os avisos de
+            vencimento do dia. Veja o log do worker e a fila
+            boleto-notificacao.
+
+      # Opcional — ligue só no deploy em que a régua está habilitada. Cobre o
+      # caso em que a métrica some (o alerta acima não dispara sem série):
+      # - alert: ReguaDeBoletosSemMetrica
+      #   expr: absent(boleto_regua_ultima_execucao_timestamp_seconds)
+      #   for: 30m
+      #   labels:
+      #     severity: warning
+      #     servico: beneficios-api
+      #   annotations:
+      #     summary: "Métrica da régua de boletos ausente"
+      #     description: "Nenhum processo publica boleto_regua_ultima_execucao_timestamp_seconds há 30 minutos."
+
+      - alert: DisparoDeMarketingPreso
+        expr: max(marketing_disparo_em_envio_idade_seconds) > 900
+        for: 2m
+        labels:
+          severity: warning
+          servico: beneficios-api
+        annotations:
+          summary: "Disparo de marketing em envio há mais de 15 min"
+          description: >-
+            Há um disparo no estado SENDING há
+            {{ $value | humanizeDuration }}. O job pode ter morrido no meio:
+            confira MarketingNotificationAuditLog e a fila
+            marketing-agendada antes de reenviar, para não duplicar o push.
+
+  # ────────────────────────────────────────────────────────────────
+  # Complementares: não estavam na lista original de alertas, mas usam
+  # métricas que a aplicação já expõe. Podem ser removidos sem afetar os demais.
+  - name: beneficios-api.complementares
+    rules:
+      - alert: ErroNaoTratadoNoProcesso
+        expr: sum by (tipo) (increase(app_unhandled_errors_total[10m])) > 0
+        for: 0m
+        labels:
+          severity: warning
+          servico: beneficios-api
+        annotations:
+          summary: "Erro não tratado no processo ({{ $labels.tipo }})"
+          description: >-
+            {{ $value | printf "%.0f" }} ocorrência(s) de {{ $labels.tipo }}
+            em 10 minutos: exceção ou promise rejeitada que ninguém capturou.
+            Procure a pilha no log.
+
+      - alert: RateLimitSemRedis
+        expr: sum by (politica) (increase(rate_limit_hits_total{resultado="erro_redis"}[5m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+          servico: beneficios-api
+        annotations:
+          summary: "Limite de requisições operando sem o Redis ({{ $labels.politica }})"
+          description: >-
+            A política {{ $labels.politica }} não consegue consultar o Redis
+            há 5 minutos. As de força bruta caem para limite em memória, por
+            processo; as demais deixam passar.

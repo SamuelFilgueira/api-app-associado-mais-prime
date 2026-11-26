@@ -8,7 +8,7 @@ import {
 
 /**
  * Erros com `code`, no mesmo formato de `direct-partners`: o
- * `HttpExceptionFilter` devolve o objeto como enviado e o app decide a
+ * filtro global (`AllExceptionsFilter`) devolve o objeto como enviado e o app decide a
  * mensagem pelo `code`.
  */
 export function erro422(

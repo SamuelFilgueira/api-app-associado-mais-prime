@@ -18,6 +18,7 @@ import {
   processarComConcorrencia,
 } from '../utils/period.utils';
 import { SoftruckByKeysApiResponse } from '../interfaces/softruck-trajectories.interface';
+import { avisoDeHistoricoParcial } from 'src/rastreamento/domain/historico-parcial';
 
 /** Máximo de dias permitidos por consulta */
 const MAX_PERIOD_DAYS = 31;
@@ -81,6 +82,8 @@ export class HistoricoResumoService {
     const { vehicleData, deviceData } = resolucao;
 
     const accs = gerarListaAcc(dataInicial, dataFinal);
+    /** Dias cuja consulta falhou (diferente de "dia sem viagens"). */
+    const accsComFalha = new Set<number>();
 
     // ── Passo 1: busca by-keys para todos os dias ──────────────
     const byKeysResultados = await processarComConcorrencia(
@@ -93,6 +96,7 @@ export class HistoricoResumoService {
           acc,
           baseOrigin,
           publicKey,
+          (accComFalha) => accsComFalha.add(accComFalha),
         ),
     );
 
@@ -130,7 +134,13 @@ export class HistoricoResumoService {
       totalDias: contarDias(dataInicial, dataFinal),
     };
 
-    return { vehicle, period, summary, dias };
+    return {
+      vehicle,
+      period,
+      summary,
+      dias,
+      ...avisoDeHistoricoParcial(accsComFalha),
+    };
   }
 
   // ============================================================

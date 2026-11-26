@@ -31,6 +31,9 @@ import { SorteRaspadinhaService } from 'src/associado-sorte/services/sorte-raspa
 import { SorteResgateService } from 'src/associado-sorte/services/sorte-resgate.service';
 import { BaseOrigin } from 'src/infra/decorators/base-origin.decorator';
 import { JwtAuthGuard } from 'src/infra/guards/jwt-auth.guard';
+import { SomenteAssociadoGuard } from 'src/infra/guards/somente-associado.guard';
+import { ChaveDeIdempotencia } from 'src/infra/idempotencia/chave-de-idempotencia.decorator';
+import { IdempotenciaService } from 'src/infra/idempotencia/idempotencia.service';
 
 type AppRequest = Request & { user?: { userId?: number | string } };
 
@@ -46,9 +49,10 @@ type AppRequest = Request & { user?: { userId?: number | string } };
 @ApiTags('Associado da Sorte')
 @ApiBearerAuth()
 @Controller('associado-sorte')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, SomenteAssociadoGuard)
 export class AssociadoSorteAppController {
   constructor(
+    private readonly idempotencia: IdempotenciaService,
     private readonly app: SorteAppService,
     private readonly acesso: SorteAcessoService,
     private readonly raspadinha: SorteRaspadinhaService,
@@ -65,8 +69,14 @@ export class AssociadoSorteAppController {
     summary:
       'Tela inicial em uma chamada: inscrição, convite, saldo, raspadinha, jornada e campanha',
   })
-  resumo(@BaseOrigin() baseOrigin: string, @Req() req: AppRequest) {
-    return this.app.resumo(this.userId(req), baseOrigin);
+  resumo(
+    // Opcional: associado sem base no cadastro recebe `{ ativa: false }`,
+    // como sempre recebeu, em vez de um 401 que o app trata como sessão
+    // expirada.
+    @BaseOrigin({ opcional: true }) baseOrigin: string | undefined,
+    @Req() req: AppRequest,
+  ) {
+    return this.app.resumo(this.userId(req), baseOrigin as string);
   }
 
   @Post('raspar')
@@ -75,8 +85,19 @@ export class AssociadoSorteAppController {
     summary:
       'Raspa (resultado decidido no servidor antes da animação): voucher do momento liberado ou "não foi dessa vez"',
   })
-  raspar(@BaseOrigin() baseOrigin: string, @Req() req: AppRequest) {
-    return this.raspadinha.raspar({ userId: this.userId(req), baseOrigin });
+  raspar(
+    @BaseOrigin() baseOrigin: string,
+    @Req() req: AppRequest,
+    @ChaveDeIdempotencia() chave?: string,
+  ) {
+    const userId = this.userId(req);
+    // Com `Idempotency-Key`, a repetição devolve o MESMO resultado da
+    // raspada (o associado vê o que ganhou mesmo se a primeira resposta se
+    // perdeu). Sem o header, segue como sempre.
+    return this.idempotencia.executar(
+      { userId, escopo: 'sorte.raspar', chave, corpo: {} },
+      () => this.raspadinha.raspar({ userId, baseOrigin }),
+    );
   }
 
   @Get('loja')
@@ -93,12 +114,15 @@ export class AssociadoSorteAppController {
     @Param('premioId', ParseIntPipe) premioId: number,
     @BaseOrigin() baseOrigin: string,
     @Req() req: AppRequest,
+    @ChaveDeIdempotencia() chave?: string,
   ) {
-    return this.loja.comprar({
-      premioId,
-      userId: this.userId(req),
-      baseOrigin,
-    });
+    const userId = this.userId(req);
+    // Toque duplo ou reenvio por timeout com a mesma `Idempotency-Key`
+    // devolvem o mesmo pedido: um débito, um item de estoque.
+    return this.idempotencia.executar(
+      { userId, escopo: 'sorte.loja.comprar', chave, corpo: { premioId } },
+      () => this.loja.comprar({ premioId, userId, baseOrigin }),
+    );
   }
 
   @Get('extrato')

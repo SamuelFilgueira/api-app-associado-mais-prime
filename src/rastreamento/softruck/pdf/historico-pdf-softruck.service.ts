@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import * as fs from 'fs';
 import * as path from 'path';
-import puppeteer from 'puppeteer';
+import { PdfRenderer } from 'src/infra/pdf/pdf-renderer';
 import { TENANT } from 'src/config/tenant.config';
 import {
   HistoricoPdfDataDto,
@@ -524,38 +524,21 @@ function gerarHtmlRelatorio(dados: HistoricoPdfDataDto): string {
 export class HistoricoPdfSoftruckService {
   private readonly logger = new Logger(HistoricoPdfSoftruckService.name);
 
+  constructor(private readonly pdf: PdfRenderer) {}
+
   /**
-   * Gera o PDF de histórico de trajetórias em memória usando Puppeteer.
-   * Retorna um Buffer pronto para envio via HTTP.
+   * Gera o PDF de histórico de trajetórias em memória, pelo renderizador
+   * único (`PdfRenderer`). Retorna um Buffer pronto para envio via HTTP.
    */
   async gerarPdf(dados: HistoricoPdfDataDto): Promise<Buffer> {
     const html = gerarHtmlRelatorio(dados);
 
-    const browser = await puppeteer.launch({
-      headless: true,
-      ...(process.env.PUPPETEER_EXECUTABLE_PATH && {
-        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
-      }),
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-      ],
-    });
-
     try {
-      const page = await browser.newPage();
-      await page.setContent(html, { waitUntil: 'networkidle0' });
-
-      const pdf = await page.pdf({
-        format: 'A4',
-        landscape: true,
-        printBackground: true,
-        margin: { top: '16px', right: '16px', bottom: '16px', left: '16px' },
+      return await this.pdf.renderizar({
+        html,
+        modelo: 'historico_softruck',
+        margem: { top: '16px', right: '16px', bottom: '16px', left: '16px' },
       });
-
-      return Buffer.from(pdf);
     } catch (error) {
       this.logger.error(
         `Erro ao gerar PDF Softruck: ${error instanceof Error ? error.message : String(error)}`,
@@ -563,8 +546,6 @@ export class HistoricoPdfSoftruckService {
       throw new InternalServerErrorException(
         'Erro ao gerar PDF de histórico de trajetórias',
       );
-    } finally {
-      await browser.close();
     }
   }
 }

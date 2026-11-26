@@ -1,7 +1,43 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { randomBytes } from 'crypto';
 import { promises as fs } from 'fs';
-import { extname, join } from 'path';
+import { extname, join, resolve, sep } from 'path';
 import sharp from 'sharp';
+
+/**
+ * Extensões que podem ser gravadas com o nome vindo do cliente. Qualquer outra
+ * (`.html`, `.svg`, `.js`…) vira `.bin`: `/uploads` é servido pela própria
+ * API, e um arquivo ativo ali rodaria na origem dela.
+ */
+const EXTENSOES_DOCUMENTO = new Set([
+  '.pdf',
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.webp',
+  '.gif',
+  '.heic',
+  '.heif',
+  '.doc',
+  '.docx',
+  '.xls',
+  '.xlsx',
+  '.csv',
+  '.txt',
+]);
+const EXTENSOES_IMAGEM = new Set([
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.webp',
+  '.heic',
+  '.heif',
+]);
+
+/** Sufixo imprevisível para nome de arquivo (o anterior usava Math.random). */
+function sufixoAleatorio(): string {
+  return randomBytes(8).toString('hex');
+}
 
 @Injectable()
 export class FileUploadService {
@@ -43,7 +79,7 @@ export class FileUploadService {
     await this.ensureDirectory(this.documentsUploadPath);
 
     const timestamp = Date.now();
-    const randomString = Math.random().toString(36).substring(2, 15);
+    const randomString = sufixoAleatorio();
     const sanitizedOriginalName = this.sanitizeFilename(
       file.originalname || 'document',
     );
@@ -51,7 +87,10 @@ export class FileUploadService {
     const basename = extension
       ? sanitizedOriginalName.slice(0, -extension.length)
       : sanitizedOriginalName;
-    const filename = `${timestamp}-${randomString}-${basename}${extension || '.bin'}`;
+    const extensaoSegura = EXTENSOES_DOCUMENTO.has(extension.toLowerCase())
+      ? extension
+      : '.bin';
+    const filename = `${timestamp}-${randomString}-${basename}${extensaoSegura}`;
     const filepath = join(this.documentsUploadPath, filename);
 
     await fs.writeFile(filepath, file.buffer);
@@ -65,7 +104,7 @@ export class FileUploadService {
 
     // Gera um nome único para o arquivo
     const timestamp = Date.now();
-    const randomString = Math.random().toString(36).substring(2, 15);
+    const randomString = sufixoAleatorio();
     const filename = `profile-${timestamp}-${randomString}.jpg`;
     const filepath = join(this.uploadPath, filename);
 
@@ -91,7 +130,7 @@ export class FileUploadService {
     await this.ensureDirectory(this.workshopUploadPath);
 
     const timestamp = Date.now();
-    const randomString = Math.random().toString(36).substring(2, 15);
+    const randomString = sufixoAleatorio();
     const filename = `workshop-${kind}-${timestamp}-${randomString}.jpg`;
     const filepath = join(this.workshopUploadPath, filename);
 
@@ -111,7 +150,7 @@ export class FileUploadService {
     await this.ensureDirectory(popupUploadPath);
 
     const timestamp = Date.now();
-    const randomString = Math.random().toString(36).substring(2, 15);
+    const randomString = sufixoAleatorio();
     const filename = `popup-${timestamp}-${randomString}.jpg`;
     const filepath = join(popupUploadPath, filename);
 
@@ -134,7 +173,7 @@ export class FileUploadService {
     await this.ensureDirectory(this.sliderUploadPath);
 
     const timestamp = Date.now();
-    const randomString = Math.random().toString(36).substring(2, 15);
+    const randomString = sufixoAleatorio();
     const filename = `slider-${timestamp}-${randomString}.jpg`;
     const filepath = join(this.sliderUploadPath, filename);
 
@@ -153,8 +192,7 @@ export class FileUploadService {
     if (!photoUrl) return;
 
     try {
-      const filepath = join(process.cwd(), photoUrl);
-      await fs.unlink(filepath);
+      await this.removerDentroDeUploads(photoUrl);
     } catch (error) {
       // Ignora erros se o arquivo não existir
       this.logger.warn(`Erro ao deletar foto: ${error.message}`);
@@ -165,8 +203,7 @@ export class FileUploadService {
     if (!photoUrl) return;
 
     try {
-      const filepath = join(process.cwd(), photoUrl);
-      await fs.unlink(filepath);
+      await this.removerDentroDeUploads(photoUrl);
     } catch (error) {
       this.logger.warn(`Erro ao deletar foto: ${error.message}`);
     }
@@ -201,8 +238,7 @@ export class FileUploadService {
     if (!logoUrl) return;
 
     try {
-      const filepath = join(process.cwd(), logoUrl.replace(/^\/+/, ''));
-      await fs.unlink(filepath);
+      await this.removerDentroDeUploads(logoUrl);
     } catch (error) {
       this.logger.warn(`Erro ao deletar logo de parceiro: ${error.message}`);
     }
@@ -262,8 +298,7 @@ export class FileUploadService {
     if (!imagemUrl) return;
 
     try {
-      const filepath = join(process.cwd(), imagemUrl.replace(/^\/+/, ''));
-      await fs.unlink(filepath);
+      await this.removerDentroDeUploads(imagemUrl);
     } catch (error) {
       this.logger.warn(`Erro ao deletar imagem de prêmio: ${error.message}`);
     }
@@ -273,8 +308,7 @@ export class FileUploadService {
     if (!photoUrl) return;
 
     try {
-      const filepath = join(process.cwd(), photoUrl);
-      await fs.unlink(filepath);
+      await this.removerDentroDeUploads(photoUrl);
     } catch (error) {
       this.logger.warn(`Erro ao deletar foto de slider: ${error.message}`);
     }
@@ -291,7 +325,7 @@ export class FileUploadService {
     await this.ensureDirectory(templateUploadPath);
 
     const timestamp = Date.now();
-    const randomString = Math.random().toString(36).substring(2, 15);
+    const randomString = sufixoAleatorio();
     const filename = `template-${timestamp}-${randomString}.jpg`;
     const filepath = join(templateUploadPath, filename);
 
@@ -310,8 +344,7 @@ export class FileUploadService {
     if (!photoUrl) return;
 
     try {
-      const filepath = join(process.cwd(), photoUrl);
-      await fs.unlink(filepath);
+      await this.removerDentroDeUploads(photoUrl);
     } catch (error) {
       this.logger.warn(`Erro ao deletar template foto: ${error.message}`);
     }
@@ -330,14 +363,41 @@ export class FileUploadService {
     const buffer = Buffer.from(cleanedBase64, 'base64');
 
     const timestamp = Date.now();
-    const randomString = Math.random().toString(36).substring(2, 15);
+    const randomString = sufixoAleatorio();
     const sanitizedName = this.sanitizeFilename(originalName);
-    const filename = `reinspection-${timestamp}-${randomString}-${sanitizedName}`;
+    const extensao = extname(sanitizedName);
+    // Foto de revistoria só é gravada com extensão de imagem; o resto vira
+    // `.bin` (ver EXTENSOES_DOCUMENTO).
+    const nomeSeguro = EXTENSOES_IMAGEM.has(extensao.toLowerCase())
+      ? sanitizedName
+      : `${extensao ? sanitizedName.slice(0, -extensao.length) : sanitizedName}.bin`;
+    const filename = `reinspection-${timestamp}-${randomString}-${nomeSeguro}`;
     const filepath = join(this.reinspectionPhotosUploadPath, filename);
 
     await fs.writeFile(filepath, buffer);
 
     return `uploads/reinspection-photos/${filename}`;
+  }
+
+  /**
+   * Remove um arquivo de upload a partir do caminho gravado no banco.
+   *
+   * O caminho é resolvido e precisa cair dentro de `uploads/`: valores como
+   * `../.env` ou `/etc/passwd` (que já chegaram aqui vindos do corpo da
+   * requisição) são recusados em vez de apagados.
+   */
+  private async removerDentroDeUploads(caminho: string): Promise<void> {
+    const raiz = resolve(process.cwd(), 'uploads') + sep;
+    const absoluto = resolve(process.cwd(), caminho.replace(/^\/+/, ''));
+
+    if (!absoluto.startsWith(raiz)) {
+      this.logger.warn(
+        `Exclusão recusada: caminho fora de uploads/ (${caminho.slice(0, 120)})`,
+      );
+      return;
+    }
+
+    await fs.unlink(absoluto);
   }
 
   private sanitizeFilename(filename: string): string {

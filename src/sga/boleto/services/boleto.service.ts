@@ -1,14 +1,15 @@
-import { SGA_BASE_URL } from 'src/integrations/hinova/hinova.constants';
 import {
   Injectable,
   Logger,
   InternalServerErrorException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import axios from 'axios';
 import { PrismaService } from 'src/database/prisma.service';
 import { BaseOrigin } from 'src/shared/token-resolver.service';
-import { TENANT } from 'src/config/tenant.config';
-import { SgaAuthService } from 'src/integrations/hinova/sga-auth.service';
+import { exigirBase } from 'src/shared/tenant/tenant-context';
+import { HinovaClient } from 'src/integrations/hinova/hinova.client';
+import { contarErroComoSucesso } from 'src/sga/helpers/erro-como-sucesso.helper';
 import { janelaVencimentoBoleto } from 'src/sga/helpers/janela-boleto.helper';
 
 type BoletoApiVehicle = {
@@ -43,6 +44,14 @@ type BoletoListItem = {
   [key: string]: unknown;
 };
 
+/**
+ * Posse do veículo e base a usar na Hinova. Sem posse não há base: o
+ * chamador responde lista vazia e nenhuma credencial é usada.
+ */
+type VehicleContext =
+  | { vehicleBelongsToUser: false }
+  | { vehicleBelongsToUser: true; baseOrigin: BaseOrigin };
+
 function normalizeVehicleCode(
   value: string | number | undefined,
 ): string | null {
@@ -60,14 +69,16 @@ export class BoletoService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly sgaAuthService: SgaAuthService,
+    private readonly hinova: HinovaClient,
   ) {}
 
   private async resolveVehicleContext(
     userId: number,
     codigoVeiculo: number,
     tokenBaseOrigin?: BaseOrigin,
-  ): Promise<{ baseOrigin: BaseOrigin; vehicleBelongsToUser: boolean }> {
+  ): Promise<VehicleContext> {
+    let baseDoCadastro: string | null | undefined;
+
     try {
       const userVehicle = await this.prisma.userVehicle.findFirst({
         where: {
@@ -79,33 +90,31 @@ export class BoletoService {
       });
 
       if (!userVehicle) {
-        return {
-          baseOrigin: tokenBaseOrigin ?? TENANT.defaultBase,
-          vehicleBelongsToUser: false,
-        };
+        return { vehicleBelongsToUser: false };
       }
 
-      if (tokenBaseOrigin) {
-        return { baseOrigin: tokenBaseOrigin, vehicleBelongsToUser: true };
-      }
-
-      if (userVehicle.user?.baseOrigin) {
-        return {
-          baseOrigin: userVehicle.user.baseOrigin,
-          vehicleBelongsToUser: true,
-        };
-      }
-
-      return { baseOrigin: TENANT.defaultBase, vehicleBelongsToUser: true };
+      baseDoCadastro = userVehicle.user?.baseOrigin;
     } catch (error: unknown) {
-      this.logger.warn(
+      // Falha de infraestrutura nunca concede posse: antes, um erro de banco
+      // devolvia `vehicleBelongsToUser: true` e os boletos de qualquer
+      // veículo saíam para quem pedisse.
+      this.logger.error(
         `Falha ao resolver contexto do veículo userId=${userId} codigo_veiculo=${codigoVeiculo}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw new ServiceUnavailableException(
+        'Não foi possível consultar os boletos no momento. Tente novamente em instantes.',
       );
     }
 
+    // Fora do `try`: base não resolvida é problema de cadastro
+    // (`BaseNaoResolvidaError`), não indisponibilidade (503). A base vem do
+    // token; sem ela, do cadastro do dono — nunca da base padrão.
     return {
-      baseOrigin: tokenBaseOrigin ?? TENANT.defaultBase,
       vehicleBelongsToUser: true,
+      baseOrigin: exigirBase(
+        tokenBaseOrigin || baseDoCadastro,
+        'boletos do veículo',
+      ),
     };
   }
 
@@ -194,16 +203,20 @@ export class BoletoService {
     codigo_veiculo: number,
     tokenBaseOrigin?: BaseOrigin,
   ) {
-    const { baseOrigin, vehicleBelongsToUser } =
-      await this.resolveVehicleContext(userId, codigo_veiculo, tokenBaseOrigin);
+    const contexto = await this.resolveVehicleContext(
+      userId,
+      codigo_veiculo,
+      tokenBaseOrigin,
+    );
 
-    if (!vehicleBelongsToUser) {
+    if (!contexto.vehicleBelongsToUser) {
       this.logger.warn(
         `Bloqueando listagem de boletos para veículo sem vínculo com o usuário. userId=${userId} codigo_veiculo=${codigo_veiculo}`,
       );
       return [];
     }
 
+    const { baseOrigin } = contexto;
     const { dataInicialStr, dataFinalStr } = janelaVencimentoBoleto();
     const body = {
       codigo_veiculo,
@@ -213,19 +226,12 @@ export class BoletoService {
     };
 
     try {
-      const response =
-        await this.sgaAuthService.executeRequestWithAuth<unknown>(baseOrigin, {
-          method: 'POST',
-          url: `${SGA_BASE_URL}/listar/boleto-associado-veiculo`,
-          data: body,
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          validateStatus: () => true,
-          compartilharEmVoo: true,
-        });
-
-      //his.logger.log(`Resposta da API de boletos para veículo ${codigo_veiculo}: status=${response.status} body=${JSON.stringify(response.data)}`);
+      // Leitura com cache: a lista é a mesma por alguns minutos, e quem gera
+      // boleto ou detecta pagamento invalida a chave do veículo.
+      const response = await this.hinova.listarBoletosDoVeiculo(
+        baseOrigin,
+        body,
+      );
 
       if (response.status === 200 && Array.isArray(response.data)) {
         const boletosDaHinova = response.data.filter(
@@ -237,11 +243,15 @@ export class BoletoService {
         );
       }
 
+      // Contrato legado: o erro do SGA volta ao app dentro da lista, com
+      // o status de sucesso da rota.
+      contarErroComoSucesso('sga/boleto/listar');
       return response.data && typeof response.data === 'object'
         ? [response.data as Record<string, unknown>]
         : [];
     } catch (error: unknown) {
       if (axios.isAxiosError(error) && error.response?.data) {
+        contarErroComoSucesso('sga/boleto/listar');
         return error.response.data && typeof error.response.data === 'object'
           ? [error.response.data as Record<string, unknown>]
           : [];

@@ -122,7 +122,8 @@ export class AnalyticsController {
 
       if (resolved === null || resolved === undefined) {
         this.logger.warn(
-          `resolveJwtUserId: JWT verified but no userId/sub/id claim found — payload: ${JSON.stringify(payload)}`,
+          // Só os NOMES das claims: o conteúdo do token não vai para o log.
+          `resolveJwtUserId: JWT verified but no userId/sub/id claim found — claims: ${Object.keys(payload).join(',') || '(nenhuma)'}`,
         );
       } else {
         this.logger.log(

@@ -10,22 +10,21 @@ import {
 import type { Request, Response } from 'express';
 import { JwtAuthGuard } from 'src/infra/guards/jwt-auth.guard';
 import { JwtUser } from 'src/auth/interfaces/jwt-user.interface';
-import { BaseContextService } from 'src/shared/base-context.service';
+import { BaseOrigin } from 'src/infra/decorators/base-origin.decorator';
+import type { BaseOrigin as BaseOriginType } from 'src/config/tenant.config';
 import {
   HistoricoM7ContestacaoQueryDto,
   HistoricoM7QueryDto,
 } from '../dto/historico-m7-query.dto';
 import { HistoricoM7Service } from '../services/historico-m7.service';
 import { HistoricoM7ResumoResponseDto } from '../dto/historico-m7-response.dto';
+import { LimiteDeTaxa } from 'src/infra/rate-limit/limite-de-taxa.decorator';
 
 @Controller('rastreamento/historico/m7')
 export class HistoricoM7Controller {
   private readonly logger = new Logger(HistoricoM7Controller.name);
 
-  constructor(
-    private readonly historicoM7Service: HistoricoM7Service,
-    private readonly baseContextService: BaseContextService,
-  ) {}
+  constructor(private readonly historicoM7Service: HistoricoM7Service) {}
 
   /**
    * Gera o relatório PDF de trajetórias M7 para o veículo do usuário autenticado.
@@ -37,14 +36,15 @@ export class HistoricoM7Controller {
    *   &dataFinal=YYYY-MM-DD
    */
   @UseGuards(JwtAuthGuard)
+  @LimiteDeTaxa('relatorio')
   @Get('pdf')
   async gerarPdf(
     @Query() query: HistoricoM7QueryDto,
     @Req() req: Request & { user?: JwtUser },
     @Res() res: Response,
+    @BaseOrigin() baseOrigin: BaseOriginType,
   ): Promise<void> {
     const user = req.user;
-    const baseOrigin = this.baseContextService.getBaseOrigin();
 
     const pdfBuffer = await this.historicoM7Service.gerarPdf(
       query.cnpj,
@@ -79,14 +79,15 @@ export class HistoricoM7Controller {
    *   &dataFinal=YYYY-MM-DD
    */
   @UseGuards(JwtAuthGuard)
+  @LimiteDeTaxa('relatorio')
   @Get('pdf-v2')
   async gerarPdfV2(
     @Query() query: HistoricoM7QueryDto,
     @Req() req: Request & { user?: JwtUser },
     @Res() res: Response,
+    @BaseOrigin() baseOrigin: BaseOriginType,
   ): Promise<void> {
     const user = req.user;
-    const baseOrigin = this.baseContextService.getBaseOrigin();
 
     const pdfBuffer = await this.historicoM7Service.gerarPdfV2(
       query.cnpj,
@@ -120,14 +121,15 @@ export class HistoricoM7Controller {
    *   &dataFinal=YYYY-MM-DD
    */
   @UseGuards(JwtAuthGuard)
+  @LimiteDeTaxa('relatorio')
   @Get('pdf-contestacao')
   async gerarPdfContestacao(
     @Query() query: HistoricoM7ContestacaoQueryDto,
     @Req() req: Request & { user?: JwtUser },
     @Res() res: Response,
+    @BaseOrigin() baseOrigin: BaseOriginType,
   ): Promise<void> {
     const user = req.user;
-    const baseOrigin = this.baseContextService.getBaseOrigin();
 
     const pdfBuffer = await this.historicoM7Service.gerarPdfContestacao(
       query.cnpj,
@@ -168,14 +170,15 @@ export class HistoricoM7Controller {
    *   &dataFinal=YYYY-MM-DD
    */
   @UseGuards(JwtAuthGuard)
+  @LimiteDeTaxa('relatorio')
   @Get('pdf-contestacao-v2')
   async gerarPdfContestacaoV2(
     @Query() query: HistoricoM7ContestacaoQueryDto,
     @Req() req: Request & { user?: JwtUser },
     @Res() res: Response,
+    @BaseOrigin() baseOrigin: BaseOriginType,
   ): Promise<void> {
     const user = req.user;
-    const baseOrigin = this.baseContextService.getBaseOrigin();
 
     // Fase 1: qualquer erro aqui ainda vira resposta HTTP normal (nada enviado).
     const preparada = await this.historicoM7Service.prepararContestacaoV2(
@@ -227,9 +230,9 @@ export class HistoricoM7Controller {
   async obterResumo(
     @Query() query: HistoricoM7QueryDto,
     @Req() req: Request & { user?: JwtUser },
+    @BaseOrigin() baseOrigin: BaseOriginType,
   ): Promise<HistoricoM7ResumoResponseDto> {
     void req.user;
-    const baseOrigin = this.baseContextService.getBaseOrigin();
 
     return this.historicoM7Service.obterResumo(
       query.cnpj,
@@ -254,9 +257,9 @@ export class HistoricoM7Controller {
   async obterRotas(
     @Query() query: HistoricoM7QueryDto,
     @Req() req: Request & { user?: JwtUser },
+    @BaseOrigin() baseOrigin: BaseOriginType,
   ) {
     const user = req.user;
-    const baseOrigin = this.baseContextService.getBaseOrigin();
 
     void user;
 

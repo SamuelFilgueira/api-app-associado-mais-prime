@@ -1,6 +1,6 @@
 import { Global, Module } from '@nestjs/common';
-import { BaseContextService } from './base-context.service';
 import { TokenResolverService } from './token-resolver.service';
+import { TenantCredentialsRegistry } from 'src/shared/tenant/tenant-credentials.registry';
 
 /**
  * Transversal de tenancy (agnóstico de vendor). Autenticação Hinova vive em
@@ -8,7 +8,7 @@ import { TokenResolverService } from './token-resolver.service';
  */
 @Global()
 @Module({
-  providers: [TokenResolverService, BaseContextService],
-  exports: [TokenResolverService, BaseContextService],
+  providers: [TenantCredentialsRegistry, TokenResolverService],
+  exports: [TenantCredentialsRegistry, TokenResolverService],
 })
 export class SharedModule {}

@@ -1,8 +1,9 @@
 import { Controller, Get, UseGuards, Req } from '@nestjs/common';
 import { JwtAuthGuard } from 'src/infra/guards/jwt-auth.guard';
 import { EconomiaService } from 'src/economia/services/economia.service';
+import { SomenteAssociadoGuard } from 'src/infra/guards/somente-associado.guard';
 
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, SomenteAssociadoGuard)
 @Controller('economia')
 export class EconomiaController {
   constructor(private readonly economiaService: EconomiaService) {}

@@ -1,26 +1,28 @@
 import { Controller, Get, Query, Res, UseGuards } from '@nestjs/common';
 import type { Response } from 'express';
 import { JwtAuthGuard } from 'src/infra/guards/jwt-auth.guard';
-import { BaseContextService } from 'src/shared/base-context.service';
+import { BaseOrigin } from 'src/infra/decorators/base-origin.decorator';
+import type { BaseOrigin as BaseOriginType } from 'src/config/tenant.config';
 import { TokenResolverService } from 'src/shared/token-resolver.service';
 import { TrajetoQueryDto } from '../dto/trajeto-query.dto';
 import { TrajetosService } from '../services/trajetos.service';
+import { LimiteDeTaxa } from 'src/infra/rate-limit/limite-de-taxa.decorator';
 
 @Controller('rastreamento/logica/trajetos')
 export class TrajetosController {
   constructor(
     private readonly trajetosService: TrajetosService,
-    private readonly baseContextService: BaseContextService,
     private readonly tokenResolver: TokenResolverService,
   ) {}
 
   @UseGuards(JwtAuthGuard)
+  @LimiteDeTaxa('relatorio')
   @Get('relatorio')
   async obterRelatorio(
     @Query() query: TrajetoQueryDto,
     @Res() res: Response,
+    @BaseOrigin() baseOrigin: BaseOriginType,
   ): Promise<void> {
-    const baseOrigin = this.baseContextService.getBaseOrigin();
     const token = this.tokenResolver.resolveLogicaToken(baseOrigin);
 
     const pdfBuffer = await this.trajetosService.obterRelatorio({

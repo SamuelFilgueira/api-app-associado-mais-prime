@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -8,11 +9,15 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
+import { ehChassiValido } from 'src/sga/domain/parametros-sga';
 import { JwtAuthGuard } from 'src/infra/guards/jwt-auth.guard';
 import { SgaService } from 'src/sga/services/sga.service';
 import { SetRevistoriaDto } from 'src/sga/dto/set-revistoria.dto';
+import { LimiteDeTaxa } from 'src/infra/rate-limit/limite-de-taxa.decorator';
+import { SomenteAssociadoGuard } from 'src/infra/guards/somente-associado.guard';
 
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, SomenteAssociadoGuard)
+@LimiteDeTaxa('sga')
 @Controller('sga')
 export class SgaController {
   constructor(private readonly sgaService: SgaService) {}
@@ -34,7 +39,16 @@ export class SgaController {
     @Param('chassi') chassi: string,
     @Req() req: { user?: { baseOrigin?: string } },
   ) {
-    return this.sgaService.consultarVeiculoInfo(chassi, req.user?.baseOrigin);
+    // O chassi entra no caminho da chamada ao SGA: só letras e números.
+    if (!ehChassiValido(chassi)) {
+      throw new BadRequestException(
+        'chassi inválido: use de 6 a 20 letras e números',
+      );
+    }
+    return this.sgaService.consultarVeiculoInfo(
+      chassi.trim(),
+      req.user?.baseOrigin,
+    );
   }
 
   @Patch('set-revistoria')

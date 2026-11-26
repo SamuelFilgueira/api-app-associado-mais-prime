@@ -13,6 +13,7 @@ import { AdminRoleGuard } from 'src/infra/guards/admin-role.guard';
 import { AdminPanelUsersService } from 'src/admin-panel/services/admin-panel-users.service';
 import { AdminPanelLoginDto } from 'src/admin-panel/dto/admin-panel-login.dto';
 import { ChangeAdminPanelPasswordDto } from 'src/admin-panel/dto/change-admin-panel-password.dto';
+import { LimiteDeTaxa } from 'src/infra/rate-limit/limite-de-taxa.decorator';
 
 /** Shape relevante do JWT do painel após o JwtStrategy.validate. */
 interface AdminPanelRequest {
@@ -25,6 +26,7 @@ export class AdminPanelAuthController {
     private readonly adminPanelUsersService: AdminPanelUsersService,
   ) {}
 
+  @LimiteDeTaxa('autenticacao', { identificador: { corpo: 'email' } })
   @Post('login')
   @HttpCode(HttpStatus.OK)
   login(@Body() data: AdminPanelLoginDto) {

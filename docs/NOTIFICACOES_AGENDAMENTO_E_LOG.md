@@ -54,3 +54,25 @@ npx prisma migrate deploy
 - **Notificações:** chave "Agendar envio" com data/hora; tabela "Histórico de disparos" com usuário, horário, status e botão "Cancelar" nos agendados.
 - **Pop-up:** bloco "Histórico de alterações".
 - **Clube de Vantagens:** desativado para todos os perfis por `CLUBE_VANTAGENS_ENABLED = false` em `src/config/features.ts` do painel (menu oculto e rotas `/parceiros-diretos*` redirecionam). Backend intocado.
+
+## O que mudou em novembro de 2026
+
+- **Disparo em massa por lotes.** Marketing (imediato ou agendado) e planilha criam um `PushDisparo`
+  com uma `PushEntrega` por destinatário e enfileiram lotes de 100 na fila `push-massa`. A rota responde
+  na hora com o que se sabe (`sentCount` = destinatários selecionados) e com `disparoId`, `estado`,
+  `totalDestinatarios` e `repetido`. O envio acontece no papel `worker`.
+- **Resultado do disparo:** `GET /api/notifications/admin/disparos/:id` (MARKETING e ADMIN) devolve o
+  estado, a contagem das entregas (pendentes, enviadas, entregues, recusadas, falhas) e
+  `cpfsComFalhaEnvio` (até 1.000). É o que substitui a lista de falhas que a planilha devolvia na
+  própria resposta — o painel precisa passar a consultar essa rota.
+- **Um disparo por pedido.** Pedido idêntico simultâneo responde 409 `DISPARO_EM_ANDAMENTO`; repetido
+  em até 2 minutos devolve o disparo existente (`repetido: true`). As rotas aceitam `Idempotency-Key`.
+- **Log.** `MarketingNotificationAuditLog` é fechado na mesma transação que fecha o disparo
+  (`SENT` ou `FAILED`, com as contagens reais). Com destinatários e nenhum push aceito, o log fica
+  `FAILED` (antes ficava `SENT` com 0).
+- **Agendado com retry.** O job reivindica `SCHEDULED → SENDING` e cria o disparo na mesma transação;
+  falha transitória usa as 5 tentativas da fila e continua do mesmo disparo. A reconciliação de boot
+  virou uma varredura de 1 minuto, que também retoma disparo parado e fecha log órfão.
+  **No primeiro deploy**, log `REQUESTED`/`SENDING` antigo, sem disparo e parado há mais de 15 minutos,
+  é fechado como `FAILED`.
+- **Recibos do Expo** são conferidos 15, 30 e 60 minutos depois; token morto é apagado.

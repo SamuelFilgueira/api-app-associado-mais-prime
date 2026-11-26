@@ -2,39 +2,36 @@ import {
   CallHandler,
   ExecutionContext,
   Injectable,
-  Logger,
   NestInterceptor,
 } from '@nestjs/common';
-import { randomUUID } from 'crypto';
-import { Observable, tap } from 'rxjs';
+import { Observable } from 'rxjs';
+import { contextoExecucao } from 'src/infra/observability/contexto-execucao';
+import { rotaEmTemplate } from 'src/infra/observability/requisicao.middleware';
 
+/**
+ * Completa o contexto de execução depois que os guards rodaram: usuário,
+ * base e rota em template passam a carimbar toda linha de log emitida pelo
+ * handler e pelos services.
+ *
+ * A linha de acesso e as métricas HTTP saem do `requisicaoMiddleware`, que
+ * enxerga também as requisições barradas por guard e o status final.
+ */
 @Injectable()
 export class LoggingInterceptor implements NestInterceptor {
-  private readonly logger = new Logger('HTTP');
-
-  intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
-    const req = context.switchToHttp().getRequest();
-    const requestId = randomUUID();
-    const { method, url } = req;
-    const start = Date.now();
-
-    return next.handle().pipe(
-      tap(() => {
-        const res = context.switchToHttp().getResponse();
-        const duration = Date.now() - start;
-        // Identificação do chamador: userId do JWT (populado pelos guards),
-        // IP e user-agent — permite distinguir app, painel e outros clientes
-        const userId = req.user?.userId ?? '-';
-        const ip =
-          req.headers?.['x-forwarded-for']?.split(',')[0]?.trim() ??
-          req.ip ??
-          req.socket?.remoteAddress ??
-          '-';
-        const userAgent = req.headers?.['user-agent'] ?? '-';
-        this.logger.log(
-          `[${requestId}] ${method} ${url} ${res.statusCode} ${duration}ms | userId=${userId} | ip=${ip} | ua=${userAgent}`,
-        );
-      }),
-    );
+  intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
+    if (context.getType() === 'http') {
+      const req = context.switchToHttp().getRequest<{
+        user?: { userId?: number | string; baseOrigin?: string };
+        route?: { path?: unknown };
+        baseUrl?: string;
+        path: string;
+      }>();
+      contextoExecucao.definir({
+        userId: req.user?.userId,
+        base: req.user?.baseOrigin,
+        rota: rotaEmTemplate(req as never),
+      });
+    }
+    return next.handle();
   }
 }

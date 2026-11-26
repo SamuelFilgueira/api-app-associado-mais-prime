@@ -3,6 +3,11 @@ import { DatabaseModule } from './database/database.module';
 import { InfraModule } from './infra/infra.module';
 import { SharedModule } from './shared/shared.module';
 import { QueueModule } from './queue/queue.module';
+import { RedisModule } from './infra/redis/redis.module';
+import { RateLimitModule } from './infra/rate-limit/rate-limit.module';
+import { CacheModule } from './infra/cache/cache.module';
+import { PdfModule } from './infra/pdf/pdf.module';
+import { ConsistenciaModule } from './infra/outbox/outbox.module';
 import { RastreamentoModule } from './rastreamento/rastreamento.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -35,7 +40,12 @@ import { AssociadoSorteModule } from './associado-sorte/associado-sorte.module';
     DatabaseModule,
     InfraModule,
     SharedModule,
+    RedisModule,
+    CacheModule,
+    RateLimitModule,
     QueueModule,
+    PdfModule,
+    ConsistenciaModule,
     // Módulos de domínio
     AuthModule,
     AssociadoModule,

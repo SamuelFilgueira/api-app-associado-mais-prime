@@ -1,5 +1,9 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from 'src/database/prisma.service';
+import {
+  deveAtualizarTotalGravado,
+  interpretarTotalEconomizado,
+} from 'src/economia/domain/total-economizado';
 import { ClubgasClient } from 'src/integrations/clubgas/clubgas.client';
 import {
   ClubgasErroLogService,
@@ -41,10 +45,11 @@ export class EconomiaService {
       });
     }
 
-    // Persistir o valor atual para que o gatilho de abastecimento
-    // use a diferença real e não o total acumulado histórico.
-    const novoValor = parseFloat(data?.totalEconomizado);
-    if (!isNaN(novoValor) && novoValor > user.totalEconomizado) {
+    // Mantém o total do cadastro em dia com o Clubgas (é o que o app mostra
+    // sem consultar). O valor de partida da verificação de abastecimento NÃO
+    // sai daqui: é lido do Clubgas na hora em que o cartão é aberto.
+    const novoValor = interpretarTotalEconomizado(data?.totalEconomizado);
+    if (deveAtualizarTotalGravado(novoValor, user.totalEconomizado)) {
       await this.prisma.user.update({
         where: { id: userId },
         data: { totalEconomizado: novoValor },

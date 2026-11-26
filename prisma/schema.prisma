@@ -42,6 +42,9 @@ model user {
   sorteLembretes                SorteLembrete[]
   sorteGanhadores               SorteGanhador[]
   sorteInscricao                SorteInscricao?
+
+  /// Seleção de destinatários por base (push em massa, régua de boletos).
+  @@index([baseOrigin, isActive], map: "User_baseOrigin_isActive_idx")
 }
 
 model workshop {
@@ -378,15 +381,19 @@ model Document {
 }
 
 model FuelSession {
-  id          String   @id @default(uuid())
-  userId      Int
-  valorAntes  Float
-  valorDepois Float?
-  diferenca   Float?
-  status      String
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  user        user     @relation(fields: [userId], references: [id], onDelete: Cascade, map: "FuelSession_userId_fkey")
+  id            String   @id @default(uuid())
+  userId        Int
+  valorAntes    Float
+  valorDepois   Float?
+  diferenca     Float?
+  status        String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  /// Preenchida (com o id do usuário) enquanto a sessão está PENDING e nula
+  /// depois. O índice único sobre ela garante uma sessão pendente por
+  /// usuário — o MySQL não tem índice único parcial.
+  pendenteChave String?  @unique(map: "FuelSession_pendenteChave_key") @db.VarChar(40)
+  user          user     @relation(fields: [userId], references: [id], onDelete: Cascade, map: "FuelSession_userId_fkey")
 
   @@index([userId, status], map: "FuelSession_userId_status_idx")
 }
@@ -442,6 +449,8 @@ model Notification {
   @@index([createdAt], map: "Notification_createdAt_idx")
   @@index([sentAt], map: "Notification_sentAt_idx")
   @@index([userId, read], map: "Notification_userId_read_idx")
+  /// Caixa de entrada do app: notificações não excluídas do usuário, da mais recente para a mais antiga.
+  @@index([userId, deleted, sentAt], map: "Notification_userId_deleted_sentAt_idx")
 }
 
 model Reinspection {
@@ -466,6 +475,15 @@ model Reinspection {
   boletoNossoNumero        String?                       @db.VarChar(50)
   /// CRIADO_APP (cadastrado pela API) | ADOTADO_SGA (já existia no SGA, criado manualmente)
   boletoOrigem             String?                       @db.VarChar(20)
+  /// Lease da geração do boleto: enquanto `boletoLeaseAte` estiver no futuro,
+  /// só o dono do lease cadastra boleto no SGA para esta revistoria. Impede
+  /// que aprovação, retry e "gerar agora" cadastrem dois boletos.
+  boletoLeaseAte           DateTime?
+  boletoLeaseDono          String?                       @db.VarChar(40)
+  /// Lease do envio de fotos à Hinova: enquanto estiver no futuro, outro envio
+  /// da mesma revistoria é recusado (duas chamadas liam as mesmas fotos
+  /// pendentes e postavam em dobro).
+  hinovaEnvioLeaseAte      DateTime?
   userVehicle              UserVehicle                   @relation(fields: [userVehicleId], references: [id], onDelete: Cascade, map: "Reinspection_userVehicleId_fkey")
   photos                   ReinspectionPhoto[]
   hinovaEnvios             ReinspectionHinovaEnvio[]
@@ -474,6 +492,9 @@ model Reinspection {
   @@index([userVehicleId], map: "Reinspection_userVehicleId_idx")
   @@index([hinovaEnvioStatus], map: "Reinspection_hinovaEnvioStatus_idx")
   @@index([boletoStatus], map: "Reinspection_boletoStatus_idx")
+  @@index([userVehicleId, createdAt], map: "Reinspection_userVehicleId_createdAt_idx")
+  /// Varredor do retry de boleto: revistorias com tentativa devida.
+  @@index([boletoStatus, boletoProximaTentativaEm], map: "Reinspection_boletoStatus_proximaTentativa_idx")
 }
 
 /// Uma linha por tentativa de envio de fotos de revistoria à Hinova
@@ -514,27 +535,50 @@ model ReinspectionAnalyst {
 }
 
 model ReinspectionPayment {
-  id             Int         @id @default(autoincrement())
-  userVehicleId  Int
-  nossoNumero    String?     @unique(map: "ReinspectionPayment_nossoNumero_key") @db.VarChar(50)
-  linhaDigitavel String?     @db.VarChar(255)
-  linkBoleto     String?     @db.VarChar(500)
-  situacaoBoleto String      @default("PENDENTE") @db.VarChar(100)
-  boletoCriadoEm DateTime    @default(now())
-  pago           Boolean     @default(false)
-  pagoEm         DateTime?
-  createdAt      DateTime    @default(now())
-  updatedAt      DateTime    @updatedAt
-  cancelado      Boolean     @default(false)
+  id                     Int         @id @default(autoincrement())
+  userVehicleId          Int
+  nossoNumero            String?     @unique(map: "ReinspectionPayment_nossoNumero_key") @db.VarChar(50)
+  linhaDigitavel         String?     @db.VarChar(255)
+  linkBoleto             String?     @db.VarChar(500)
+  situacaoBoleto         String      @default("PENDENTE") @db.VarChar(100)
+  boletoCriadoEm         DateTime    @default(now())
+  pago                   Boolean     @default(false)
+  pagoEm                 DateTime?
+  createdAt              DateTime    @default(now())
+  updatedAt              DateTime    @updatedAt
+  cancelado              Boolean     @default(false)
   /// Revistoria que originou o boleto (null nos registros anteriores a 2026-10-22).
-  reinspectionId Int?
-  userVehicle    UserVehicle @relation(fields: [userVehicleId], references: [id], onDelete: Cascade, map: "ReinspectionPayment_userVehicleId_fkey")
+  reinspectionId         Int?
+  /// Quando o SGA aceitou a reativação do veículo após o pagamento. Enquanto
+  /// for null com `pago = true`, a verificação segue tentando reativar.
+  reativadoEm            DateTime?
+  /// Quando o e-mail de "boleto pago" foi enviado à equipe (envio único).
+  pagoNotificadoEm       DateTime?
+  /// WhatsApp (Suri) de boleto pago enviado ao associado: marcador de envio único.
+  suriNotificadoEm       DateTime?
+  /// Memória de cálculo do valor quando a regra da empresa cobra encargos por
+  /// atraso (valor base, multa, mora, dias, boleto em aberto que serviu de
+  /// base e a situação do cancelamento dele). Nulo = boleto pelo valor base.
+  encargos               Json?
+  /// Verificação de pagamento por varredura (substitui um job repetível por
+  /// boleto): o varredor pega as linhas com `proximaConsultaEm` vencido e
+  /// `verificacaoEncerradaEm` nulo. Os campos abaixo são o que o job
+  /// repetível carregava no payload.
+  proximaConsultaEm      DateTime?
+  verificacaoEncerradaEm DateTime?
+  baseOrigin             String?     @db.VarChar(50)
+  codigoVeiculo          String?     @db.VarChar(50)
+  codigoAssociado        Int?
+  nomeAssociado          String?     @db.VarChar(255)
+  telefoneAssociado      String?     @db.VarChar(30)
+  userVehicle            UserVehicle @relation(fields: [userVehicleId], references: [id], onDelete: Cascade, map: "ReinspectionPayment_userVehicleId_fkey")
 
   @@index([boletoCriadoEm], map: "ReinspectionPayment_boletoCriadoEm_idx")
   @@index([pago], map: "ReinspectionPayment_pago_idx")
   @@index([situacaoBoleto], map: "ReinspectionPayment_situacaoBoleto_idx")
   @@index([userVehicleId], map: "ReinspectionPayment_userVehicleId_idx")
   @@index([reinspectionId], map: "ReinspectionPayment_reinspectionId_idx")
+  @@index([verificacaoEncerradaEm, proximaConsultaEm], map: "ReinspectionPayment_varredura_idx")
 }
 
 /// Execução da rotina diária de notificações de boleto (uma linha por
@@ -659,6 +703,16 @@ model UserVehicle {
   lastSyncAt           DateTime              @default(now())
   reinspectionRequired Boolean               @default(false)
   cortarRastreamento   Boolean               @default(false)
+  /// Provedor de rastreamento que respondeu por último para este veículo
+  /// (M7 | LOGICA | SOFTRUCK). Evita consultar os três a cada posição.
+  provedorRastreamento String?               @db.VarChar(20)
+  provedorVerificadoEm DateTime?
+  /// Falhas seguidas do provedor gravado; ao passar do limite, volta a sondar todos.
+  provedorFalhas       Int                   @default(0)
+  /// Âncora e alerta de ignição POR VEÍCULO. `null` = ainda não definido
+  /// para este veículo (vale o valor antigo, gravado no usuário).
+  ancoraAtiva          Boolean?
+  notificacaoIgnicao   Boolean?
   reinspections        Reinspection[]
   reinspectionPayments ReinspectionPayment[]
   user                 user                  @relation(fields: [userId], references: [id], onDelete: Cascade, map: "UserVehicle_userId_fkey")
@@ -666,6 +720,7 @@ model UserVehicle {
   @@unique([userId, chassi], map: "UserVehicle_userId_chassi_key")
   @@index([chassi], map: "UserVehicle_chassi_idx")
   @@index([userId], map: "UserVehicle_userId_idx")
+  @@index([plate], map: "UserVehicle_plate_idx")
 }
 
 model VehicleWebhookEvent {
@@ -677,6 +732,9 @@ model VehicleWebhookEvent {
   payload    Json
   receivedAt DateTime @default(now())
   processed  Boolean  @default(false)
+  /// SHA-256 do evento: reentrega do mesmo evento não grava outra linha nem
+  /// manda outro push. `null` nas linhas anteriores a esta coluna.
+  eventoHash String?  @unique(map: "VehicleWebhookEvent_eventoHash_key") @db.VarChar(64)
 
   @@index([chassi], map: "VehicleWebhookEvent_chassi_idx")
   @@index([receivedAt], map: "VehicleWebhookEvent_receivedAt_idx")
@@ -976,14 +1034,17 @@ model DirectPartnerCoupon {
 /// singleUse=true → no máximo 1 linha por (couponId, userId), garantido pelo serviço em transação.
 /// singleUse=false → uma linha por uso declarado (métrica).
 model DirectPartnerCouponRedemption {
-  id         Int                 @id @default(autoincrement())
-  couponId   Int
-  coupon     DirectPartnerCoupon @relation(fields: [couponId], references: [id], onDelete: Cascade)
-  userId     Int
-  user       user                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id            Int                 @id @default(autoincrement())
+  couponId      Int
+  coupon        DirectPartnerCoupon @relation(fields: [couponId], references: [id], onDelete: Cascade)
+  userId        Int
+  user          user                @relation(fields: [userId], references: [id], onDelete: Cascade)
   /// base do JWT no momento do resgate
-  baseOrigin String              @db.VarChar(40)
-  redeemedAt DateTime            @default(now())
+  baseOrigin    String              @db.VarChar(40)
+  redeemedAt    DateTime            @default(now())
+  /// `<couponId>:<userId>` nos cupons de uso único; nula nos demais. O índice
+  /// único é a última linha de defesa contra resgate em dobro.
+  chaveUsoUnico String?             @unique(map: "DirectPartnerCouponRedemption_chaveUsoUnico_key") @db.VarChar(40)
 
   @@index([couponId, userId])
   @@index([userId, redeemedAt])
@@ -1478,4 +1539,126 @@ enum SorteGanhadorSituacao {
   EM_CONTATO
   ENTREGUE
   CANCELADO
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Consistência e filas (plano de arquitetura, fase 4)
+// ─────────────────────────────────────────────────────────────────────────
+
+/// Chave de idempotência de escritas disparadas por toque do usuário
+/// (header `Idempotency-Key`). A repetição com a mesma chave devolve a
+/// resposta gravada em vez de executar de novo.
+model ChaveDeIdempotencia {
+  id         Int      @id @default(autoincrement())
+  userId     Int
+  /// Operação: `sorte.loja.comprar`, `parceiros.cupom.resgatar`...
+  escopo     String   @db.VarChar(60)
+  chave      String   @db.VarChar(100)
+  /// SHA-256 do corpo: a mesma chave com corpo diferente é recusada (422).
+  corpoHash  String   @db.VarChar(64)
+  /// EM_ANDAMENTO | CONCLUIDA
+  estado     String   @default("EM_ANDAMENTO") @db.VarChar(20)
+  statusHttp Int?
+  resposta   Json?
+  criadoEm   DateTime @default(now())
+  expiraEm   DateTime
+
+  @@unique([userId, escopo, chave], map: "ChaveDeIdempotencia_user_escopo_chave_key")
+  @@index([expiraEm], map: "ChaveDeIdempotencia_expiraEm_idx")
+}
+
+/// Outbox: evento gravado na MESMA transação do fato que o gerou. Um
+/// despachante publica na fila depois do commit — cobre o caso "commit feito,
+/// Redis fora", em que o efeito seguinte se perdia.
+model OutboxEvento {
+  id                 Int       @id @default(autoincrement())
+  /// Ex.: `boleto.pago`, `revistoria.aprovada`.
+  tipo               String    @db.VarChar(80)
+  /// Chave de negócio: com `tipo`, impede o mesmo evento duas vezes e vira o
+  /// `jobId` da publicação.
+  chave              String    @db.VarChar(150)
+  baseOrigin         String?   @db.VarChar(50)
+  payload            Json
+  /// PENDENTE | PUBLICADO | FALHOU
+  estado             String    @default("PENDENTE") @db.VarChar(20)
+  tentativas         Int       @default(0)
+  proximaTentativaEm DateTime  @default(now())
+  ultimoErro         String?   @db.VarChar(500)
+  criadoEm           DateTime  @default(now())
+  publicadoEm        DateTime?
+
+  @@unique([tipo, chave], map: "OutboxEvento_tipo_chave_key")
+  @@index([estado, proximaTentativaEm], map: "OutboxEvento_estado_proximaTentativa_idx")
+}
+
+/// Disparo de push em massa (marketing, situação de cadastro). O HTTP só
+/// cria o disparo e as entregas; o envio roda em lotes na fila `push-massa`.
+model PushDisparo {
+  id                  Int           @id @default(autoincrement())
+  /// MARKETING | SITUACAO_CADASTRO
+  tipo                String        @db.VarChar(30)
+  /// Log de auditoria do disparo de marketing, quando houver.
+  marketingAuditLogId Int?
+  titulo              String        @db.VarChar(255)
+  corpo               String        @db.Text
+  dados               Json
+  /// CRIADO | ENVIANDO | CONCLUIDO | FALHOU
+  estado              String        @default("CRIADO") @db.VarChar(20)
+  totalDestinatarios  Int           @default(0)
+  totalEnviadas       Int           @default(0)
+  totalRecusadas      Int           @default(0)
+  totalFalhas         Int           @default(0)
+  /// Batimento do lote em curso: disparo em ENVIANDO sem batimento recente
+  /// é retomado pela varredura.
+  batimentoEm         DateTime?
+  criadoEm            DateTime      @default(now())
+  concluidoEm         DateTime?
+  entregas            PushEntrega[]
+
+  @@index([estado, batimentoEm], map: "PushDisparo_estado_batimento_idx")
+  @@index([marketingAuditLogId], map: "PushDisparo_marketingAuditLogId_idx")
+}
+
+/// Uma linha por destinatário de um disparo. É a chave de idempotência do
+/// envio: lote reexecutado só manda o que ainda está PENDENTE.
+model PushEntrega {
+  id            Int         @id @default(autoincrement())
+  disparoId     Int
+  disparo       PushDisparo @relation(fields: [disparoId], references: [id], onDelete: Cascade, map: "PushEntrega_disparoId_fkey")
+  userId        Int
+  expoPushToken String      @db.VarChar(255)
+  /// PENDENTE | ENVIADA | ENTREGUE | RECUSADA | FALHA
+  estado        String      @default("PENDENTE") @db.VarChar(20)
+  ticketId      String?     @db.VarChar(100)
+  erro          String?     @db.VarChar(255)
+  tentativas    Int         @default(0)
+  enviadaEm     DateTime?
+  reciboEm      DateTime?
+
+  @@unique([disparoId, userId], map: "PushEntrega_disparo_user_key")
+  @@index([disparoId, estado, id], map: "PushEntrega_disparo_estado_idx")
+  @@index([estado, enviadaEm], map: "PushEntrega_estado_enviadaEm_idx")
+}
+
+/// Auditoria dos comandos de veículo (âncora e alerta de ignição).
+model VeiculoComandoLog {
+  id               Int      @id @default(autoincrement())
+  /// Associado que pediu o comando. Nulo quando o token é do painel (o id
+  /// dele não é um id de `user`) — ver `adminPanelUserId`.
+  userId           Int?
+  /// Usuário do painel que pediu o comando, quando não foi um associado.
+  adminPanelUserId Int?
+  userVehicleId    Int?
+  chassi           String   @db.VarChar(100)
+  baseOrigin       String?  @db.VarChar(50)
+  /// ANCORA | IGNICAO
+  comando          String   @db.VarChar(20)
+  valor            Boolean
+  /// OK | FALHA
+  resultado        String   @db.VarChar(10)
+  erro             String?  @db.VarChar(255)
+  criadoEm         DateTime @default(now())
+
+  @@index([chassi, criadoEm], map: "VeiculoComandoLog_chassi_criadoEm_idx")
+  @@index([userId, criadoEm], map: "VeiculoComandoLog_userId_criadoEm_idx")
 }

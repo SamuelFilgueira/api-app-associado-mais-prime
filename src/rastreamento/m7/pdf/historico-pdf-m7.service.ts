@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import * as fs from 'fs';
 import * as path from 'path';
-import puppeteer from 'puppeteer';
+import { PdfRenderer } from 'src/infra/pdf/pdf-renderer';
 import { TENANT } from 'src/config/tenant.config';
 import {
   DiaM7ResumoDto,
@@ -616,33 +616,15 @@ function gerarHtmlRelatorioContestacao(
 export class HistoricoPdfM7Service {
   private readonly logger = new Logger(HistoricoPdfM7Service.name);
 
+  constructor(private readonly pdf: PdfRenderer) {}
+
   async gerarPdf(dados: HistoricoM7PdfDataDto): Promise<Buffer> {
-    const browser = await puppeteer.launch({
-      headless: true,
-      ...(process.env.PUPPETEER_EXECUTABLE_PATH && {
-        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
-      }),
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-      ],
-    });
-
     try {
-      const page = await browser.newPage();
-      const html = gerarHtmlRelatorio(dados);
-      await page.setContent(html, { waitUntil: 'networkidle0' });
-
-      const pdf = await page.pdf({
-        format: 'A4',
-        landscape: true,
-        printBackground: true,
-        margin: { top: '20px', right: '16px', bottom: '20px', left: '16px' },
+      return await this.pdf.renderizar({
+        html: gerarHtmlRelatorio(dados),
+        modelo: 'historico_m7',
+        margem: { top: '20px', right: '16px', bottom: '20px', left: '16px' },
       });
-
-      return Buffer.from(pdf);
     } catch (error) {
       this.logger.error(
         `Erro ao gerar PDF M7: ${error instanceof Error ? error.message : JSON.stringify(error)}`,
@@ -650,40 +632,18 @@ export class HistoricoPdfM7Service {
       throw new InternalServerErrorException(
         'Erro ao gerar PDF de histórico M7',
       );
-    } finally {
-      await browser.close();
     }
   }
 
   async gerarPdfContestacao(
     dados: HistoricoM7ContestacaoPdfDataDto,
   ): Promise<Buffer> {
-    const browser = await puppeteer.launch({
-      headless: true,
-      ...(process.env.PUPPETEER_EXECUTABLE_PATH && {
-        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
-      }),
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-      ],
-    });
-
     try {
-      const page = await browser.newPage();
-      const html = gerarHtmlRelatorioContestacao(dados);
-      await page.setContent(html, { waitUntil: 'networkidle0' });
-
-      const pdf = await page.pdf({
-        format: 'A4',
-        landscape: true,
-        printBackground: true,
-        margin: { top: '18px', right: '14px', bottom: '18px', left: '14px' },
+      return await this.pdf.renderizar({
+        html: gerarHtmlRelatorioContestacao(dados),
+        modelo: 'contestacao_m7',
+        margem: { top: '18px', right: '14px', bottom: '18px', left: '14px' },
       });
-
-      return Buffer.from(pdf);
     } catch (error) {
       this.logger.error(
         `Erro ao gerar PDF M7 de contestação: ${error instanceof Error ? error.message : JSON.stringify(error)}`,
@@ -691,8 +651,6 @@ export class HistoricoPdfM7Service {
       throw new InternalServerErrorException(
         'Erro ao gerar PDF de contestação M7',
       );
-    } finally {
-      await browser.close();
     }
   }
 }

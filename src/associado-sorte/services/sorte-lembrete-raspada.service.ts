@@ -16,13 +16,13 @@ import {
 import { SorteRaspadasRepository } from 'src/associado-sorte/repositories/sorte-raspadas.repository';
 import { SorteCampanhaService } from 'src/associado-sorte/services/sorte-campanha.service';
 import { SorteConfigService } from 'src/associado-sorte/services/sorte-config.service';
-import { NOTIFICATION_QUEUE } from 'src/queue/queue.module';
+import {
+  PushAvulso,
+  emLotesDePush,
+} from 'src/notifications/domain/push-avulsos';
+import { comEnvelope } from 'src/queue/job-envelope';
+import { PUSH_MASSA_QUEUE } from 'src/queue/queue.module';
 import { baseTag } from 'src/shared/log.util';
-
-const OPCOES_DO_JOB = {
-  attempts: 3,
-  backoff: { type: 'exponential' as const, delay: 2000 },
-};
 
 /**
  * Lembrete programático "Sua raspadinha está liberada" (seção 2.7). Um passo
@@ -31,6 +31,10 @@ const OPCOES_DO_JOB = {
  * (`SorteCarteira.lembreteRaspadaEm`). Fora da janela de envio, ninguém é
  * avisado; quando a janela abre, cada liberação pendente gera um único push.
  * Limita cada ciclo a um lote; o resto sai no ciclo seguinte.
+ *
+ * Os pushes vão para a fila de MASSA (`PUSH_MASSA_QUEUE`), em jobs de até
+ * 100 mensagens — não para a fila de alerta, onde atrasavam o aviso de
+ * ignição. O retry é o padrão da fila.
  */
 @Injectable()
 export class SorteLembreteRaspadaService {
@@ -40,7 +44,7 @@ export class SorteLembreteRaspadaService {
     private readonly config: SorteConfigService,
     private readonly campanhas: SorteCampanhaService,
     private readonly repository: SorteRaspadasRepository,
-    @InjectQueue(NOTIFICATION_QUEUE) private readonly fila: Queue,
+    @InjectQueue(PUSH_MASSA_QUEUE) private readonly fila: Queue,
   ) {}
 
   /** Devolve quantos pushes entraram na fila. */
@@ -90,11 +94,7 @@ export class SorteLembreteRaspadaService {
       lote: associadoSorteConfig().lembreteRaspadaLote,
     });
 
-    const mensagens: {
-      name: string;
-      data: object;
-      opts: typeof OPCOES_DO_JOB;
-    }[] = [];
+    const mensagens: PushAvulso[] = [];
     for (const c of candidatos) {
       const { lembrar, liberacao } = deveLembrarRaspada({
         agora,
@@ -113,20 +113,23 @@ export class SorteLembreteRaspadaService {
       );
       if (!minha) continue;
       mensagens.push({
-        name: 'sorte-lembrete-raspada',
-        data: {
-          userId: c.userId,
-          expoPushToken: c.expoPushToken,
-          title: 'Sua raspadinha está liberada 🍀',
-          body: 'Raspe agora na Loja da Sorte e veja se ganhou um voucher em créditos.',
-          data: { type: 'internal_route', screen: 'associado-da-sorte' },
-        },
-        opts: OPCOES_DO_JOB,
+        userId: c.userId,
+        expoPushToken: c.expoPushToken,
+        title: 'Sua raspadinha está liberada 🍀',
+        body: 'Raspe agora na Loja da Sorte e veja se ganhou um voucher em créditos.',
+        data: { type: 'internal_route', screen: 'associado-da-sorte' },
       });
     }
 
     if (mensagens.length > 0) {
-      await this.fila.addBulk(mensagens);
+      await this.fila.addBulk(
+        emLotesDePush(mensagens).map((lote) => ({
+          name: 'sorte-lembrete-raspada',
+          // `addBulk` não passa pelo `ProdutorDeFilas`: o envelope (base e
+          // metadados de rastreio) é acrescentado aqui.
+          data: comEnvelope({ mensagens: lote }, baseOrigin),
+        })),
+      );
       this.logger.log(
         `${baseTag(baseOrigin)} ${mensagens.length} lembrete(s) de raspadinha na fila`,
       );

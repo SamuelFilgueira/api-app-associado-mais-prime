@@ -4,14 +4,26 @@
  *
  * Quando a aprovação da revistoria não consegue cadastrar o boleto por
  * instabilidade do SGA, a revistoria fica `boletoStatus = PENDENTE_RETRY` e
- * um job tenta de novo a cada `intervaloMin` minutos, por no máximo
+ * a varredura tenta de novo a cada `intervaloMin` minutos, por no máximo
  * `maxHoras` horas contadas da primeira tentativa. Cada tentativa consulta
  * antes se já existe boleto de reativação em aberto no SGA (criado à mão
  * por uma operadora) e, se existir, adota-o em vez de cadastrar outro.
  */
 
+/** Job atrasado do formato antigo (um por revistoria). Não é mais criado. */
 export const JOB_RETRY_BOLETO_REATIVACAO = 'retry-boleto-reativacao';
 export const JOB_ID_PREFIXO_RETRY_BOLETO = 'boleto-reativacao-retry-';
+
+/** Varredura periódica das revistorias com tentativa de boleto vencida. */
+export const JOB_VARRER_RETRY_BOLETO = 'varrer-retry-boleto-reativacao';
+export const AGENDADOR_VARREDURA_RETRY = 'boleto-reativacao-retry-varredura';
+/**
+ * De quanto em quanto tempo a varredura roda. O intervalo ENTRE tentativas
+ * de uma revistoria continua sendo `intervaloMin` (gravado em
+ * `boletoProximaTentativaEm`); este só define o atraso máximo para notar
+ * que uma tentativa venceu.
+ */
+export const INTERVALO_VARREDURA_RETRY_MS = 60_000;
 
 const MINUTO_MS = 60_000;
 const HORA_MS = 3_600_000;

@@ -96,6 +96,11 @@ export class ExpoUpdatesController {
       query.runtimeVersion,
       query.release,
     );
+    // Release desativado deixa de ser distribuído: quem ainda tinha o
+    // manifest antigo não consegue baixar o restante do update retirado.
+    if (!release.ativa) {
+      throw new NotFoundException('Asset não encontrado');
+    }
     const caminho = this.releases.resolverArquivo(release, query.asset);
 
     try {

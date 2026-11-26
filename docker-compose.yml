@@ -1,41 +1,156 @@
+# ══════════════════════════════════════════════════════════════════
+# Benefícios API — deploy padrão: Redis + UM container da aplicação
+#
+#   docker compose up -d --build api
+#
+# O container `api` roda todos os papéis juntos (APP_ROLE=all): HTTP, filas,
+# agendadores e PDF. É a mesma forma de subir de sempre.
+#
+#   MySQL/MariaDB roda NO HOST (fora do compose): DATABASE_URL do .env.
+#
+# Antes de subir uma versão que traga migrations novas:
+#   npx prisma migrate deploy            (no host, como sempre), ou
+#   docker compose run --rm migrate      (dentro da imagem, sem Node no host)
+#
+# O que este arquivo faz sozinho no `up`:
+#   - sobe o Redis, publicado só em 127.0.0.1 (antes ficava aberto na 6379);
+#   - acerta o dono dos volumes para o usuário `node` da imagem (a imagem
+#     antiga rodava como root) — serviço `volumes-permissoes`, de uma passada.
+#
+# Senha no Redis: opcional aqui. Se REDIS_PASSWORD existir no .env, o Redis
+# sobe exigindo essa senha e a aplicação a usa; sem ela, sobe sem senha.
+#
+# Topologia em processos separados (api ×2, worker, pdf): é o arquivo
+# `docker-compose.escala.yml`, opcional — ver docs/OPERACAO_E_DEPLOY.md.
+#
+# NÃO defina `name:` aqui nem renomeie os volumes: os dados existentes
+# (uploads, releases OTA, Redis) estão em volumes com o prefixo do projeto
+# atual, e trocar o nome sobe a API com volumes vazios.
+# ══════════════════════════════════════════════════════════════════
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
+x-imagem: &imagem
+  image: ${APP_IMAGE:-beneficios-api:local}
+  build:
+    context: .
+    dockerfile: Dockerfile
+
 services:
-  # ── Redis ──────────────────────────────────────────────────────
+  # ── Redis (filas BullMQ, cache, rate limit, sessões de vendor) ──
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    # Só loopback: a API alcança pela rede do compose, e um `npm run
+    # start:dev` na mesma máquina alcança por localhost. Nada de fora entra.
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      # Exigência do BullMQ: o Redis nunca descarta chave de fila sozinho.
+      - --maxmemory-policy
+      - noeviction
+      # Vazio = sem senha (comportamento de sempre).
+      - --requirepass
+      - "${REDIS_PASSWORD:-}"
+    environment:
+      # Só para o healthcheck autenticar quando houver senha.
+      REDIS_PASSWORD: "${REDIS_PASSWORD:-}"
     volumes:
       - redis-data:/data
-    command: redis-server --appendonly yes
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      # `redis-cli ping` devolve 0 mesmo com NOAUTH; conferir o PONG. A
+      # senha vai por REDISCLI_AUTH (não aparece na linha de comando), e só
+      # quando existe: vazia, o redis-cli tentaria um AUTH que o Redis recusa.
+      test:
+        - CMD-SHELL
+        - '[ -n "$$REDIS_PASSWORD" ] && export REDISCLI_AUTH="$$REDIS_PASSWORD"; redis-cli ping | grep -q PONG'
       interval: 10s
       timeout: 5s
-      retries: 3
+      retries: 5
+      start_period: 10s
+    stop_grace_period: 30s
+    logging: *logging
 
-  # ── API ────────────────────────────────────────────────────────
+  # ── Aplicação: um container, todos os papéis ─────────────────────
   api:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    <<: *imagem
     restart: unless-stopped
+    # PID 1 mínimo: repassa SIGTERM ao Node e recolhe processos órfãos do Chromium.
+    init: true
+    # Tempo para o Nest fechar HTTP, terminar o job em curso e soltar conexões.
+    stop_grace_period: 60s
     ports:
       - "${PORT:-3001}:3001"
     env_file:
       - .env
+    # `environment` vence o env_file.
     environment:
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - PORT=3001
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      PORT: "3001"
+      APP_ROLE: all
+    # MySQL no host: `host.docker.internal` na DATABASE_URL passa a resolver
+    # também no Linux. Quem usa o IP do servidor não precisa mudar nada.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - uploads-data:/app/uploads
       - webhook-data:/app/webhook/payloads
-      # Releases OTA (expo-updates) — persistem entre rebuilds
       - updates-data:/app/updates
     depends_on:
       redis:
         condition: service_healthy
+      volumes-permissoes:
+        condition: service_completed_successfully
+    logging: *logging
+
+  # Acerta o dono dos volumes para o usuário `node` (uid 1000) da imagem.
+  # Roda sozinho antes da `api`, a cada `up`, e termina. Só faz `chown` se
+  # achar algo com outro dono (a primeira vez depois da imagem antiga, que
+  # rodava como root). Roda como root, sem rede e sem o .env.
+  volumes-permissoes:
+    image: redis:7-alpine
+    user: "0:0"
+    network_mode: none
+    restart: "no"
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        for dir in /v/uploads /v/webhook /v/updates; do
+          if [ -n "$$(find "$$dir" ! -user 1000 -print -quit)" ]; then
+            echo "Ajustando dono de $$dir para o usuário da aplicação (uid 1000)"
+            chown -R 1000:1000 "$$dir"
+          else
+            echo "$$dir já pertence ao usuário da aplicação"
+          fi
+        done
+    volumes:
+      - uploads-data:/v/uploads
+      - webhook-data:/v/webhook
+      - updates-data:/v/updates
+    logging: *logging
+
+  # ── Ferramenta (profile `tools`: não sobe com `up`) ──────────────
+  # Migrations de dentro da imagem, para servidor sem Node instalado:
+  #   docker compose run --rm migrate
+  migrate:
+    <<: *imagem
+    profiles: ["tools"]
+    env_file:
+      - .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: ["npx", "prisma", "migrate", "deploy"]
+    restart: "no"
+    logging: *logging
+
 volumes:
   redis-data:
   uploads-data:

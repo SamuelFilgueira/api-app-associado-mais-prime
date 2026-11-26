@@ -18,6 +18,26 @@ export interface MailConfig {
   passwordResetProvider: MailPasswordResetProvider;
 }
 
+/**
+ * Prazos do envio de e-mail.
+ *
+ * Sem eles, o SDK da AWS não tem timeout nenhum e o nodemailer espera 2 min
+ * pela conexão SMTP: se o provedor fica inacessível, a requisição HTTP fica
+ * pendurada até o proxy (Nginx, 60 s) ou o próprio app (iOS, 60 s) desistir, e
+ * o usuário vê "Network request failed" em vez de uma resposta da API. Os
+ * valores ficam bem abaixo desses 60 s para a API sempre responder primeiro.
+ */
+export const MAIL_PRAZOS = {
+  /** Prazo total do envio pelo SES (inclui as tentativas internas do SDK). */
+  sesTotalMs: 12_000,
+  /** Abertura da conexão TCP com o SMTP do Gmail. */
+  smtpConexaoMs: 10_000,
+  /** Espera pela saudação do servidor SMTP depois de conectar. */
+  smtpSaudacaoMs: 10_000,
+  /** Inatividade do socket SMTP (não é prazo total: anexos grandes passam). */
+  smtpInatividadeMs: 30_000,
+} as const;
+
 const PROVEDORES_VALIDOS: readonly MailPasswordResetProvider[] = [
   'ses',
   'gmail',

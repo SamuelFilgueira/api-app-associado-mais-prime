@@ -58,3 +58,31 @@ npx prisma migrate deploy   # ou migrate dev localmente
 npx prisma generate
 npm run verify
 ```
+
+## O que mudou em novembro de 2026
+
+- **Lease no lugar do lock por contador.** A tentativa reivindica `boletoLeaseAte` (10 min) antes de
+  qualquer chamada ao SGA; quem perde devolve o estado atual com `pulado: true`. A reivindicação já
+  grava `PENDENTE_RETRY`, então um processo que morre no meio é retomado pela varredura.
+- **Retry por varredura.** A cada 60 s, no papel `worker`, as revistorias `PENDENTE_RETRY` com
+  `boletoProximaTentativaEm` vencido são tentadas. Não há mais job atrasado por revistoria (os que já
+  estão no Redis disparam uma tentativa e a cadeia termina). Só instabilidade comprovada (rede, timeout,
+  5xx, bloqueio/login da Hinova, disjuntor, banco fora) entra em retry; o resto vira `FALHA`.
+- **Referência no boleto.** A descrição enviada ao SGA passou a ser `Boleto reativação app REV-<id da
+  revistoria>`; a adoção procura primeiro essa marca e depois os critérios de antes. Não há prova de
+  que a listagem do SGA devolve esse texto — se não devolver, valem só os critérios antigos.
+- **Verificação de pagamento por varredura.** O boleto grava na própria linha
+  (`ReinspectionPayment.proximaConsultaEm`) quando deve ser consultado; um agendador único
+  (`boleto-verificacao-varredura`, 60 s) reserva lotes com `SKIP LOCKED`. Cadência pela idade do boleto
+  (2, 10 e 60 min). Os jobs repetíveis criados pela versão anterior continuam atendidos até encerrarem.
+  **Rollback:** boleto criado nesta versão não tem job repetível — o código anterior não o verificaria.
+- **Pós-pagamento.** Recusa do SGA ao reativar lança erro (a rodada seguinte retoma por `reativadoEm`).
+  Os avisos saem pelo outbox (`boleto.pago`), gravado na mesma transação do `pago = true`: e-mail à
+  equipe com marcador `pagoNotificadoEm` e WhatsApp ao associado com marcador `suriNotificadoEm` — cada
+  um sai uma vez. O WhatsApp passa a sair na detecção do pagamento, não depois da reativação.
+- **Falha ao gravar o pagamento não vira mais `GERADO`.** O `nosso_numero` fica anotado na revistoria
+  e a tentativa seguinte retoma dele, sem cadastrar outro boleto.
+- **Aprovação repetida** de revistoria já `APROVADA` com boleto `NAO_GERADO` retoma a geração (ver
+  `docs/REVISTORIA_HINOVA_ENVIO.md`).
+- Chassi fora de `^[A-Za-z0-9]{6,20}$` responde 400 em `GET /sga/veiculos-info/:chassi` e
+  `PATCH /sga/set-revistoria`.

@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
+import { papelAtivo } from 'src/config/app.config';
 import { BOLETO_NOTIFICACAO_QUEUE } from 'src/queue/queue.module';
 import { BoletoNotificacaoConfigService } from 'src/boleto-notificacao/config/boleto-notificacao.config';
 import { JOB_EXECUTAR_ROTINA } from 'src/boleto-notificacao/services/boleto-notificacao.service';
@@ -26,6 +27,9 @@ export class BoletoNotificacaoSchedulerService
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
+    // Só o worker registra o agendamento no boot; a `api` continua podendo
+    // sincronizar pelo endpoint admin (`sincronizarAgendamento`).
+    if (!papelAtivo('worker')) return;
     try {
       await this.sincronizarAgendamento();
     } catch (error) {
@@ -54,16 +58,14 @@ export class BoletoNotificacaoSchedulerService
       return { enabled: false, cron: config.cronPattern };
     }
 
+    // Tentativas, backoff e retenção vêm do padrão da fila (`filas.ts`): as
+    // ocorrências do agendamento herdam as `defaultJobOptions` dela.
     await this.queue.add(
       JOB_EXECUTAR_ROTINA,
       { origem: 'AGENDADA' },
       {
         repeat: { pattern: config.cronPattern, tz: TIMEZONE_ROTINA },
         jobId: JOB_ID_AGENDADO,
-        attempts: 2,
-        backoff: { type: 'fixed', delay: 5 * 60_000 },
-        removeOnComplete: 30,
-        removeOnFail: 30,
       },
     );
 

@@ -26,3 +26,24 @@ export class BoletoReativacaoDefinitivoError extends Error {
     this.name = 'BoletoReativacaoDefinitivoError';
   }
 }
+
+/**
+ * O SGA cadastrou o boleto, mas a gravação local (`ReinspectionPayment`)
+ * falhou. O boleto EXISTE: quem captura grava o `nossoNumero` na revistoria
+ * e a tentativa seguinte retoma dele — nunca cadastra outro.
+ */
+export class BoletoCadastradoSemRegistroError extends Error {
+  constructor(
+    public readonly boleto: {
+      nossoNumero: string | null;
+      linhaDigitavel: string | null;
+      linkBoleto: string | null;
+    },
+    public readonly causa: unknown,
+  ) {
+    super(
+      `boleto ${boleto.nossoNumero ?? '(sem nosso_numero)'} cadastrado no SGA, mas a gravação local falhou: ${causa instanceof Error ? causa.message : String(causa)}`,
+    );
+    this.name = 'BoletoCadastradoSemRegistroError';
+  }
+}

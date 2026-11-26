@@ -83,3 +83,18 @@ awk '{print substr($4,2,17), $7}' access.log | grep "/api/" | sort | uniq -c | s
 - `BOLETO_NOTIFICACAO_HORARIO` de madrugada: se a varredura bloquear um token, o desbloqueio (~1h) acontece antes do pico de uso do app.
 - `BOLETO_NOTIFICACAO_PAUSA_ENTRE_PAGINAS_MS` maior (até 300000) e/ou `BOLETO_NOTIFICACAO_D20_ALCANCE` menor (menos registros por varredura).
 - `BOLETO_NOTIFICACAO_ENABLED=false` por alguns dias isola se a rotina ainda é o gatilho.
+
+## 8. Atualização (novembro de 2026)
+
+- **Sessão e bloqueio compartilhados.** `token_usuario`, o registro de token bloqueado e a pausa de
+  login ficam no Redis (`VendorSessionStore`), vistos por todos os processos; o login roda sob trava.
+  Antes cada processo tinha os seus, e um bloqueio detectado por um não era conhecido pelos outros.
+- **Cache das leituras do app** (`HinovaClient`): associado 5 min, boletos 2 min, produtos do veículo
+  6 h (`HINOVA_CACHE_*_SEG`). É a principal redução de chamadas por token.
+- **Disjuntor por base**: cinco falhas de transporte seguidas abrem o circuito por 30 s.
+- **Orçamento por token** (`HINOVA_ORCAMENTO_POR_MINUTO`, 0 = só mede) e a métrica
+  `hinova_token_bloqueado_total`.
+- **Régua de boletos**: o 403 de extração faz o job falhar e repetir em +10 e +20 min, varrendo só as
+  bases que falharam (até 3 varreduras por dia numa base em falha).
+- **Verificação de pagamento**: um agendador único com varredura substituiu um job repetível por
+  boleto (ver `docs/REVISTORIA_BOLETO_REATIVACAO.md`).

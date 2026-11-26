@@ -8,6 +8,15 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import request from 'supertest';
 import { ExpoUpdatesModule } from './expo-updates.module';
+import {
+  ExpoUpdatesManifestService,
+  MAX_MANIFESTS_EM_CACHE,
+} from './services/expo-updates-manifest.service';
+import {
+  ExpoUpdatesReleasesService,
+  conferirTamanhoDeclarado,
+  limiteDescompactadoBytes,
+} from './services/expo-updates-releases.service';
 
 const URL_PUBLICA = 'https://api.teste.com.br';
 const ADMIN_TOKEN = 'token-admin-teste';
@@ -428,5 +437,98 @@ describe('ExpoUpdatesModule (HTTP)', () => {
     expect(status.body.assinaturaHabilitada).toBe(true);
     expect(status.body.urlPublica).toBe(URL_PUBLICA);
     expect(status.body.runtimes[0].ativa.nome).toBe(lista.body[1].nome);
+  });
+
+  describe('endurecimento', () => {
+    it('asset de release desativado deixa de ser baixável', async () => {
+      const lista = await request(servidor())
+        .get('/api/expo-updates/admin/releases')
+        .set('x-admin-token', ADMIN_TOKEN)
+        .query({ runtimeVersion: RUNTIME });
+      const desativado = (
+        lista.body as Array<{ nome: string; ativa: boolean }>
+      ).find((r) => !r.ativa)!;
+      const ativo = (
+        lista.body as Array<{ nome: string; ativa: boolean }>
+      ).find((r) => r.ativa)!;
+      const asset = '_expo/static/js/android/index-aaa.hbc';
+
+      const doDesativado = await request(servidor())
+        .get('/api/expo-updates/assets')
+        .query({ runtimeVersion: RUNTIME, release: desativado.nome, asset });
+      const doAtivo = await request(servidor())
+        .get('/api/expo-updates/assets')
+        .query({ runtimeVersion: RUNTIME, release: ativo.nome, asset });
+
+      expect(doDesativado.status).toBe(404);
+      expect(doAtivo.status).toBe(200);
+    });
+
+    it('metadata.json com caminho que sai da pasta do release é recusado na publicação', async () => {
+      const zip = new AdmZip();
+      zip.addFile('_expo/static/js/android/index-aaa.hbc', Buffer.from('x'));
+      zip.addFile(
+        'metadata.json',
+        Buffer.from(
+          JSON.stringify({
+            version: 0,
+            bundler: 'metro',
+            fileMetadata: {
+              android: {
+                bundle: '_expo/static/js/android/index-aaa.hbc',
+                assets: [{ path: '../../../etc/passwd', ext: 'txt' }],
+              },
+            },
+          }),
+        ),
+      );
+      zip.addFile(
+        'expoConfig.json',
+        Buffer.from(JSON.stringify({ runtimeVersion: RUNTIME })),
+      );
+
+      const pub = await publicar(zip.toBuffer());
+
+      expect(pub.status).toBe(400);
+      expect(pub.body.message).toContain('Caminho inválido em metadata.json');
+    });
+
+    it('zip que declara conteúdo descompactado acima do teto é recusado antes de extrair', () => {
+      const MB = 1024 * 1024;
+      const upload = 200 * MB;
+
+      // Um export real: algumas centenas de arquivos, dezenas de MB.
+      expect(conferirTamanhoDeclarado([30 * MB, 5 * MB, 1 * MB], upload)).toBe(
+        limiteDescompactadoBytes(upload),
+      );
+      // "Zip bomb": pouco upload, gigabytes declarados.
+      expect(() => conferirTamanhoDeclarado([3_000 * MB], upload)).toThrow(
+        /grande demais/,
+      );
+      expect(() =>
+        conferirTamanhoDeclarado(new Array<number>(10_001).fill(1), upload),
+      ).toThrow(/arquivos demais/);
+      // O teto acompanha o limite de upload, com piso de 200 MB.
+      expect(limiteDescompactadoBytes(10 * MB)).toBe(200 * MB);
+      expect(limiteDescompactadoBytes(200 * MB)).toBe(800 * MB);
+    });
+
+    it('o cache de manifests tem teto: hosts inventados não acumulam na memória', async () => {
+      const manifests = app.get(ExpoUpdatesManifestService);
+      const releases = app.get(ExpoUpdatesReleasesService);
+      const ativa = (await releases.releaseAtiva(RUNTIME, 'android'))!;
+
+      for (let i = 0; i < MAX_MANIFESTS_EM_CACHE + 30; i++) {
+        await manifests.obterManifest(
+          ativa,
+          'android',
+          `https://host-inventado-${i}.exemplo`,
+        );
+      }
+
+      const cache = (manifests as unknown as { cache: Map<string, unknown> })
+        .cache;
+      expect(cache.size).toBeLessThanOrEqual(MAX_MANIFESTS_EM_CACHE);
+    });
   });
 });

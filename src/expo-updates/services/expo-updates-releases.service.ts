@@ -42,6 +42,41 @@ const MARCADOR_DESATIVADA = '.desativada';
  * Releases são imutáveis depois de publicados: rollback é feito republicando
  * um release antigo como um release novo (ver `republicar`).
  */
+/** Arquivos por zip de export (um export real tem algumas centenas). */
+const MAX_ENTRADAS_NO_ZIP = 10_000;
+
+/**
+ * Teto do conteúdo descompactado: quatro vezes o limite de upload, com piso
+ * de 200 MB (bundles de JS comprimem em torno de 3 a 4 vezes).
+ */
+export function limiteDescompactadoBytes(limiteUploadBytes: number): number {
+  return Math.max(limiteUploadBytes * 4, 200 * 1024 * 1024);
+}
+
+/**
+ * Confere quantidade de arquivos e tamanho descompactado DECLARADO no zip.
+ * Lança 400 se passar do teto; devolve o teto em bytes para a conferência do
+ * tamanho real durante a extração.
+ */
+export function conferirTamanhoDeclarado(
+  tamanhos: number[],
+  limiteUploadBytes: number,
+): number {
+  const limite = limiteDescompactadoBytes(limiteUploadBytes);
+  if (tamanhos.length > MAX_ENTRADAS_NO_ZIP) {
+    throw new BadRequestException(
+      `Zip com arquivos demais (${tamanhos.length}; máximo ${MAX_ENTRADAS_NO_ZIP})`,
+    );
+  }
+  const declarado = tamanhos.reduce((total, t) => total + t, 0);
+  if (declarado > limite) {
+    throw new BadRequestException(
+      `Conteúdo do zip grande demais depois de descompactado (${(declarado / 1024 / 1024).toFixed(0)} MB; máximo ${(limite / 1024 / 1024).toFixed(0)} MB)`,
+    );
+  }
+  return limite;
+}
+
 @Injectable()
 export class ExpoUpdatesReleasesService {
   private readonly logger = new Logger(ExpoUpdatesReleasesService.name);
@@ -186,6 +221,14 @@ export class ExpoUpdatesReleasesService {
         caminho: normalizarCaminhoRelativo(e.entryName),
       }));
 
+    // Teto ANTES de descompactar: um zip pequeno pode declarar gigabytes
+    // ("zip bomb"). O tamanho declarado é conferido aqui e o real, de novo,
+    // durante a extração (o cabeçalho pode mentir).
+    const limiteDescompactado = conferirTamanhoDeclarado(
+      entradas.map((e) => e.entrada.header.size || 0),
+      this.config.limiteUploadBytes,
+    );
+
     const candidatosMetadata = entradas
       .filter(
         (e) =>
@@ -230,6 +273,11 @@ export class ExpoUpdatesReleasesService {
         }
         const dados = entrada.getData();
         tamanhoBytes += dados.length;
+        if (tamanhoBytes > limiteDescompactado) {
+          throw new BadRequestException(
+            'Conteúdo do zip grande demais depois de descompactado',
+          );
+        }
         await fs.mkdir(dirname(destino), { recursive: true });
         await fs.writeFile(destino, dados);
       }
@@ -461,6 +509,19 @@ export class ExpoUpdatesReleasesService {
     for (const plataforma of PLATAFORMAS_EXPO) {
       const pm = metadata.fileMetadata[plataforma];
       if (!pm) continue;
+      // Os caminhos do metadata.json viram caminho de arquivo e URL de asset:
+      // nada de `..`, segmento vazio ou caminho absoluto.
+      const caminhos = [pm.bundle, ...(pm.assets ?? []).map((a) => a.path)];
+      for (const caminho of caminhos) {
+        if (
+          typeof caminho === 'string' &&
+          !caminhoRelativoSeguro(normalizarCaminhoRelativo(caminho))
+        ) {
+          throw new BadRequestException(
+            `Caminho inválido em ${ARQUIVO_METADATA} (${plataforma}): "${caminho.slice(0, 120)}"`,
+          );
+        }
+      }
       if (
         !pm.bundle ||
         !(await this.existe(join(dir, normalizarCaminhoRelativo(pm.bundle))))

@@ -1,5 +1,7 @@
 # Clonagem do Backend para a Hertz — Visão Geral
 
+> **Atualização (novembro de 2026).** O comando de deploy continua o mesmo (`docker compose up -d --build api`). Mudou o que ele faz por baixo: o Redis passa a ser publicado só em `127.0.0.1`, a imagem roda como usuário `node` (o compose acerta o dono dos volumes sozinho) e há uma topologia opcional em processos separados (`docker-compose.escala.yml`). Ver `docs/OPERACAO_E_DEPLOY.md`.
+
 > **Documento mestre**: o que já está pronto e o que ainda falta para subir o backend na infraestrutura da Hertz.
 >
 > - Comandos detalhados do deploy: **[DEPLOY_HERTZ_PASSO_A_PASSO.md](DEPLOY_HERTZ_PASSO_A_PASSO.md)**

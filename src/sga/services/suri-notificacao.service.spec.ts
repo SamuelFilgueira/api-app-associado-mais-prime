@@ -73,6 +73,25 @@ describe('SuriNotificacaoService', () => {
     axiosPost.mockRejectedValue(new Error('ECONNREFUSED'));
     await expect(enviar()).rejects.toThrow('ECONNREFUSED');
   });
+
+  it('`enviarTemplateComResultado` diz se a Suri aceitou e com qual status', async () => {
+    const params = {
+      nome: 'FULANO DE TAL',
+      telefoneCelular: '(31) 98888-7777',
+      templateId: 'tpl-1',
+    };
+    axiosPost.mockResolvedValueOnce({ status: 201, data: {} });
+    await expect(service.enviarTemplateComResultado(params)).resolves.toEqual({
+      aceito: true,
+      status: 201,
+    });
+
+    axiosPost.mockResolvedValueOnce({ status: 503, data: 'fora' });
+    await expect(service.enviarTemplateComResultado(params)).resolves.toEqual({
+      aceito: false,
+      status: 503,
+    });
+  });
 });
 
 describe('mascararTelefone', () => {

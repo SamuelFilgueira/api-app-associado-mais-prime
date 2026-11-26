@@ -376,3 +376,12 @@ export function mapTenantBases<T>(
     return acc;
   }, {});
 }
+
+/**
+ * Valor de uma variável de ambiente de credencial, pelo NOME já resolvido
+ * (`tenantEnvName`). Fica aqui porque `process.env` só é lido em
+ * `src/config`; quem interpreta ausência é o `TenantCredentialsRegistry`.
+ */
+export function valorDaEnvDeCredencial(nome: string): string | undefined {
+  return process.env[nome];
+}

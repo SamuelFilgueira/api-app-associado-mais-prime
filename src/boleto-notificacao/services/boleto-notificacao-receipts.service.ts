@@ -1,8 +1,18 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Expo } from 'expo-server-sdk';
-import { PrismaService } from 'src/database/prisma.service';
+import {
+  PushGateway,
+  ReciboPush,
+  tokenMorto,
+} from 'src/integrations/expo/push.gateway';
 import { baseTag } from 'src/shared/log.util';
-import { BoletoNotificacaoService } from 'src/boleto-notificacao/services/boleto-notificacao.service';
+import {
+  descreverRecusa,
+  fatiar,
+} from 'src/boleto-notificacao/domain/regua-envio';
+import { cobertura } from 'src/boleto-notificacao/domain/regua-resultado';
+import { ReguaDestinatarioRepository } from 'src/boleto-notificacao/repositories/regua-destinatario.repository';
+import { ReguaExecucaoRepository } from 'src/boleto-notificacao/repositories/regua-execucao.repository';
+import { ReguaLogRepository } from 'src/boleto-notificacao/repositories/regua-log.repository';
 
 export interface ResultadoReceipts {
   execucaoId: number;
@@ -13,31 +23,27 @@ export interface ResultadoReceipts {
   pendentes: number;
 }
 
+/** Limite de ids por consulta de recibos no Expo. */
+const RECIBOS_POR_CONSULTA = 300;
+
 /**
- * Verificação assíncrona dos receipts do Expo para uma execução da rotina.
+ * Caso de uso: verificar os recibos do Expo de uma execução da rotina.
  * Atualiza cada log (ENTREGUE / FALHA), invalida tokens DeviceNotRegistered e
  * recalcula a métrica de cobertura de entrega da execução.
  */
 @Injectable()
 export class BoletoNotificacaoReceiptsService {
   private readonly logger = new Logger(BoletoNotificacaoReceiptsService.name);
-  private readonly expo = new Expo();
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly notificacaoService: BoletoNotificacaoService,
+    private readonly execucoes: ReguaExecucaoRepository,
+    private readonly logs: ReguaLogRepository,
+    private readonly destinatarios: ReguaDestinatarioRepository,
+    private readonly push: PushGateway,
   ) {}
 
   async verificarExecucao(execucaoId: number): Promise<ResultadoReceipts> {
-    const execucao = await this.prisma.boletoNotificacaoExecucao.findUnique({
-      where: { id: execucaoId },
-      select: {
-        id: true,
-        tenant: true,
-        tipoMensagem: true,
-        totalEnfileirados: true,
-      },
-    });
+    const execucao = await this.execucoes.buscarParaRecibos(execucaoId);
     if (!execucao) {
       throw new Error(`Execução #${execucaoId} não encontrada`);
     }
@@ -52,121 +58,86 @@ export class BoletoNotificacaoReceiptsService {
       pendentes: 0,
     };
 
-    const pendentes = await this.prisma.boletoNotificacaoLog.findMany({
-      where: {
-        execucaoId,
-        statusEnvio: 'ENVIADO',
-        expoTicketId: { not: null },
-      },
-      select: {
-        id: true,
-        userId: true,
-        expoPushToken: true,
-        expoTicketId: true,
-      },
-    });
-
-    if (pendentes.length === 0) {
+    const aguardando = await this.logs.aguardandoRecibo(execucaoId);
+    if (aguardando.length === 0) {
       this.logger.log(
         `${tag} nenhum ticket pendente de receipt na execução #${execucaoId}`,
       );
     }
 
+    // O recibo é casado com o log pelo id do ticket, nunca pela posição.
     const porTicket = new Map(
-      pendentes.map((p) => [p.expoTicketId as string, p]),
-    );
-    const chunks = this.expo.chunkPushNotificationReceiptIds(
-      Array.from(porTicket.keys()),
+      aguardando.map((log) => [log.expoTicketId as string, log]),
     );
 
-    for (const chunk of chunks) {
-      let receipts: Awaited<
-        ReturnType<Expo['getPushNotificationReceiptsAsync']>
-      >;
+    for (const ticketIds of fatiar(
+      Array.from(porTicket.keys()),
+      RECIBOS_POR_CONSULTA,
+    )) {
+      let recibos: Record<string, ReciboPush>;
       try {
-        receipts = await this.expo.getPushNotificationReceiptsAsync(chunk);
-      } catch (error) {
+        recibos = await this.push.consultarRecibos(ticketIds);
+      } catch (erro) {
+        // Sem resposta do Expo: os tickets seguem pendentes e o resultado
+        // diz isso — o job reagenda a verificação enquanto houver pendente.
         this.logger.error(
-          `${tag} erro ao consultar receipts: ${error.message}`,
+          `${tag} erro ao consultar receipts: ${erro instanceof Error ? erro.message : String(erro)}`,
         );
-        resultado.pendentes += chunk.length;
+        resultado.pendentes += ticketIds.length;
         continue;
       }
 
-      for (const ticketId of chunk) {
-        const receipt = receipts[ticketId];
+      for (const ticketId of ticketIds) {
+        const recibo = recibos[ticketId];
         const log = porTicket.get(ticketId);
         if (!log) continue;
 
-        if (!receipt) {
+        if (!recibo) {
           resultado.pendentes++; // Expo ainda não processou — nova tentativa depois
           continue;
         }
 
-        resultado.verificados++;
-
-        if (receipt.status === 'ok') {
-          resultado.entregues++;
-          await this.prisma.boletoNotificacaoLog.update({
-            where: { id: log.id },
-            data: { statusEnvio: 'ENTREGUE', expoErro: null },
-          });
+        if (recibo.status === 'ok') {
+          if (await this.logs.marcarEntregue(log.id)) {
+            resultado.verificados++;
+            resultado.entregues++;
+          }
           continue;
         }
 
-        const codigoErro = receipt.details?.error ?? 'RECEIPT_ERROR';
-        const descricao =
-          `${codigoErro}: ${receipt.message ?? 'erro desconhecido'}`.slice(
-            0,
-            255,
-          );
+        const descricao = descreverRecusa(
+          recibo.detalhe,
+          recibo.mensagem,
+          'RECEIPT_ERROR',
+        );
+        // Outra verificação pode ter tratado este ticket no mesmo instante:
+        // quem não muda a linha não conta nem apaga token.
+        if (!(await this.logs.marcarFalhaDeRecibo(log.id, descricao))) continue;
+        resultado.verificados++;
         resultado.falhas++;
-        await this.prisma.boletoNotificacaoLog.update({
-          where: { id: log.id },
-          data: { statusEnvio: 'FALHA', expoErro: descricao },
-        });
 
-        if (
-          codigoErro === 'DeviceNotRegistered' &&
-          log.userId &&
-          log.expoPushToken
-        ) {
+        if (tokenMorto(recibo) && log.userId && log.expoPushToken) {
           resultado.tokensInvalidos++;
-          await this.notificacaoService.invalidarToken(
+          const removido = await this.destinatarios.invalidarToken(
             log.userId,
             log.expoPushToken,
-            tag,
+          );
+          this.logger.warn(
+            removido
+              ? `${tag} token do user ${log.userId} marcado como inválido (DeviceNotRegistered) e removido`
+              : `${tag} token do user ${log.userId} recusado como inválido, mas o cadastro já está com outro token`,
           );
         }
       }
     }
 
     // Recalcula as métricas de entrega da execução a partir dos logs
-    const [entregues, falhas] = await Promise.all([
-      this.prisma.boletoNotificacaoLog.count({
-        where: { execucaoId, statusEnvio: 'ENTREGUE' },
-      }),
-      this.prisma.boletoNotificacaoLog.count({
-        where: { execucaoId, statusEnvio: 'FALHA' },
-      }),
-    ]);
-    const tokensInvalidos = await this.prisma.boletoNotificacaoLog.count({
-      where: { execucaoId, expoErro: { startsWith: 'DeviceNotRegistered' } },
-    });
-
-    await this.prisma.boletoNotificacaoExecucao.update({
-      where: { id: execucaoId },
-      data: {
-        totalEntregues: entregues,
-        totalFalhas: falhas,
-        totalTokensInvalidos: tokensInvalidos,
-        coberturaEntrega:
-          execucao.totalEnfileirados > 0
-            ? Math.round((entregues / execucao.totalEnfileirados) * 10000) /
-              10000
-            : null,
-        receiptsVerificadosEm: new Date(),
-      },
+    const totais = await this.logs.totaisDeEntrega(execucaoId);
+    await this.execucoes.registrarEntrega(execucaoId, {
+      totalEntregues: totais.entregues,
+      totalFalhas: totais.falhas,
+      totalTokensInvalidos: totais.tokensInvalidos,
+      coberturaEntrega: cobertura(totais.entregues, execucao.totalEnfileirados),
     });
 
     this.logger.log(

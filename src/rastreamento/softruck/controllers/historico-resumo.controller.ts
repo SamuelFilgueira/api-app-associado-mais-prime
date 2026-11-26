@@ -1,6 +1,7 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from 'src/infra/guards/jwt-auth.guard';
-import { BaseContextService } from 'src/shared/base-context.service';
+import { BaseOrigin } from 'src/infra/decorators/base-origin.decorator';
+import type { BaseOrigin as BaseOriginType } from 'src/config/tenant.config';
 import { TokenResolverService } from 'src/shared/token-resolver.service';
 import { HistoricoQueryDto } from '../dto/historico-query.dto';
 import { HistoricoResumoResponseDto } from '../dto/historico-resumo-response.dto';
@@ -20,7 +21,6 @@ import { HistoricoResumoService } from '../services/historico-resumo.service';
 export class HistoricoResumoController {
   constructor(
     private readonly resumoService: HistoricoResumoService,
-    private readonly baseContextService: BaseContextService,
     private readonly tokenResolver: TokenResolverService,
   ) {}
 
@@ -41,8 +41,8 @@ export class HistoricoResumoController {
   @Get('resumo')
   async obterResumo(
     @Query() query: HistoricoQueryDto,
+    @BaseOrigin() baseOrigin: BaseOriginType,
   ): Promise<HistoricoResumoResponseDto> {
-    const baseOrigin = this.baseContextService.getBaseOrigin();
     const softruckPublicKey =
       this.tokenResolver.resolveSoftruckPublicKey(baseOrigin);
 

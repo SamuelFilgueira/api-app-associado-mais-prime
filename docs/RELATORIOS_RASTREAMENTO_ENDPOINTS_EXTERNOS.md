@@ -581,3 +581,14 @@ veículo e do período; cards de resumo; tabela com cabeçalho escuro e linhas z
 
 Na linha do tempo da Lógica, cada parada entra como uma posição na data de início; itens com mesma
 data e coordenada aparecem uma vez só, e a ignição vazia repete o último valor conhecido.
+
+## Atualização (novembro de 2026)
+
+- **Resposta parcial sinalizada.** `/rastreamento/softruck/historico/resumo` e
+  `/rastreamento/historico/softruck/rotas` ganharam `parcial` e `diasComFalha` (aditivos): dia que
+  falhou por timeout, rede, 5xx, 408 ou 429 aparece na lista em vez de sumir em silêncio. No caminho da
+  Lógica, `parcial: true` indica que a trilha completa (`/mobile/posicao`) falhou.
+- **Sessão da M7** fica no Redis, compartilhada entre os processos, com login sob trava e sob demanda.
+- **PDF** é renderizado pela porta `PdfRenderer` (um Chromium reaproveitado, no papel `pdf`).
+- **Posição**: cache de 15 s por chassi; o veículo guarda qual provedor o atende e só ele é consultado,
+  com revalidação periódica dos demais.

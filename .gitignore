@@ -81,3 +81,6 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 
 # Backup do .env trazido do Windows
 .env.bak-win11
+
+# Diretório de troca de arquivos entre a API e o processo pdf (dev local)
+/tmp

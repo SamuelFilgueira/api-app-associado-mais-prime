@@ -21,6 +21,7 @@ import { UpdateSliderDto } from 'src/slider/dto/update-slider.dto';
 import { AdminPanelRoleGuard } from 'src/infra/guards/admin-panel-role.guard';
 import { AdminPanelRoles } from 'src/infra/decorators/admin-panel-roles.decorator';
 import { AdminPanelRole } from 'src/infra/enums/admin-panel-role.enum';
+import { LIMITE_IMAGEM } from 'src/infra/storage/limites-de-upload';
 
 @UseGuards(JwtAuthGuard)
 @Controller('slider')
@@ -42,7 +43,7 @@ export class SliderController {
   @Post()
   @UseGuards(AdminPanelRoleGuard)
   @AdminPanelRoles(AdminPanelRole.MARKETING)
-  @UseInterceptors(FileInterceptor('image'))
+  @UseInterceptors(FileInterceptor('image', LIMITE_IMAGEM))
   async createSlider(
     @Body() body: CreateSliderDto,
     @UploadedFile() image?: Express.Multer.File,
@@ -53,7 +54,7 @@ export class SliderController {
   @Patch(':id')
   @UseGuards(AdminPanelRoleGuard)
   @AdminPanelRoles(AdminPanelRole.MARKETING)
-  @UseInterceptors(FileInterceptor('image'))
+  @UseInterceptors(FileInterceptor('image', LIMITE_IMAGEM))
   updateSlider(
     @Param('id', ParseIntPipe) id: number,
     @Body() body: UpdateSliderDto,

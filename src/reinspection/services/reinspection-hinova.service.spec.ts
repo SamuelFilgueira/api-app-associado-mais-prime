@@ -4,9 +4,11 @@ import {
   ReinspectionHinovaEnvioOrigem,
   ReinspectionHinovaEnvioStatus,
 } from '@prisma/client';
-import { PrismaService } from 'src/database/prisma.service';
 import { SgaAuthService } from 'src/integrations/hinova/sga-auth.service';
+import { ReinspectionHinovaRepository } from 'src/reinspection/repositories/reinspection-hinova.repository';
+import { ReinspectionHinovaLoteService } from 'src/reinspection/services/reinspection-hinova-lote.service';
 import { ReinspectionHinovaService } from 'src/reinspection/services/reinspection-hinova.service';
+import { PrismaRevistoriaMemoria } from 'src/reinspection/testing/prisma-revistoria.memoria';
 
 jest.mock('fs', () => {
   const real = jest.requireActual('fs');
@@ -24,19 +26,6 @@ type Foto = {
   sentToHinova: boolean;
 };
 
-function revistoria(
-  fotos: Foto[],
-  status = 'APROVADA',
-): Record<string, unknown> {
-  return {
-    id: 10,
-    status,
-    codigoVeiculo: 555,
-    userVehicle: { user: { baseOrigin: 'MAIS_PRIME' } },
-    photos: fotos,
-  };
-}
-
 const foto = (id: number, extra: Partial<Foto> = {}): Foto => ({
   id,
   nomeArquivo: `revistoria_ordem${id}_1.jpg`,
@@ -47,75 +36,65 @@ const foto = (id: number, extra: Partial<Foto> = {}): Foto => ({
 });
 
 describe('ReinspectionHinovaService', () => {
+  let banco: PrismaRevistoriaMemoria;
   let prisma: {
-    reinspection: {
-      findUnique: jest.Mock;
-      update: jest.Mock;
-      findMany: jest.Mock;
-    };
-    reinspectionPhoto: { update: jest.Mock; count: jest.Mock };
-    reinspectionHinovaEnvio: { create: jest.Mock; findMany: jest.Mock };
-    $transaction: jest.Mock;
+    reinspection: { update: jest.SpyInstance };
+    reinspectionPhoto: { update: jest.SpyInstance };
+    reinspectionHinovaEnvio: { create: jest.SpyInstance };
   };
   let sgaAuth: { executeRequestWithAuth: jest.Mock };
   let service: ReinspectionHinovaService;
   const readFile = fs.readFile as jest.Mock;
 
+  /**
+   * Grava a revistoria 10 (veículo de um associado MAIS_PRIME) com as fotos
+   * informadas; o próximo id gerado — o do registro de envio — é 77.
+   */
+  function revistoria(fotos: Foto[], status = 'APROVADA'): void {
+    const dono = banco.comUsuario({ id: 500, baseOrigin: 'MAIS_PRIME' });
+    const veiculo = banco.comVeiculo({ id: 501, userId: dono.id });
+    banco.comRevistoria({
+      id: 10,
+      userVehicleId: veiculo.id,
+      status,
+      codigoVeiculo: 555,
+    });
+    for (const f of fotos) banco.comFoto({ ...f, reinspectionId: 10 });
+    banco.definirProximoId(77);
+  }
+
   beforeEach(() => {
     jest.clearAllMocks();
+    banco = new PrismaRevistoriaMemoria();
     prisma = {
-      reinspection: {
-        findUnique: jest.fn(),
-        update: jest.fn().mockResolvedValue({}),
-        findMany: jest.fn(),
-      },
+      reinspection: { update: jest.spyOn(banco.reinspection, 'update') },
       reinspectionPhoto: {
-        update: jest.fn().mockImplementation((args) => ({ __update: args })),
-        count: jest.fn().mockImplementation((args) => ({ __count: args })),
+        update: jest.spyOn(banco.reinspectionPhoto, 'update'),
       },
       reinspectionHinovaEnvio: {
-        create: jest.fn().mockResolvedValue({ id: 77 }),
-        findMany: jest.fn(),
+        create: jest.spyOn(banco.reinspectionHinovaEnvio, 'create'),
       },
-      $transaction: jest.fn(),
     };
-    // $transaction recebe a lista de "promises" montadas acima; resolvemos
-    // as contagens com base nos argumentos para simular o consolidado.
-    prisma.$transaction.mockImplementation((ops: unknown[]) =>
-      ops.map((op: { __count?: { where: { sentToHinova?: boolean } } }) => {
-        if (op?.__count) {
-          return op.__count.where.sentToHinova === true
-            ? contagem.enviadas
-            : contagem.total;
-        }
-        return op;
-      }),
-    );
     sgaAuth = { executeRequestWithAuth: jest.fn() };
     readFile.mockResolvedValue(Buffer.from('img'));
     service = new ReinspectionHinovaService(
-      prisma as unknown as PrismaService,
-      sgaAuth as unknown as SgaAuthService,
+      new ReinspectionHinovaRepository(banco.comoPrisma()),
+      new ReinspectionHinovaLoteService(sgaAuth as unknown as SgaAuthService),
     );
   });
-
-  const contagem = { total: 2, enviadas: 2 };
 
   const opcoesAprovacao = {
     origem: ReinspectionHinovaEnvioOrigem.APROVACAO,
   };
 
   it('lança 404 quando a revistoria não existe', async () => {
-    prisma.reinspection.findUnique.mockResolvedValue(null);
     await expect(service.enviarFotos(1, opcoesAprovacao)).rejects.toThrow(
       NotFoundException,
     );
   });
 
   it('bloqueia reenvio manual fora de APROVADA/FINALIZADA', async () => {
-    prisma.reinspection.findUnique.mockResolvedValue(
-      revistoria([foto(1)], 'EM_ANALISE'),
-    );
+    revistoria([foto(1)], 'EM_ANALISE');
     await expect(
       service.enviarFotos(10, {
         origem: ReinspectionHinovaEnvioOrigem.REENVIO_MANUAL,
@@ -124,9 +103,7 @@ describe('ReinspectionHinovaService', () => {
   });
 
   it('retorna null e não chama a Hinova quando não há foto pendente', async () => {
-    prisma.reinspection.findUnique.mockResolvedValue(
-      revistoria([foto(1, { sentToHinova: true })]),
-    );
+    revistoria([foto(1, { sentToHinova: true })]);
     const resultado = await service.enviarFotos(10, opcoesAprovacao);
     expect(resultado).toBeNull();
     expect(sgaAuth.executeRequestWithAuth).not.toHaveBeenCalled();
@@ -134,15 +111,11 @@ describe('ReinspectionHinovaService', () => {
   });
 
   it('envia só as fotos pendentes e marca ENVIADA quando todas são inseridas', async () => {
-    prisma.reinspection.findUnique.mockResolvedValue(
-      revistoria([foto(1, { sentToHinova: true }), foto(2)]),
-    );
+    revistoria([foto(1, { sentToHinova: true }), foto(2)]);
     sgaAuth.executeRequestWithAuth.mockResolvedValue({
       status: 200,
       data: [{ nome_arquivo: 'revistoria_ordem2_1.jpg', situacao: 'Inserido' }],
     });
-    contagem.total = 2;
-    contagem.enviadas = 2;
 
     const resultado = await service.enviarFotos(10, opcoesAprovacao);
 
@@ -184,13 +157,11 @@ describe('ReinspectionHinovaService', () => {
   });
 
   it('registra FALHA quando a Hinova responde HTTP >= 400 e não lança', async () => {
-    prisma.reinspection.findUnique.mockResolvedValue(revistoria([foto(1)]));
+    revistoria([foto(1)]);
     sgaAuth.executeRequestWithAuth.mockResolvedValue({
       status: 403,
       data: { mensagem: 'bloqueado' },
     });
-    contagem.total = 1;
-    contagem.enviadas = 0;
 
     const resultado = await service.enviarFotos(10, opcoesAprovacao);
 
@@ -206,12 +177,10 @@ describe('ReinspectionHinovaService', () => {
   });
 
   it('registra FALHA quando a chamada lança (timeout/rede)', async () => {
-    prisma.reinspection.findUnique.mockResolvedValue(revistoria([foto(1)]));
+    revistoria([foto(1)]);
     sgaAuth.executeRequestWithAuth.mockRejectedValue(
       new Error('timeout of 60000ms exceeded'),
     );
-    contagem.total = 1;
-    contagem.enviadas = 0;
 
     const resultado = await service.enviarFotos(10, opcoesAprovacao);
 
@@ -222,15 +191,11 @@ describe('ReinspectionHinovaService', () => {
   });
 
   it('envia as fotos legíveis e registra erro individual na foto sem arquivo', async () => {
-    prisma.reinspection.findUnique.mockResolvedValue(
-      revistoria([foto(1), foto(2, { url: null })]),
-    );
+    revistoria([foto(1), foto(2, { url: null })]);
     sgaAuth.executeRequestWithAuth.mockResolvedValue({
       status: 200,
       data: [{ nome_arquivo: 'revistoria_ordem1_1.jpg', situacao: 'Inserido' }],
     });
-    contagem.total = 2;
-    contagem.enviadas = 1;
 
     const resultado = await service.enviarFotos(10, opcoesAprovacao);
 
@@ -244,10 +209,8 @@ describe('ReinspectionHinovaService', () => {
   });
 
   it('registra FALHA sem chamar a Hinova quando nenhuma foto pôde ser lida', async () => {
-    prisma.reinspection.findUnique.mockResolvedValue(revistoria([foto(1)]));
+    revistoria([foto(1)]);
     readFile.mockRejectedValue(new Error('ENOENT'));
-    contagem.total = 1;
-    contagem.enviadas = 0;
 
     const resultado = await service.enviarFotos(10, opcoesAprovacao);
 
@@ -258,13 +221,11 @@ describe('ReinspectionHinovaService', () => {
   });
 
   it('casa nomes repetidos na ordem de envio e marca foto sem retorno', async () => {
-    prisma.reinspection.findUnique.mockResolvedValue(
-      revistoria([
-        foto(1, { nomeArquivo: 'x.jpg' }),
-        foto(2, { nomeArquivo: 'x.jpg' }),
-        foto(3, { nomeArquivo: 'y.jpg' }),
-      ]),
-    );
+    revistoria([
+      foto(1, { nomeArquivo: 'x.jpg' }),
+      foto(2, { nomeArquivo: 'x.jpg' }),
+      foto(3, { nomeArquivo: 'y.jpg' }),
+    ]);
     sgaAuth.executeRequestWithAuth.mockResolvedValue({
       status: 200,
       data: [
@@ -272,8 +233,6 @@ describe('ReinspectionHinovaService', () => {
         { nome_arquivo: 'x.jpg', situacao: 'Erro: duplicada' },
       ],
     });
-    contagem.total = 3;
-    contagem.enviadas = 1;
 
     const resultado = await service.enviarFotos(10, opcoesAprovacao);
 
@@ -285,7 +244,7 @@ describe('ReinspectionHinovaService', () => {
   });
 
   it('reenvio manual com photoIds de outra revistoria é rejeitado', async () => {
-    prisma.reinspection.findUnique.mockResolvedValue(revistoria([foto(1)]));
+    revistoria([foto(1)]);
     await expect(
       service.enviarFotos(10, {
         origem: ReinspectionHinovaEnvioOrigem.REENVIO_MANUAL,
@@ -295,15 +254,11 @@ describe('ReinspectionHinovaService', () => {
   });
 
   it('reenvio manual com forcar inclui fotos já enviadas e grava o usuário do painel', async () => {
-    prisma.reinspection.findUnique.mockResolvedValue(
-      revistoria([foto(1, { sentToHinova: true })], 'FINALIZADA'),
-    );
+    revistoria([foto(1, { sentToHinova: true })], 'FINALIZADA');
     sgaAuth.executeRequestWithAuth.mockResolvedValue({
       status: 200,
       data: [{ nome_arquivo: 'revistoria_ordem1_1.jpg', situacao: 'Inserido' }],
     });
-    contagem.total = 1;
-    contagem.enviadas = 1;
 
     await service.enviarFotos(10, {
       origem: ReinspectionHinovaEnvioOrigem.REENVIO_MANUAL,

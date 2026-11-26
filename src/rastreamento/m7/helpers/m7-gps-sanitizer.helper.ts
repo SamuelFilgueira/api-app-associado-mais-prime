@@ -1,5 +1,6 @@
 import { M7PontoHistoricoRaw } from '../interfaces/m7-historico.interface';
 import { HistoricoM7RotasPontoDto } from '../dto/historico-m7-response.dto';
+import { percorrerEmBlocos } from 'src/rastreamento/helpers/ceder-event-loop';
 
 /** Distância mínima entre pontos consecutivos (metros) */
 const MIN_DISTANCIA_METROS = 15;
@@ -83,62 +84,98 @@ export function amostrarPontosPorIntervalo(
   return resultado;
 }
 
+/**
+ * Sanitizador ponto a ponto. Guarda o último ponto aceito para descartar
+ * jitter (menos de 15 m em menos de 5 s); coordenada inválida ou ponto sem
+ * data também saem. `aceitar` devolve o ponto normalizado ou `null`.
+ */
+export function criarSanitizadorDePontosGps(): {
+  aceitar(ponto: M7PontoHistoricoRaw): HistoricoM7RotasPontoDto | null;
+} {
+  let ultimo: HistoricoM7RotasPontoDto | null = null;
+
+  return {
+    aceitar(ponto) {
+      const lat = Number(ponto.latitude);
+      const lng = Number(ponto.longitude);
+
+      if (
+        !Number.isFinite(lat) ||
+        !Number.isFinite(lng) ||
+        lat === 0 ||
+        lng === 0 ||
+        Math.abs(lat) > 90 ||
+        Math.abs(lng) > 180
+      ) {
+        return null;
+      }
+
+      if (!ponto.data_gps) return null;
+
+      const dataGps = String(ponto.data_gps);
+      const velocidade = Number(ponto.velocidade ?? 0);
+
+      if (ultimo) {
+        const distancia = calcularDistanciaMetros(
+          ultimo.latitude,
+          ultimo.longitude,
+          lat,
+          lng,
+        );
+        const intervaloMs =
+          new Date(dataGps).getTime() - new Date(ultimo.dataGps).getTime();
+        const intervaloSeg = intervaloMs / 1000;
+
+        if (
+          distancia < MIN_DISTANCIA_METROS &&
+          intervaloSeg < MIN_INTERVALO_SEGUNDOS
+        ) {
+          return null;
+        }
+      }
+
+      const normalizado: HistoricoM7RotasPontoDto = {
+        latitude: lat,
+        longitude: lng,
+        velocidade: Number.isFinite(velocidade) ? velocidade : 0,
+        ignicao: parseIgnicao(ponto.ignicao),
+        dataGps,
+      };
+
+      ultimo = normalizado;
+      return normalizado;
+    },
+  };
+}
+
 export function sanitizarPontosGps(
   pontos: M7PontoHistoricoRaw[],
 ): HistoricoM7RotasPontoDto[] {
+  const sanitizador = criarSanitizadorDePontosGps();
   const resultado: HistoricoM7RotasPontoDto[] = [];
-  let ultimo: HistoricoM7RotasPontoDto | null = null;
 
   for (const ponto of pontos) {
-    const lat = Number(ponto.latitude);
-    const lng = Number(ponto.longitude);
-
-    if (
-      !Number.isFinite(lat) ||
-      !Number.isFinite(lng) ||
-      lat === 0 ||
-      lng === 0 ||
-      Math.abs(lat) > 90 ||
-      Math.abs(lng) > 180
-    ) {
-      continue;
-    }
-
-    if (!ponto.data_gps) continue;
-
-    const dataGps = String(ponto.data_gps);
-    const velocidade = Number(ponto.velocidade ?? 0);
-
-    if (ultimo) {
-      const distancia = calcularDistanciaMetros(
-        ultimo.latitude,
-        ultimo.longitude,
-        lat,
-        lng,
-      );
-      const intervaloMs =
-        new Date(dataGps).getTime() - new Date(ultimo.dataGps).getTime();
-      const intervaloSeg = intervaloMs / 1000;
-
-      if (
-        distancia < MIN_DISTANCIA_METROS &&
-        intervaloSeg < MIN_INTERVALO_SEGUNDOS
-      ) {
-        continue;
-      }
-    }
-
-    const normalizado: HistoricoM7RotasPontoDto = {
-      latitude: lat,
-      longitude: lng,
-      velocidade: Number.isFinite(velocidade) ? velocidade : 0,
-      ignicao: parseIgnicao(ponto.ignicao),
-      dataGps,
-    };
-
-    resultado.push(normalizado);
-    ultimo = normalizado;
+    const aceito = sanitizador.aceitar(ponto);
+    if (aceito) resultado.push(aceito);
   }
+
+  return resultado;
+}
+
+/**
+ * Mesmo resultado de `sanitizarPontosGps`, cedendo o event loop a cada bloco
+ * de pontos (31 dias de histórico são dezenas de milhares de pontos).
+ */
+export async function sanitizarPontosGpsEmBlocos(
+  pontos: M7PontoHistoricoRaw[],
+): Promise<HistoricoM7RotasPontoDto[]> {
+  const sanitizador = criarSanitizadorDePontosGps();
+  const resultado: HistoricoM7RotasPontoDto[] = [];
+
+  await percorrerEmBlocos(pontos, (ponto) => {
+    const aceito = sanitizador.aceitar(ponto);
+    if (aceito) resultado.push(aceito);
+  });
 
   return resultado;
 }

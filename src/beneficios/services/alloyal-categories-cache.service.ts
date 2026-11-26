@@ -1,74 +1,80 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
-import type Redis from 'ioredis';
-import { ALLOYAL_REDIS } from 'src/beneficios/providers/alloyal-redis.provider';
-import { baseTag } from 'src/shared/log.util';
+import { Injectable } from '@nestjs/common';
+import {
+  AlloyalCategoriaResumo,
+  CHAVE_CATEGORIAS_DO_PAINEL,
+  PRAZO_CATEGORIAS_DO_PAINEL_SEG,
+  resumirCategorias,
+} from 'src/beneficios/domain/alloyal-catalogo-cache';
+import { CacheService } from 'src/infra/cache/cache.service';
 
-export interface AlloyalCategoriaResumo {
-  id: number;
-  title: string;
-}
+export type { AlloyalCategoriaResumo };
+
+const RECURSO = 'alloyal_categorias_painel';
+
+/** Quantas vezes regravar se a gravação cair numa leitura em andamento. */
+const TENTATIVAS_DE_GRAVACAO = 3;
 
 /**
- * Cache das categorias da Alloyal por base.
+ * Categorias da Alloyal por base, para o painel (formulário de parceiros
+ * diretos, §5.0).
  *
- * A API da Alloyal só devolve categorias com sessão de um usuário final
- * (uid/client/access-token), que o painel administrativo não possui. Por
- * isso o cache é alimentado pelo próprio app: toda vez que um associado
- * carrega `GET /alloyal/categories`, a lista da base do JWT é guardada aqui
- * e fica disponível para o formulário de parceiros diretos (§5.0).
+ * A Alloyal só devolve categorias com a sessão de um usuário final
+ * (uid/client/access-token), que o painel não tem. Por isso quem alimenta
+ * este resumo é o app: sempre que `GET /alloyal/categories` consulta a
+ * Alloyal de fato (cache do catálogo vencido), o `AlloyalCatalogoService`
+ * guarda aqui o id e o título de cada categoria da base, por 7 dias.
  *
- * Falha de Redis nunca propaga: o app segue normalmente e o painel recebe
- * lista vazia para a base.
+ * Chave própria (`<base>:alloyal:catalogo:categorias_painel`), separada da
+ * que o app lê: uma leitura do painel nunca responde no lugar da Alloyal
+ * para o app.
+ *
+ * Redis fora nunca propaga (é o `CacheService` que absorve): o app segue
+ * normalmente e o painel recebe lista vazia para a base.
  */
 @Injectable()
 export class AlloyalCategoriesCacheService {
-  private readonly logger = new Logger(AlloyalCategoriesCacheService.name);
-  private static readonly TTL_SEGUNDOS = 7 * 24 * 60 * 60;
+  constructor(private readonly cache: CacheService) {}
 
-  constructor(@Inject(ALLOYAL_REDIS) private readonly redis: Redis) {}
-
-  private chave(baseOrigin: string): string {
-    return `alloyal:categorias:${baseOrigin}`;
-  }
-
+  /** Guarda o resumo das categorias recém-lidas da Alloyal. */
   async armazenar(
     baseOrigin: string | undefined,
     categorias: unknown,
   ): Promise<void> {
-    if (!baseOrigin || !Array.isArray(categorias)) return;
-
-    const resumo: AlloyalCategoriaResumo[] = categorias
-      .filter((c) => c && typeof c === 'object' && Number.isInteger(c.id))
-      .map((c) => ({ id: Number(c.id), title: String(c.title ?? '') }));
-
+    if (!baseOrigin) return;
+    const resumo = resumirCategorias(categorias);
     if (resumo.length === 0) return;
 
-    try {
-      await this.redis.set(
-        this.chave(baseOrigin),
-        JSON.stringify(resumo),
-        'EX',
-        AlloyalCategoriesCacheService.TTL_SEGUNDOS,
-      );
-    } catch (error) {
-      this.logger.warn(
-        `${baseTag(baseOrigin)} falha ao gravar cache de categorias Alloyal: ${error.message}`,
-      );
+    for (let i = 0; i < TENTATIVAS_DE_GRAVACAO; i++) {
+      // O read-through só grava quando não há valor: apaga e "lê" tendo o
+      // resumo novo como origem.
+      await this.cache.invalidar(baseOrigin, CHAVE_CATEGORIAS_DO_PAINEL);
+      const gravado = await this.cache.obter<AlloyalCategoriaResumo[]>({
+        base: baseOrigin,
+        chave: CHAVE_CATEGORIAS_DO_PAINEL,
+        recurso: RECURSO,
+        ttlSeg: PRAZO_CATEGORIAS_DO_PAINEL_SEG,
+        carregar: () => Promise.resolve(resumo),
+      });
+      // Leituras simultâneas da mesma chave compartilham UMA ida à origem:
+      // se havia uma leitura do painel em andamento, o que voltou foi a
+      // lista vazia dela, e nada foi gravado. Tenta de novo.
+      if (gravado.valor === resumo || gravado.fonte !== 'origem') return;
     }
   }
 
+  /** Categorias guardadas da base; `[]` se o app ainda não as carregou. */
   async obter(baseOrigin: string): Promise<AlloyalCategoriaResumo[]> {
-    try {
-      const raw = await this.redis.get(this.chave(baseOrigin));
-      if (!raw) return [];
-      const parsed: unknown = JSON.parse(raw);
-      return Array.isArray(parsed) ? (parsed as AlloyalCategoriaResumo[]) : [];
-    } catch (error) {
-      this.logger.warn(
-        `${baseTag(baseOrigin)} falha ao ler cache de categorias Alloyal: ${error.message}`,
-      );
-      return [];
-    }
+    const { valor } = await this.cache.obter<AlloyalCategoriaResumo[]>({
+      base: baseOrigin,
+      chave: CHAVE_CATEGORIAS_DO_PAINEL,
+      recurso: RECURSO,
+      ttlSeg: PRAZO_CATEGORIAS_DO_PAINEL_SEG,
+      // Não há origem para o painel: sem valor guardado, lista vazia —
+      // que não é gravada.
+      carregar: () => Promise.resolve([]),
+      guardarSe: () => false,
+    });
+    return Array.isArray(valor) ? valor : [];
   }
 
   /** Uma entrada por base; base sem cache devolve `[]`. */

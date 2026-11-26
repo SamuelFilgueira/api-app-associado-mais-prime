@@ -3,10 +3,22 @@
  * auth.module, jwt.strategy, admin-panel.module, analytics.module e
  * analytics.controller.
  *
- * O fallback 'minha_chave_secreta' é preservado de propósito (removê-lo é a
- * pendência B7 — exige coordenar deploy nas duas bases). JWT_SECRET é REQUIRED
- * no env.validator, então o fallback é inalcançável em produção.
+ * Em produção NÃO existe fallback: sem `JWT_SECRET` o processo falha já no
+ * carregamento dos módulos, em vez de subir assinando tokens com um segredo
+ * que está no código-fonte. `JWT_SECRET` também é REQUIRED no env.validator.
+ *
+ * Fora de produção (desenvolvimento e testes) o valor de desenvolvimento
+ * continua valendo, para os módulos poderem ser importados sem `.env`.
  */
-export function jwtSecret(): string {
-  return process.env.JWT_SECRET || 'minha_chave_secreta';
+const SEGREDO_DE_DESENVOLVIMENTO = 'minha_chave_secreta';
+
+export function jwtSecret(env: NodeJS.ProcessEnv = process.env): string {
+  if (env.JWT_SECRET) return env.JWT_SECRET;
+
+  if (env.NODE_ENV === 'production') {
+    throw new Error(
+      'JWT_SECRET não definido: em produção a API não sobe com o segredo de desenvolvimento.',
+    );
+  }
+  return SEGREDO_DE_DESENVOLVIMENTO;
 }

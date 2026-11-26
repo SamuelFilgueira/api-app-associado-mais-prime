@@ -1,8 +1,16 @@
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import {
+  ExecutionContext,
+  INestApplication,
+  ValidationPipe,
+} from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import request from 'supertest';
 import { AlloyalApiController } from 'src/beneficios/controllers/alloyal-api.controller';
-import { AlloyalApiService } from 'src/beneficios/services/alloyal-api.service';
+import { AlloyalCashbackService } from 'src/beneficios/services/alloyal-cashback.service';
+import { AlloyalCatalogoService } from 'src/beneficios/services/alloyal-catalogo.service';
+import { AlloyalCuponsService } from 'src/beneficios/services/alloyal-cupons.service';
+import { AlloyalSessaoService } from 'src/beneficios/services/alloyal-sessao.service';
+import { AlloyalUsuariosService } from 'src/beneficios/services/alloyal-usuarios.service';
 import { JwtAuthGuard } from 'src/infra/guards/jwt-auth.guard';
 
 /**
@@ -13,6 +21,8 @@ import { JwtAuthGuard } from 'src/infra/guards/jwt-auth.guard';
 describe('AlloyalApiController (contrato)', () => {
   let app: INestApplication;
 
+  // O god service virou um service por assunto: `login` é do de sessão e
+  // `getCategories` é `categorias` do de catálogo (mesmos argumentos).
   const alloyalApiServiceMock = {
     login: jest.fn(),
     getCategories: jest.fn(),
@@ -24,15 +34,36 @@ describe('AlloyalApiController (contrato)', () => {
     'access-token': 'token-1',
   };
 
+  /**
+   * Usuário que o `JwtAuthGuard` (sobrescrito) coloca em `request.user`: a
+   * base chega às rotas pelo `@BaseOrigin`. `{}` simula token sem base.
+   */
+  let usuarioDoToken: { baseOrigin?: string } = { baseOrigin: 'MAIS_PRIME' };
+
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
       controllers: [AlloyalApiController],
       providers: [
-        { provide: AlloyalApiService, useValue: alloyalApiServiceMock },
+        {
+          provide: AlloyalSessaoService,
+          useValue: { login: alloyalApiServiceMock.login },
+        },
+        {
+          provide: AlloyalCatalogoService,
+          useValue: { categorias: alloyalApiServiceMock.getCategories },
+        },
+        { provide: AlloyalCashbackService, useValue: {} },
+        { provide: AlloyalUsuariosService, useValue: {} },
+        { provide: AlloyalCuponsService, useValue: {} },
       ],
     })
       .overrideGuard(JwtAuthGuard)
-      .useValue({ canActivate: () => true })
+      .useValue({
+        canActivate: (context: ExecutionContext) => {
+          context.switchToHttp().getRequest().user = usuarioDoToken;
+          return true;
+        },
+      })
       .compile();
 
     app = moduleFixture.createNestApplication();
@@ -48,6 +79,7 @@ describe('AlloyalApiController (contrato)', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    usuarioDoToken = { baseOrigin: 'MAIS_PRIME' };
   });
 
   it('POST /alloyal/login devolve uid/client/accessToken da sessão', async () => {
@@ -67,6 +99,11 @@ describe('AlloyalApiController (contrato)', () => {
       client: 'client-1',
       accessToken: 'token-1',
     });
+    expect(alloyalApiServiceMock.login).toHaveBeenCalledWith(
+      'MAIS_PRIME',
+      '12345678900',
+      'senha',
+    );
   });
 
   it('POST /alloyal/login com falha upstream responde 401 com mensagem fixa', async () => {
@@ -93,11 +130,14 @@ describe('AlloyalApiController (contrato)', () => {
       .expect(200);
 
     expect(response.body).toEqual(categorias);
-    expect(alloyalApiServiceMock.getCategories).toHaveBeenCalledWith({
-      uid: 'uid-1',
-      client: 'client-1',
-      accessToken: 'token-1',
-    });
+    expect(alloyalApiServiceMock.getCategories).toHaveBeenCalledWith(
+      'MAIS_PRIME',
+      {
+        uid: 'uid-1',
+        client: 'client-1',
+        accessToken: 'token-1',
+      },
+    );
   });
 
   it('GET /alloyal/categories sem headers de sessão responde 500 (comportamento vigente — pendência B4)', async () => {
@@ -108,6 +148,38 @@ describe('AlloyalApiController (contrato)', () => {
     expect(response.body).toMatchObject({
       statusCode: 500,
       message: 'Erro ao buscar categorias',
+    });
+  });
+
+  describe('token sem base (ex.: token do painel)', () => {
+    beforeEach(() => {
+      usuarioDoToken = {};
+    });
+
+    it('GET /alloyal/categories segue respondendo 500 com a mensagem fixa e não chama a Alloyal', async () => {
+      const response = await request(app.getHttpServer())
+        .get('/alloyal/categories')
+        .set(sessionHeaders)
+        .expect(500);
+
+      expect(response.body).toMatchObject({
+        statusCode: 500,
+        message: 'Erro ao buscar categorias',
+      });
+      expect(alloyalApiServiceMock.getCategories).not.toHaveBeenCalled();
+    });
+
+    it('POST /alloyal/login segue respondendo 401 com a mensagem fixa e não chama a Alloyal', async () => {
+      const response = await request(app.getHttpServer())
+        .post('/alloyal/login')
+        .send({ cpf: '12345678900', password: 'senha' })
+        .expect(401);
+
+      expect(response.body).toMatchObject({
+        statusCode: 401,
+        message: 'Erro ao fazer login na API Alloyal',
+      });
+      expect(alloyalApiServiceMock.login).not.toHaveBeenCalled();
     });
   });
 });

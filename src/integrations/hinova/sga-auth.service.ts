@@ -1,11 +1,22 @@
-import { SGA_BASE_URL } from './hinova.constants';
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  SGA_BASE_URL,
+  SGA_SESSAO_TTL_SEG,
+  SGA_TIMEOUT_LOGIN_MS,
+  SGA_TIMEOUT_PADRAO_MS,
+} from './hinova.constants';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import axios, { AxiosRequestConfig, AxiosResponse } from 'axios';
 import {
   BaseOrigin,
   TokenResolverService,
 } from 'src/shared/token-resolver.service';
 import { baseTag } from 'src/shared/log.util';
+import { hinovaOrcamentoPorMinuto } from 'src/config/integracoes.config';
+import { Disjuntor } from 'src/integrations/core/disjuntor';
+import { VendorSessionStore } from 'src/integrations/core/vendor-session.store';
+import { medirVendor, metricas } from 'src/infra/observability/metricas';
+
+const VENDOR = 'hinova';
 
 interface SgaAuthResponse {
   mensagem: string;
@@ -98,11 +109,19 @@ export interface SessaoSga {
 @Injectable()
 export class SgaAuthService {
   private readonly logger = new Logger(SgaAuthService.name);
-  /** `token_usuario` por sessão (chave `base:indice`). */
+  /**
+   * `token_usuario` por sessão (chave `base:indice`) — cópia local da sessão
+   * guardada no Redis (`VendorSessionStore`). O Redis é a fonte da verdade
+   * entre os processos; esta cópia só evita uma ida ao Redis por requisição.
+   */
   private readonly sessaoCache = new Map<string, string>();
-  /** Logins em voo por sessão (dedupe). */
+  /** Logins em voo por sessão (dedupe dentro do processo). */
   private readonly authInFlight = new Map<string, Promise<string>>();
-  /** Instante até o qual o token de base está fora da rotação (chave `base:indice`). */
+  /**
+   * Instante até o qual o token de base está fora da rotação (chave
+   * `base:indice`). Espelho local das marcas do Redis, sincronizado a cada
+   * requisição para que um bloqueio visto por um processo valha para todos.
+   */
   private readonly bloqueadoAte = new Map<string, number>();
   /** Último índice usado por base (rotação round-robin). */
   private readonly cursor = new Map<BaseOrigin, number>();
@@ -119,8 +138,22 @@ export class SgaAuthService {
     string,
     Promise<AxiosResponse<unknown>>
   >();
+  /** Chamadas por token de base no minuto corrente (orçamento). */
+  private readonly usoPorMinuto = new Map<
+    string,
+    { minuto: number; total: number }
+  >();
+  private readonly disjuntor = new Disjuntor(VENDOR);
+  private readonly store: VendorSessionStore;
 
-  constructor(private readonly tokenResolver: TokenResolverService) {}
+  constructor(
+    private readonly tokenResolver: TokenResolverService,
+    // Opcional para os specs e scripts que instanciam o service com `new`:
+    // sem o store do Nest, a sessão fica só na memória do processo.
+    @Optional() store?: VendorSessionStore,
+  ) {
+    this.store = store ?? VendorSessionStore.emMemoria();
+  }
 
   /**
    * `token_usuario` de uma sessão livre da base (compatibilidade). Prefira
@@ -133,7 +166,10 @@ export class SgaAuthService {
   /** Invalida o `token_usuario` de todas as sessões da base. */
   invalidateUserToken(baseOrigin: BaseOrigin): void {
     for (const chave of [...this.sessaoCache.keys()]) {
-      if (chave.startsWith(`${baseOrigin}:`)) this.sessaoCache.delete(chave);
+      if (chave.startsWith(`${baseOrigin}:`)) {
+        this.sessaoCache.delete(chave);
+        void this.store.apagar(VENDOR, `usuario:${chave}`);
+      }
     }
   }
 
@@ -201,8 +237,27 @@ export class SgaAuthService {
     this.logger.warn(
       `${baseTag(baseOrigin)} token_usuario da sessão #${sessao.indice + 1} inválido. Reautenticando automaticamente.`,
     );
-    this.sessaoCache.delete(this.chave(baseOrigin, sessao.indice));
-    const renovada = await this.autenticarSessao(baseOrigin, sessao.indice);
+    // Só invalida se a sessão guardada ainda é a que recebeu o 401. Um 401
+    // tardio (de requisição feita com o token antigo) não pode apagar o token
+    // que outra requisição — ou outro processo — acabou de obter: isso gerava
+    // um login por 401 e, entre réplicas, uma derrubava a sessão da outra.
+    const chave = this.chave(baseOrigin, sessao.indice);
+    const recusado = sessao.tokenUsuario;
+    if (this.sessaoCache.get(chave) === recusado) {
+      this.sessaoCache.delete(chave);
+    }
+    await this.store.apagar(VENDOR, `usuario:${chave}`, recusado);
+
+    const emCache =
+      this.sessaoCache.get(chave) ??
+      (await this.store.ler(VENDOR, `usuario:${chave}`));
+    let renovada: string;
+    if (emCache && emCache !== recusado) {
+      this.sessaoCache.set(chave, emCache);
+      renovada = emCache;
+    } else {
+      renovada = await this.autenticarSessao(baseOrigin, sessao.indice);
+    }
     response = await makeRequest(renovada);
     return response;
   }
@@ -215,18 +270,32 @@ export class SgaAuthService {
   ): Promise<AxiosResponse<T>> {
     const { failoverTokenBase, compartilharEmVoo, ...axiosConfig } = config;
 
+    const operacao = operacaoDaUrl(axiosConfig.url);
     const executar = () =>
       this.executeWithAuth<T>(
         baseOrigin,
         (tokenUsuario) =>
-          axios.request<T>({
-            ...axiosConfig,
-            headers: {
-              ...(axiosConfig.headers ?? {}),
-              Authorization: `Bearer ${tokenUsuario}`,
-            },
-            validateStatus: axiosConfig.validateStatus ?? (() => true),
-          }),
+          // O circuito só conta falha de transporte: timeout, rede e 5xx. O
+          // 403 de bloqueio e os 4xx de negócio mostram a Hinova de pé.
+          this.disjuntor.executar(
+            baseOrigin,
+            () =>
+              medirVendor(
+                { vendor: VENDOR, base: baseOrigin, operacao },
+                () =>
+                  axios.request<T>({
+                    ...axiosConfig,
+                    timeout: axiosConfig.timeout ?? SGA_TIMEOUT_PADRAO_MS,
+                    headers: {
+                      ...(axiosConfig.headers ?? {}),
+                      Authorization: `Bearer ${tokenUsuario}`,
+                    },
+                    validateStatus: axiosConfig.validateStatus ?? (() => true),
+                  }),
+                classificarErroDeRede,
+              ),
+            (resposta) => resposta.status >= 500,
+          ),
         { failoverTokenBase },
       );
 
@@ -260,11 +329,74 @@ export class SgaAuthService {
   }
 
   private marcarBloqueado(baseOrigin: BaseOrigin, indice: number): void {
-    this.bloqueadoAte.set(
-      this.chave(baseOrigin, indice),
-      Date.now() + SGA_TOKEN_BLOQUEIO_MS,
+    const ate = Date.now() + SGA_TOKEN_BLOQUEIO_MS;
+    this.bloqueadoAte.set(this.chave(baseOrigin, indice), ate);
+    metricas.hinovaTokenBloqueado.inc({ base: baseOrigin });
+    // Avisa os outros processos: sem isto cada réplica sondaria o token
+    // bloqueado por conta própria, multiplicando as chamadas recusadas.
+    void this.store.gravar(
+      VENDOR,
+      `bloqueio:${this.chave(baseOrigin, indice)}`,
+      String(ate),
+      Math.ceil(SGA_TOKEN_BLOQUEIO_MS / 1000),
     );
     // A sessão desse token continua válida; só o token de base está bloqueado.
+  }
+
+  /**
+   * Traz para a memória as marcas de bloqueio e a pausa de login que outros
+   * processos gravaram. Uma ida ao Redis (`MGET`) por requisição.
+   */
+  private async sincronizarEstado(baseOrigin: BaseOrigin): Promise<void> {
+    const total = this.tokenResolver.resolveSgaBaseTokens(baseOrigin).length;
+    const chaves = [
+      `cooldown:${baseOrigin}`,
+      ...Array.from(
+        { length: total },
+        (_, i) => `bloqueio:${this.chave(baseOrigin, i)}`,
+      ),
+    ];
+    const [cooldown, ...bloqueios] = await this.store.lerVarios(VENDOR, chaves);
+    const agora = Date.now();
+
+    bloqueios.forEach((valor, indice) => {
+      const ate = Number(valor);
+      const chave = this.chave(baseOrigin, indice);
+      if (ate > agora && ate > (this.bloqueadoAte.get(chave) ?? 0)) {
+        this.bloqueadoAte.set(chave, ate);
+      }
+    });
+
+    if (cooldown) {
+      const separador = cooldown.indexOf('|');
+      const ate = Number(cooldown.slice(0, separador));
+      const atual = this.authCooldown.get(baseOrigin);
+      if (ate > agora && ate > (atual?.ate ?? 0)) {
+        this.authCooldown.set(baseOrigin, {
+          ate,
+          motivo: cooldown.slice(separador + 1),
+        });
+      }
+    }
+  }
+
+  /**
+   * Conta a chamada no orçamento do token de base e diz se ele ainda tem
+   * folga neste minuto. Com `HINOVA_ORCAMENTO_POR_MINUTO` em 0, só conta.
+   */
+  private dentroDoOrcamento(baseOrigin: BaseOrigin, indice: number): boolean {
+    const limite = hinovaOrcamentoPorMinuto();
+    if (limite === 0) return true;
+
+    const minuto = Math.floor(Date.now() / 60_000);
+    const chave = this.chave(baseOrigin, indice);
+    const uso = this.usoPorMinuto.get(chave);
+    if (!uso || uso.minuto !== minuto) {
+      this.usoPorMinuto.set(chave, { minuto, total: 1 });
+      return true;
+    }
+    uso.total += 1;
+    return uso.total <= limite;
   }
 
   /**
@@ -274,14 +406,25 @@ export class SgaAuthService {
   private proximoIndiceLivre(baseOrigin: BaseOrigin): number | null {
     const total = this.tokenResolver.resolveSgaBaseTokens(baseOrigin).length;
     const inicio = ((this.cursor.get(baseOrigin) ?? -1) + 1) % total;
+    let livreForaDoOrcamento: number | null = null;
+
     for (let i = 0; i < total; i++) {
       const indice = (inicio + i) % total;
-      if (!this.estaBloqueado(baseOrigin, indice)) {
+      if (this.estaBloqueado(baseOrigin, indice)) continue;
+      if (this.dentroDoOrcamento(baseOrigin, indice)) {
         this.cursor.set(baseOrigin, indice);
         return indice;
       }
+      livreForaDoOrcamento ??= indice;
     }
-    return null;
+
+    // Todos os tokens livres estouraram o orçamento do minuto: segue com o
+    // primeiro deles. O orçamento distribui a carga; recusar a requisição do
+    // associado seria pior do que o risco que ele tenta evitar.
+    if (livreForaDoOrcamento !== null) {
+      this.cursor.set(baseOrigin, livreForaDoOrcamento);
+    }
+    return livreForaDoOrcamento;
   }
 
   /**
@@ -306,13 +449,20 @@ export class SgaAuthService {
     baseOrigin: BaseOrigin,
   ): Promise<SessaoSga | null> {
     const total = this.tokenResolver.resolveSgaBaseTokens(baseOrigin).length;
+    await this.sincronizarEstado(baseOrigin);
 
     for (let tentativa = 0; tentativa < total; tentativa++) {
       const indice = this.proximoIndiceLivre(baseOrigin);
       if (indice === null) return null;
 
-      const cacheada = this.sessaoCache.get(this.chave(baseOrigin, indice));
-      if (cacheada) return { indice, tokenUsuario: cacheada };
+      const chave = this.chave(baseOrigin, indice);
+      const cacheada =
+        this.sessaoCache.get(chave) ??
+        (await this.store.ler(VENDOR, `usuario:${chave}`));
+      if (cacheada) {
+        this.sessaoCache.set(chave, cacheada);
+        return { indice, tokenUsuario: cacheada };
+      }
 
       try {
         const tokenUsuario = await this.autenticarSessao(baseOrigin, indice);
@@ -352,7 +502,27 @@ export class SgaAuthService {
       );
     }
 
-    const promessa = this.authenticate(baseOrigin, indice)
+    // Trava entre processos: um autentica, os outros esperam e reaproveitam
+    // a sessão gravada — em vez de cada réplica fazer o próprio login.
+    const promessa = this.store
+      .comTrava(
+        VENDOR,
+        `login:${chave}`,
+        async () => {
+          const jaGravada = await this.store.ler(VENDOR, `usuario:${chave}`);
+          if (jaGravada) return jaGravada;
+
+          const token = await this.authenticate(baseOrigin, indice);
+          await this.store.gravar(
+            VENDOR,
+            `usuario:${chave}`,
+            token,
+            SGA_SESSAO_TTL_SEG,
+          );
+          return token;
+        },
+        { ttlMs: SGA_TIMEOUT_LOGIN_MS + 5_000, esperaMs: SGA_TIMEOUT_LOGIN_MS },
+      )
       .then((token) => {
         this.sessaoCache.set(chave, token);
         this.authCooldown.delete(baseOrigin);
@@ -362,6 +532,7 @@ export class SgaAuthService {
         if (err instanceof FalhaAutenticacaoSga && err.bloqueioTotal) {
           this.marcarBloqueado(baseOrigin, indice);
         } else {
+          metricas.sgaAuthFalhas.inc({ base: baseOrigin });
           this.registrarCooldown(baseOrigin);
         }
         throw err;
@@ -377,10 +548,14 @@ export class SgaAuthService {
   /** Pausa de login da base após falha que não seja bloqueio por extração. */
   private registrarCooldown(baseOrigin: BaseOrigin): void {
     const motivo = 'último login no SGA falhou';
-    this.authCooldown.set(baseOrigin, {
-      ate: Date.now() + SGA_AUTH_COOLDOWN_FALHA_MS,
-      motivo,
-    });
+    const ate = Date.now() + SGA_AUTH_COOLDOWN_FALHA_MS;
+    this.authCooldown.set(baseOrigin, { ate, motivo });
+    void this.store.gravar(
+      VENDOR,
+      `cooldown:${baseOrigin}`,
+      `${ate}|${motivo}`,
+      Math.ceil(SGA_AUTH_COOLDOWN_FALHA_MS / 1000),
+    );
     this.logger.warn(
       `${baseTag(baseOrigin)} login no SGA em pausa por ${SGA_AUTH_COOLDOWN_FALHA_MS / 1000}s (${motivo}). Requisições nesse intervalo falham sem chamar a Hinova.`,
     );
@@ -403,6 +578,7 @@ export class SgaAuthService {
           Authorization: `Bearer ${tokensBase[indice]}`,
           'Content-Type': 'application/json',
         },
+        timeout: SGA_TIMEOUT_LOGIN_MS,
         validateStatus: () => true,
       },
     );
@@ -426,4 +602,31 @@ export class SgaAuthService {
       bloqueado,
     );
   }
+}
+
+/**
+ * Rótulo de métrica para a chamada: o caminho do SGA com os valores trocados
+ * por `:id` (`/associado/buscar/:id`). Nunca a URL crua — ela carrega CPF e
+ * código de veículo.
+ */
+export function operacaoDaUrl(url: string | undefined): string {
+  if (!url) return 'desconhecida';
+  const caminho = url
+    .replace(SGA_BASE_URL, '')
+    .replace(/^https?:\/\/[^/]+/, '')
+    .split('?')[0];
+  return (
+    caminho
+      .split('/')
+      .map((parte) => (/\d/.test(parte) ? ':id' : parte))
+      .join('/')
+      .slice(0, 80) || '/'
+  );
+}
+
+function classificarErroDeRede(erro: unknown): 'erro' | 'timeout' {
+  const codigo = (erro as { code?: unknown } | null)?.code;
+  return codigo === 'ECONNABORTED' || codigo === 'ETIMEDOUT'
+    ? 'timeout'
+    : 'erro';
 }

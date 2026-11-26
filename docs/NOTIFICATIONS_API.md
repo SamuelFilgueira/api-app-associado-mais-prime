@@ -199,7 +199,7 @@ Authorization: Bearer eyJhbGc...
 
 **POST** `/notifications/test`
 
-Envia uma notificação de teste (não requer autenticação).
+Envia uma notificação de teste. Exige JWT com `role` ADMIN (`JwtAuthGuard` + `AdminRoleGuard`), assim como `POST /notifications/queue-test`.
 
 **Request Body:**
 ```json
@@ -390,3 +390,12 @@ curl -X DELETE "http://localhost:3000/notifications/123" \
 curl -X PATCH "http://localhost:3000/notifications/user/1/read-all" \
   -H "Authorization: Bearer seu_token_aqui"
 ```
+
+## Atualização (novembro de 2026)
+
+- **Push unitário** (alertas, avisos): falha de transporte com o Expo faz o job repetir; recusa não. O
+  aviso continua indo para a caixa de entrada do app mesmo quando o push é recusado.
+- **Alerta de ignição e de âncora** é enfileirado (um job por usuário) em vez de enviado dentro do
+  processamento do webhook, e respeita a preferência **por veículo** (`UserVehicle.notificacaoIgnicao`),
+  com a preferência da conta valendo para o vínculo que ainda não tem valor próprio.
+- **Disparos em massa**: ver `docs/NOTIFICACOES_AGENDAMENTO_E_LOG.md`.

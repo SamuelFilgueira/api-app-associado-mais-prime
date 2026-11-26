@@ -1,5 +1,7 @@
 # Deploy Hertz — Passo a Passo
 
+> **Atualização (novembro de 2026).** O comando de deploy continua o mesmo (`docker compose up -d --build api`). Mudou o que ele faz por baixo: o Redis passa a ser publicado só em `127.0.0.1`, a imagem roda como usuário `node` (o compose acerta o dono dos volumes sozinho) e há uma topologia opcional em processos separados (`docker-compose.escala.yml`). Ver `docs/OPERACAO_E_DEPLOY.md`.
+
 > Guia operacional para subir o backend da **Hertz** com **MySQL instalado no host** (não em container).
 >
 > Contexto e decisões: [CLONAGEM_BACKEND_HERTZ.md](CLONAGEM_BACKEND_HERTZ.md)
@@ -161,7 +163,7 @@ Substituir `assets/Logo.png` pela logo da Hertz (usada nos 3 geradores de PDF) o
 
 ```bash
 docker compose up -d --build api
-curl http://localhost:3001/health
+curl http://localhost:3001/health/ready     # 200 = banco e Redis respondendo
 ```
 
 Log esperado:
@@ -194,7 +196,7 @@ Roteiro de validação:
 | # | O quê | Prova |
 |---|---|---|
 | 1 | `GET /health` | Banco conectado |
-| 2 | `POST /api/rastreamento/renovar-token` | Credencial M7 da Hertz. Deve retornar **só a chave `HERTZ`** |
+| 2 | `POST /api/rastreamento/renovar-token` com o header `x-admin-token: <ADMIN_PANEL_TOKEN>` | Credencial M7 da Hertz. Deve retornar **só a chave `HERTZ`**, com `{ "renovado": true, "expires_in": ... }` (o token não é mais devolvido) |
 | 3 | `GET /api/associado/verificar-situacao/<CPF>` | Credencial SGA/Hinova da Hertz |
 | 4 | `POST /api/associado/primeiro-acesso` | Ponta a ponta: cria o primeiro usuário da Hinova |
 | 5 | `POST /api/auth/login` | JWT com `baseOrigin: "HERTZ"` |
@@ -242,15 +244,15 @@ Não há `dotenv` nem `ConfigModule`. Via Docker Compose o `env_file` resolve. F
 
 ### 7.2 Redis exposto na internet
 
-O compose publica `6379:6379` no host, sem senha. Trocar por `127.0.0.1:6379:6379` ou remover o mapeamento.
+Resolvido no compose de novembro de 2026: o Redis é publicado só em `127.0.0.1:6379` (senha opcional, via `REDIS_PASSWORD`). Em um servidor que ainda esteja no compose antigo (`6379:6379` aberto, sem senha), feche a porta no firewall até atualizar.
 
 ### 7.3 Nginx e uploads
 
-Limite de payload da API é 20 MB (fotos de revistoria em base64). Configurar `client_max_body_size 20m;` no proxy, senão uploads falham com 413.
+O limite de payload da API é 1 MB, e 20 MB só nas rotas de foto em base64 (revistoria). No proxy, mantenha `client_max_body_size 25m;` nas rotas de upload e `200m` na publicação de update OTA, senão os envios falham com 413. O `ops/nginx/beneficios-api.conf` versionado traz esses limites por rota e serve de referência.
 
-### 7.4 `renovar-token` sem guard
+### 7.4 `renovar-token` exige `x-admin-token`
 
-`POST /api/rastreamento/renovar-token` não tem nenhum guard e dispara login nas APIs externas de todas as bases. Útil para validação, mas em produção convém o `AdminTokenGuard`.
+Resolvido em novembro de 2026: `POST /api/rastreamento/renovar-token` passou a exigir o header `x-admin-token` (`AdminTokenGuard`) e não devolve mais o token da M7, só `{ renovado, expires_in }` por base. Se a rota ficou exposta sem guard em algum servidor, rotacione as credenciais da M7.
 
 ### 7.5 Nominatim
 

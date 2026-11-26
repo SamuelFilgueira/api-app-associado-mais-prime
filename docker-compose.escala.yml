@@ -1,0 +1,262 @@
+# ══════════════════════════════════════════════════════════════════
+# Benefícios API — topologia de ESCALA em uma VPS (4 vCPU / 16 GB)
+#
+# OPCIONAL. O deploy padrão é o `docker-compose.yml` (um container `api`
+# que faz tudo, `docker compose up -d --build api`). Este arquivo separa a
+# aplicação em processos, para quando a carga pedir:
+#
+#   Nginx (host) ─┬─ 127.0.0.1:3001 ─ api-1 ─┐
+#                 └─ 127.0.0.1:3002 ─ api-2 ─┼─ redis (só na rede interna)
+#                                    worker ─┤
+#                                       pdf ─┘
+#   MySQL/MariaDB roda NO HOST (fora do compose): DATABASE_URL do .env.
+#
+# A MESMA imagem roda os três papéis; quem escolhe é APP_ROLE.
+#
+# Orçamento de partida (tetos):
+#   api ×2   1,0 CPU   1,0 GB   pool Prisma 10 cada
+#   worker   1,0 CPU   1,5 GB   pool Prisma 10
+#   pdf      1,0 CPU   3,0 GB   pool Prisma 2 (a memória é do Chromium)
+#   redis    0,5 CPU   1,5 GB
+#   fora do compose: MySQL no host (5 GB), Nginx e coletor (0,25 CPU / 0,5 GB)
+#
+# Uso (sempre com `-f docker-compose.escala.yml`):
+#   deploy ........... ops/deploy.sh <tag>      (rolling, uma réplica por vez)
+#   migrations ....... docker compose -f docker-compose.escala.yml run --rm migrate
+#   dono dos volumes . docker compose -f docker-compose.escala.yml run --rm volumes-permissoes
+#
+# Diferenças para o arquivo padrão, que exigem preparo (docs/OPERACAO_E_DEPLOY.md):
+#   - REDIS_PASSWORD é obrigatória no .env e o Redis não publica porta;
+#   - a API fica só em loopback (3001 e 3002): o Nginx precisa do upstream
+#     com as duas (ops/nginx/beneficios-api.conf);
+#   - trocar de um arquivo para o outro não é rolling: `docker compose down`
+#     (sem -v) no que estiver de pé e depois subir o outro.
+#
+# O arquivo .env desta pasta é usado duas vezes: como env_file dos containers
+# e para as variáveis ${...} deste arquivo (REDIS_PASSWORD, APP_IMAGE).
+#
+# NÃO defina `name:` aqui nem renomeie os volumes: os dados existentes
+# (uploads, releases OTA, Redis) estão em volumes com o prefixo do projeto
+# atual, e trocar o nome sobe a API com volumes vazios. Os dois arquivos de
+# compose usam os MESMOS volumes de propósito.
+# ══════════════════════════════════════════════════════════════════
+
+# ── Variáveis comuns a todos os papéis ───────────────────────────
+# `environment` vence o env_file: o que está aqui não pode ser desfeito por
+# um .env copiado de outro ambiente.
+x-app-env: &app-env
+  PORT: "3001"
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  # Mesma origem da senha do serviço redis (o .env); explícito para falhar
+  # cedo se faltar, em vez de subir com o Redis recusando a conexão.
+  REDIS_PASSWORD: ${REDIS_PASSWORD:?defina REDIS_PASSWORD no .env}
+  LOG_FORMAT: json
+  # Um proxy confiável à frente (o Nginx do host): req.ip = IP do cliente.
+  TRUST_PROXY: "1"
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
+# ── Base de todo container da aplicação ──────────────────────────
+x-app: &app
+  # Produção usa a imagem do registry (APP_IMAGE, definida pelo deploy).
+  # `build` fica para quem constrói na própria VPS:
+  # `docker compose -f docker-compose.escala.yml build api-1`.
+  image: ${APP_IMAGE:-beneficios-api:local}
+  build:
+    context: .
+    dockerfile: Dockerfile
+  env_file:
+    - .env
+  # PID 1 mínimo: repassa SIGTERM ao Node e recolhe processos órfãos do Chromium.
+  init: true
+  restart: unless-stopped
+  # Tempo para o Nest fechar HTTP, terminar o job em curso e soltar conexões.
+  stop_grace_period: 60s
+  # MySQL no host: use host.docker.internal na DATABASE_URL. No Linux o nome
+  # só existe com este mapeamento. O MySQL precisa escutar no gateway da rede
+  # do Docker (bind-address) e o usuário precisa de permissão a partir dela.
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  logging: *logging
+  depends_on:
+    redis:
+      condition: service_healthy
+  # Pronto = MySQL e Redis respondem (503 na falha). É o que o ops/deploy.sh
+  # espera antes de passar para a próxima réplica. A sonda de processo vivo
+  # (/health/live) é a do Dockerfile.
+  healthcheck:
+    test:
+      - CMD
+      - node
+      - -e
+      - "fetch('http://127.0.0.1:'+(process.env.PORT||3001)+'/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+    interval: 10s
+    timeout: 5s
+    retries: 3
+    start_period: 60s
+  volumes:
+    - uploads-data:/app/uploads
+
+# ── Réplica HTTP ─────────────────────────────────────────────────
+x-api: &api
+  <<: *app
+  environment:
+    <<: *app-env
+    APP_ROLE: api
+    # ~75% do teto de memória; o resto é para buffers, sharp e pilhas nativas.
+    NODE_OPTIONS: --max-old-space-size=768
+    PRISMA_CONNECTION_LIMIT: "10"
+  cpus: "1.0"
+  mem_limit: 1g
+  volumes:
+    - uploads-data:/app/uploads
+    # Releases OTA (expo-updates): publicados por uma réplica, servidos pelas duas.
+    - updates-data:/app/updates
+    - webhook-data:/app/webhook/payloads
+    # Troca de arquivos com o processo `pdf`: o HTML do relatório vai e o PDF
+    # volta por aqui (só o identificador passa pela fila).
+    - pdf-tmp:/app/tmp/pdf
+
+services:
+  # ── Redis (filas BullMQ, cache, rate limit, sessões de vendor) ──
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # Sem `ports`: só a rede interna do compose alcança o Redis.
+    command:
+      - redis-server
+      - --requirepass
+      - ${REDIS_PASSWORD:?defina REDIS_PASSWORD no .env}
+      - --appendonly
+      - "yes"
+      # Abaixo do mem_limit para sobrar espaço para o fork do AOF/RDB.
+      - --maxmemory
+      - 1gb
+      # Exigência do BullMQ: com qualquer política de despejo o Redis pode
+      # apagar chave de fila. Cheio, ele recusa escrita — por isso o uso de
+      # memória precisa de alerta (ver ops/alertas/README.md).
+      - --maxmemory-policy
+      - noeviction
+    environment:
+      # O redis-cli lê a senha daqui: o healthcheck autentica sem `-a`, que
+      # imprime aviso e deixa a senha na linha de comando.
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?defina REDIS_PASSWORD no .env}
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      # `redis-cli ping` devolve 0 mesmo com NOAUTH; conferir o PONG.
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    stop_grace_period: 30s
+    cpus: "0.5"
+    mem_limit: 1536m
+    logging: *logging
+
+  # ── API: HTTP público (prefixo /api); só PRODUZ jobs ─────────────
+  # Publicadas só em loopback: o Nginx do host faz upstream nas duas.
+  api-1:
+    <<: *api
+    ports:
+      - "127.0.0.1:3001:3001"
+
+  api-2:
+    <<: *api
+    ports:
+      - "127.0.0.1:3002:3001"
+
+  # ── Worker: consome as filas BullMQ e roda os agendadores ────────
+  # Uma instância no orçamento de partida. Antes de escalar para duas,
+  # confirme que os agendadores toleram rodar em dobro.
+  # A porta 3001 (health/metrics) existe só na rede interna.
+  worker:
+    <<: *app
+    environment:
+      <<: *app-env
+      APP_ROLE: worker
+      NODE_OPTIONS: --max-old-space-size=1152
+      PRISMA_CONNECTION_LIMIT: "10"
+    cpus: "1.0"
+    mem_limit: 1536m
+    volumes:
+      - uploads-data:/app/uploads
+      - webhook-data:/app/webhook/payloads
+      - pdf-tmp:/app/tmp/pdf
+
+  # ── PDF: consome só a fila de renderização (Chromium/Puppeteer) ──
+  pdf:
+    <<: *app
+    environment:
+      <<: *app-env
+      APP_ROLE: pdf
+      # O heap do Node é pequeno de propósito: os 3 GB são do Chromium.
+      NODE_OPTIONS: --max-old-space-size=768
+      PRISMA_CONNECTION_LIMIT: "2"
+      PDF_CONCORRENCIA: ${PDF_CONCORRENCIA:-2}
+    cpus: "1.0"
+    mem_limit: 3g
+    # /dev/shm maior para o Chromium. Hoje o código passa
+    # --disable-dev-shm-usage, então a memória compartilhada vai para /tmp
+    # (disco do container); este valor só entra em jogo se a flag sair.
+    shm_size: 1gb
+    volumes:
+      - uploads-data:/app/uploads
+      # Mesmo volume das réplicas da API: recebe o HTML e devolve o PDF.
+      - pdf-tmp:/app/tmp/pdf
+
+  # ── Ferramentas (profile `tools`: não sobem com `up`) ────────────
+  # Migrations: passo único antes de trocar as réplicas. Nunca no entrypoint.
+  migrate:
+    <<: *app
+    profiles: ["tools"]
+    command: ["npx", "prisma", "migrate", "deploy"]
+    restart: "no"
+    depends_on: {}
+    healthcheck:
+      disable: true
+    volumes: []
+
+  # Acerta o dono dos volumes para o usuário `node` (uid 1000) da imagem.
+  # Necessário porque a imagem antiga rodava como root e os volumes existentes
+  # ficaram com dono root. Idempotente: só faz chown se achar algo fora do
+  # lugar. Roda como root, sem rede e sem o .env.
+  volumes-permissoes:
+    image: ${APP_IMAGE:-beneficios-api:local}
+    profiles: ["tools"]
+    user: "0:0"
+    network_mode: none
+    restart: "no"
+    init: true
+    healthcheck:
+      disable: true
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        for dir in /app/uploads /app/updates /app/webhook/payloads /app/tmp/pdf; do
+          if [ -n "$$(find "$$dir" ! -user node -print -quit)" ]; then
+            echo "Ajustando dono de $$dir para node:node"
+            chown -R node:node "$$dir"
+          else
+            echo "$$dir já pertence a node"
+          fi
+        done
+    volumes:
+      - uploads-data:/app/uploads
+      - updates-data:/app/updates
+      - webhook-data:/app/webhook/payloads
+      - pdf-tmp:/app/tmp/pdf
+    logging: *logging
+
+volumes:
+  redis-data:
+  uploads-data:
+  webhook-data:
+  updates-data:
+  pdf-tmp:

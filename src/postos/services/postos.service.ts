@@ -10,6 +10,13 @@ import {
   ClubgasErroLogService,
 } from 'src/integrations/clubgas/clubgas-erro-log.service';
 import { BaseOrigin } from 'src/config/tenant.config';
+import { CacheService } from 'src/infra/cache/cache.service';
+import {
+  TTL_DO_CACHE_DE_POSTOS_SEG,
+  chaveDoCacheDePostos,
+  descreverPosto,
+  paginarPostos,
+} from 'src/postos/domain/busca-de-postos';
 import { baseTag } from 'src/shared/log.util';
 
 @Injectable()
@@ -20,6 +27,7 @@ export class PostosService {
     private prisma: PrismaService,
     private readonly clubgasClient: ClubgasClient,
     private readonly clubgasErros: ClubgasErroLogService,
+    private readonly cache: CacheService,
   ) {}
 
   async buscarPostos(
@@ -56,13 +64,23 @@ export class PostosService {
       );
     }
 
+    // A lista inteira vem do Clubgas de uma vez e a paginação é local: as
+    // páginas seguintes da mesma busca saem do cache, por base. Só resposta
+    // válida é guardada — recusa pela placa e erro voltam ao Clubgas sempre.
+    const busca = { latitude, longitude, placa: vehicle.plate };
     let data: Awaited<ReturnType<ClubgasClient['obterPostosMapa']>>;
+    let fonte: string;
     try {
-      data = await this.clubgasClient.obterPostosMapa(baseOrigin, {
-        latitude,
-        longitude,
-        placa: vehicle.plate,
-      });
+      ({ valor: data, fonte } = await this.cache.obter({
+        base: baseOrigin,
+        chave: chaveDoCacheDePostos(busca),
+        recurso: 'clubgas_postos',
+        ttlSeg: TTL_DO_CACHE_DE_POSTOS_SEG,
+        carregar: () => this.clubgasClient.obterPostosMapa(baseOrigin, busca),
+        guardarSe: (resposta) =>
+          Array.isArray(resposta?.result) &&
+          !postosRecusadosPelaPlaca(resposta),
+      }));
     } catch (falha) {
       // Grava em ClubgasErroLog e devolve ao app a mensagem do Clubgas.
       throw await this.clubgasErros.tratar(falha, contexto);
@@ -84,14 +102,15 @@ export class PostosService {
       );
     }
 
-    // Paginação local
+    // Paginação local, sobre a lista completa (do Clubgas ou do cache).
     const postos = Array.isArray(data.result) ? data.result : [];
-    const pageSize = 5;
-    const totalElements = postos.length;
-    const totalPages = Math.ceil(totalElements / pageSize);
-    const start = (page - 1) * pageSize;
-    const end = start + pageSize;
-    const paginatedResult = postos.slice(start, end);
+    const {
+      pagination,
+      result: paginatedResult,
+      inicio: start,
+      fim: end,
+    } = paginarPostos(postos, page);
+    const { totalElements, pageSize, totalPages } = pagination;
 
     const tag = `${baseTag(baseOrigin)} [postos]`;
     this.logger.log(
@@ -100,10 +119,10 @@ export class PostosService {
         `(itens ${start + 1}-${Math.min(end, totalElements)} de ${totalElements})`,
     );
     this.logger.log(
-      `${tag} lista completa do Clubgas (${totalElements} postos, ${pageSize} por página):\n` +
+      `${tag} lista completa do Clubgas (${totalElements} postos, ${pageSize} por página, fonte: ${fonte}):\n` +
         postos
           .map((posto, i) =>
-            this.descreverPosto(posto, i, pageSize, i >= start && i < end),
+            descreverPosto(posto, i, pageSize, i >= start && i < end),
           )
           .join('\n'),
     );
@@ -113,35 +132,6 @@ export class PostosService {
       );
     }
 
-    return {
-      pagination: {
-        totalElements,
-        pageSize,
-        pageNumber: page,
-        totalPages,
-      },
-      result: paginatedResult,
-    };
-  }
-
-  /**
-   * Linha de log de um posto: posição na lista do Clubgas, página em que cai
-   * na paginação local e os campos que identificam o posto. `>>` marca os
-   * postos devolvidos nesta requisição.
-   */
-  private descreverPosto(
-    posto: unknown,
-    indice: number,
-    pageSize: number,
-    naPaginaAtual: boolean,
-  ): string {
-    const p = (posto ?? {}) as Record<string, string | number | undefined>;
-    const marcador = naPaginaAtual ? '>>' : '  ';
-    const pagina = Math.floor(indice / pageSize) + 1;
-    return (
-      `${marcador} #${indice + 1} pág.${pagina} | ${p.postoNome ?? '(sem nome)'} | ` +
-      `${p.enderecoPosto ?? '(sem endereço)'} | ${p.distancia ?? '?'} km | ` +
-      `lat=${p.latitude ?? '?'} lng=${p.longitude ?? '?'} | id=${p.id ?? '?'}`
-    );
+    return { pagination, result: paginatedResult };
   }
 }

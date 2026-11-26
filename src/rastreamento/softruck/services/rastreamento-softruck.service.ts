@@ -2,7 +2,9 @@ import {
   Injectable,
   InternalServerErrorException,
   Logger,
+  Optional,
 } from '@nestjs/common';
+import { VendorSessionStore } from 'src/integrations/core/vendor-session.store';
 import axios, { AxiosInstance } from 'axios';
 import { Agent as HttpAgent } from 'http';
 import { Agent as HttpsAgent } from 'https';
@@ -26,6 +28,8 @@ import {
 } from 'src/rastreamento/softruck/interfaces/softruck-trajectories.interface';
 import { M7ReverseGeocodeService } from 'src/rastreamento/m7/services/m7-reverse-geocode.service';
 import { maskSecret } from 'src/shared/log.util';
+import { erroInternoDeRastreamento } from 'src/rastreamento/helpers/erro-de-rastreamento';
+import { ehFalhaDeConsultaDoDia } from 'src/rastreamento/domain/historico-parcial';
 
 /** Timeout padrão para chamadas HTTP à API Softruck (em ms) */
 const SOFTRUCK_REQUEST_TIMEOUT = 15_000;
@@ -84,11 +88,18 @@ export class RastreamentoSoftruck {
     }>
   >();
 
+  /** Sessão (JWT) compartilhada entre os processos. */
+  private readonly sessoes: VendorSessionStore;
+
   constructor(
     tokenResolver: TokenResolverService,
     private readonly reverseGeocodeService: M7ReverseGeocodeService,
+    // Opcional para quem instancia a classe com `new`: sem o store do Nest,
+    // o token fica só na memória do processo.
+    @Optional() sessoes?: VendorSessionStore,
   ) {
     this.tokenResolver = tokenResolver;
+    this.sessoes = sessoes ?? VendorSessionStore.emMemoria();
 
     this.axiosInstance = axios.create({
       httpAgent: new HttpAgent({
@@ -188,9 +199,9 @@ export class RastreamentoSoftruck {
     const baseUrl = process.env.SOFTRUCK_API_BASE_URL;
 
     if (!baseUrl) {
-      throw new InternalServerErrorException(
-        'SOFTRUCK_API_BASE_URL não configurada',
-      );
+      // O nome da variável fica só no log; o app recebe mensagem neutra.
+      this.logger.error('SOFTRUCK_API_BASE_URL não configurada');
+      throw erroInternoDeRastreamento('RASTREAMENTO_NAO_CONFIGURADO');
     }
 
     const normalizedBaseUrl = baseUrl.endsWith('/')
@@ -269,6 +280,13 @@ export class RastreamentoSoftruck {
     return null;
   }
 
+  /** A consulta do dia falhou de verdade (timeout, rede, 5xx)? */
+  private ehFalhaDoDia(error: unknown): boolean {
+    return ehFalhaDeConsultaDoDia(
+      axios.isAxiosError(error) ? error.response?.status : undefined,
+    );
+  }
+
   private isAuthError(error: unknown): boolean {
     if (!axios.isAxiosError(error)) {
       return false;
@@ -298,7 +316,53 @@ export class RastreamentoSoftruck {
     }
   }
 
-  private async executeAutenticarSoftruck(
+  /**
+   * Login sob trava entre processos. Se outro processo já renovou o token
+   * (há um JWT diferente e ainda válido no Redis), ele é adotado sem novo
+   * login.
+   */
+  private executeAutenticarSoftruck(
+    baseOrigin: BaseOrigin,
+    publicKey: string,
+  ): Promise<void> {
+    return this.sessoes.comTrava(
+      'softruck',
+      `login:${baseOrigin}`,
+      async () => {
+        const local = this.softruckTokenByBase.get(baseOrigin)?.token;
+        const guardado = await this.sessoes.ler(
+          'softruck',
+          `token:${baseOrigin}`,
+        );
+        if (guardado && guardado !== local && !this.isTokenExpired(guardado)) {
+          const exp = this.decodeJwt(guardado)?.exp;
+          this.softruckTokenByBase.set(baseOrigin, {
+            token: guardado,
+            expiresAt: exp ? exp * 1000 : Date.now() + CACHE_TTL,
+          });
+          return;
+        }
+
+        await this.loginSoftruck(baseOrigin, publicKey);
+
+        const novo = this.softruckTokenByBase.get(baseOrigin);
+        if (novo) {
+          await this.sessoes.gravar(
+            'softruck',
+            `token:${baseOrigin}`,
+            novo.token,
+            Math.max(60, Math.floor((novo.expiresAt - Date.now()) / 1000)),
+          );
+        }
+      },
+      {
+        ttlMs: SOFTRUCK_REQUEST_TIMEOUT + 5_000,
+        esperaMs: SOFTRUCK_REQUEST_TIMEOUT,
+      },
+    );
+  }
+
+  private async loginSoftruck(
     baseOrigin: BaseOrigin,
     publicKey: string,
   ): Promise<void> {
@@ -315,11 +379,10 @@ export class RastreamentoSoftruck {
 
     if (!username || !password) {
       this.logger.error(
-        `[${baseOrigin}] Credenciais ausentes — ${usernameKey}="${username ?? '(vazio)'}" ${passwordKey}="${password ? '***' : '(vazio)'}"`,
+        `[${baseOrigin}] Credenciais ausentes — ${usernameKey}="${username ? '***' : '(vazio)'}" ${passwordKey}="${password ? '***' : '(vazio)'}"`,
       );
-      throw new InternalServerErrorException(
-        `Credenciais ${usernameKey}/${passwordKey} da Softruck não configuradas`,
-      );
+      // Os nomes das variáveis ficam só no log acima.
+      throw erroInternoDeRastreamento('RASTREAMENTO_NAO_CONFIGURADO');
     }
 
     const loginUrl = this.buildSoftruckUrl('/auth/login');
@@ -368,9 +431,8 @@ export class RastreamentoSoftruck {
             `  → Status : ${error.response?.status ?? 'N/A'}\n` +
             `  → Mensagem: ${error.response?.data?.error?.message ?? JSON.stringify(error.response?.data) ?? error.message}`,
         );
-        throw new InternalServerErrorException(
-          `Falha no login Softruck (${error.response?.status}): ${error.response?.data?.error?.message ?? 'Erro desconhecido'}`,
-        );
+        // A mensagem do provedor fica só no log acima.
+        throw erroInternoDeRastreamento('RASTREAMENTO_FALHA_DE_AUTENTICACAO');
       }
       this.logger.error(
         `[LOGIN] Erro inesperado ao autenticar na Softruck: ${this.formatError(error)}`,
@@ -623,6 +685,8 @@ export class RastreamentoSoftruck {
     acc: number,
     baseOrigin: BaseOrigin,
     publicKey: string,
+    /** Chamado quando a consulta do dia FALHOU (não é "dia sem viagens"). */
+    aoFalhar?: (acc: number) => void,
   ): Promise<SoftruckByKeysApiResponse | null> {
     try {
       const url = this.buildSoftruckUrl(
@@ -649,6 +713,7 @@ export class RastreamentoSoftruck {
       this.logger.warn(
         `[${baseOrigin}] by-keys acc=${acc} sem dados: ${this.formatError(error)}`,
       );
+      if (this.ehFalhaDoDia(error)) aoFalhar?.(acc);
       return null;
     }
   }
@@ -661,6 +726,8 @@ export class RastreamentoSoftruck {
     acc: number,
     baseOrigin: BaseOrigin,
     publicKey: string,
+    /** Chamado quando a consulta do dia FALHOU (não é "dia sem pontos"). */
+    aoFalhar?: (acc: number) => void,
   ): Promise<SoftruckGeomFeatureCollection | null> {
     try {
       const url = this.buildSoftruckUrl(
@@ -688,6 +755,7 @@ export class RastreamentoSoftruck {
       this.logger.warn(
         `[${baseOrigin}] geom acc=${acc} sem dados: ${this.formatError(error)}`,
       );
+      if (this.ehFalhaDoDia(error)) aoFalhar?.(acc);
       return null;
     }
   }

@@ -1,8 +1,15 @@
-import { OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
+import { OnWorkerEvent, Processor } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
+import {
+  PushUnitarioService,
+  RespostaDoPush,
+  paraRespostaDoPush,
+} from 'src/notifications/services/push-unitario.service';
+import { FilaDeMortosService } from 'src/queue/fila-de-mortos.service';
+import { ProcessadorBase } from 'src/queue/processador-base';
 import { NOTIFICATION_QUEUE } from 'src/queue/queue.module';
-import { NotificationsService } from 'src/notifications/services/notifications.service';
+import { IntegrationError } from 'src/shared/erros/erros';
 
 export interface NotificationJobData {
   userId: number;
@@ -10,42 +17,62 @@ export interface NotificationJobData {
   title: string;
   body: string;
   data: Record<string, any>;
+  /**
+   * Gravado pelo próprio job quando o provedor aceita o push: a nova
+   * tentativa não envia de novo, só termina de gravar a caixa de entrada.
+   */
+  _pushAceito?: boolean;
 }
 
 /**
- * Processor que consome jobs da fila de notificações.
+ * Fila de ALERTA: um push por job (ignição, âncora, avisos avulsos, teste).
+ * Push em massa não entra aqui — vai para a `PUSH_MASSA_QUEUE`, para não
+ * atrasar o alerta.
  *
- * Desacopla o envio de push notifications do fluxo HTTP, garantindo:
- *   1. Respostas rápidas nos endpoints que disparam notificações.
- *   2. Retry automático em caso de falha no Expo push service.
- *   3. Controle de concorrência (evita burst de requests ao Expo).
+ * Atende qualquer nome de job com este formato, inclusive os `sorte-*` que
+ * já estavam nesta fila antes de os lembretes do Associado da Sorte irem
+ * para a fila de massa.
+ *
+ * Falha de TRANSPORTE lança: o job repete conforme o retry da fila. Recusa
+ * do provedor (token inválido, mensagem rejeitada) conclui o job — repetir
+ * não mudaria a resposta.
  */
 @Processor(NOTIFICATION_QUEUE, { concurrency: 3 })
-export class NotificationProcessor extends WorkerHost {
-  private readonly logger = new Logger(NotificationProcessor.name);
+export class NotificationProcessor extends ProcessadorBase<
+  NotificationJobData,
+  RespostaDoPush
+> {
+  protected readonly logger = new Logger(NotificationProcessor.name);
 
-  constructor(private readonly notificationsService: NotificationsService) {
-    super();
+  constructor(
+    private readonly pushUnitario: PushUnitarioService,
+    filaDeMortos: FilaDeMortosService,
+  ) {
+    super(filaDeMortos);
   }
 
-  async process(job: Job<NotificationJobData>): Promise<any> {
+  protected async executar(
+    job: Job<NotificationJobData>,
+  ): Promise<RespostaDoPush> {
     const { userId, expoPushToken, title, body, data } = job.data;
 
-    try {
-      const result = await this.notificationsService.sendPushNotification(
-        userId,
-        expoPushToken,
-        title,
-        body,
-        data,
-      );
-      return result;
-    } catch (error) {
-      this.logger.error(
-        `[QUEUE] ✖ job #${job.id} falhou (tentativa ${job.attemptsMade + 1}): ${error instanceof Error ? error.message : error}`,
-      );
-      throw error;
+    const resultado = await this.pushUnitario.enviar(
+      { userId, expoPushToken, title, body, data },
+      {
+        pushAceito: job.data._pushAceito === true,
+        marcarPushAceito: () =>
+          job.updateData({ ...job.data, _pushAceito: true }),
+      },
+    );
+
+    if (resultado.status === 'falha_transporte') {
+      throw new IntegrationError({
+        vendor: 'expo',
+        tipo: 'indisponivel',
+        detalhes: { userId, motivo: resultado.mensagem },
+      });
     }
+    return paraRespostaDoPush(resultado);
   }
 
   @OnWorkerEvent('active')
@@ -58,12 +85,12 @@ export class NotificationProcessor extends WorkerHost {
   @OnWorkerEvent('failed')
   onFailed(job: Job, error: Error) {
     this.logger.error(
-      `[QUEUE] ✖ job #${job.id} falhou definitivamente após ${job.attemptsMade} tentativas: ${error.message}`,
+      `[QUEUE] ✖ job #${job.id} falhou (tentativa ${job.attemptsMade}): ${error.message}`,
     );
   }
 
   @OnWorkerEvent('completed')
   onCompleted(job: Job) {
-    this.logger.log(`[QUEUE] ✔ job #${job.id} processado e removido da fila`);
+    this.logger.log(`[QUEUE] ✔ job #${job.id} processado`);
   }
 }

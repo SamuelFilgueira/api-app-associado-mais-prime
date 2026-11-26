@@ -26,6 +26,7 @@ import {
   AdminPanelRole,
   ALL_ADMIN_PANEL_ROLES,
 } from 'src/infra/enums/admin-panel-role.enum';
+import { LIMITE_IMAGEM } from 'src/infra/storage/limites-de-upload';
 
 @UseGuards(JwtAuthGuard)
 @Controller('oficina')
@@ -72,10 +73,13 @@ export class OficinaController {
   @AdminPanelRoles(AdminPanelRole.EVENTOS)
   @HttpCode(HttpStatus.OK)
   @UseInterceptors(
-    FileFieldsInterceptor([
-      { name: 'photoFront', maxCount: 1 },
-      { name: 'photoBack', maxCount: 1 },
-    ]),
+    FileFieldsInterceptor(
+      [
+        { name: 'photoFront', maxCount: 1 },
+        { name: 'photoBack', maxCount: 1 },
+      ],
+      LIMITE_IMAGEM,
+    ),
   )
   async updateWorkshop(
     @Param('id', ParseIntPipe) id: number,
@@ -97,10 +101,13 @@ export class OficinaController {
   @AdminPanelRoles(AdminPanelRole.EVENTOS)
   @HttpCode(HttpStatus.CREATED)
   @UseInterceptors(
-    FileFieldsInterceptor([
-      { name: 'photoFront', maxCount: 1 },
-      { name: 'photoBack', maxCount: 1 },
-    ]),
+    FileFieldsInterceptor(
+      [
+        { name: 'photoFront', maxCount: 1 },
+        { name: 'photoBack', maxCount: 1 },
+      ],
+      LIMITE_IMAGEM,
+    ),
   )
   async createWorkshop(
     @Body() data: CreateWorkshopDto,

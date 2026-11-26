@@ -12,10 +12,9 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { InjectQueue } from '@nestjs/bullmq';
-import { Queue } from 'bullmq';
 import { JwtAuthGuard } from 'src/infra/guards/jwt-auth.guard';
 import { AdminRoleGuard } from 'src/infra/guards/admin-role.guard';
+import { ProdutorDeFilas } from 'src/queue/produtor-de-filas.service';
 import { BOLETO_NOTIFICACAO_QUEUE } from 'src/queue/queue.module';
 import { parseDateBR } from 'src/shared/date.util';
 import { BoletoNotificacaoConfigService } from 'src/boleto-notificacao/config/boleto-notificacao.config';
@@ -42,7 +41,7 @@ export class BoletoNotificacaoAdminController {
     private readonly notificacaoService: BoletoNotificacaoService,
     private readonly receiptsService: BoletoNotificacaoReceiptsService,
     private readonly schedulerService: BoletoNotificacaoSchedulerService,
-    @InjectQueue(BOLETO_NOTIFICACAO_QUEUE) private readonly queue: Queue,
+    private readonly produtor: ProdutorDeFilas,
   ) {}
 
   /** Configuração efetiva da régua + estado do agendamento. */
@@ -70,6 +69,10 @@ export class BoletoNotificacaoAdminController {
   /**
    * Dispara a rotina manualmente. `sync=true` executa inline e devolve o
    * resultado (ideal para dev/homologação); caso contrário enfileira no BullMQ.
+   *
+   * Só uma execução por base e data: com `sync=true`, se a régua pedida já
+   * está rodando, a resposta é 409 `REGUA_EM_EXECUCAO`. Enfileirada, a
+   * segunda execução conclui sem fazer nada (o job registra em log).
    */
   @Post('executar')
   @HttpCode(HttpStatus.OK)
@@ -77,7 +80,7 @@ export class BoletoNotificacaoAdminController {
     const dataReferencia = this.parseDataReferencia(dto.dataReferencia);
 
     if (dto.sync) {
-      const resultados = await this.notificacaoService.executarRotina({
+      const resultados = await this.notificacaoService.executarManual({
         origem: 'MANUAL',
         dataReferencia,
         tenants: dto.tenants,
@@ -87,7 +90,10 @@ export class BoletoNotificacaoAdminController {
       return { executadoEm: 'sync', resultados };
     }
 
-    const job = await this.queue.add(
+    // Sem base: a rotina percorre todos os tenants pedidos (`tenants`).
+    // Tentativas, backoff e retenção vêm do padrão da fila (`filas.ts`).
+    const job = await this.produtor.enfileirar(
+      BOLETO_NOTIFICACAO_QUEUE,
       JOB_EXECUTAR_ROTINA,
       {
         origem: 'MANUAL',
@@ -96,7 +102,6 @@ export class BoletoNotificacaoAdminController {
         tipos: dto.tipos,
         dryRun: dto.dryRun === true,
       },
-      { removeOnComplete: 30, removeOnFail: 30 },
     );
 
     return {

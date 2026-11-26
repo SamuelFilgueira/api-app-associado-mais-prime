@@ -19,24 +19,25 @@ import {
   Logger,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { InjectQueue } from '@nestjs/bullmq';
-import { Queue } from 'bullmq';
 import { NotificationsService } from 'src/notifications/services/notifications.service';
 import { TestNotificationDto } from 'src/notifications/dto/test-notification.dto';
 import { JwtAuthGuard } from 'src/infra/guards/jwt-auth.guard';
 import { SendMarketingNotificationDto } from 'src/notifications/dto/send-marketing-notification.dto';
+import { ProdutorDeFilas } from 'src/queue/produtor-de-filas.service';
 import { NOTIFICATION_QUEUE } from 'src/queue/queue.module';
 import { AdminRoleGuard } from 'src/infra/guards/admin-role.guard';
 import { RegisterExpoTokenDto } from 'src/notifications/dto/register-expo-token.dto';
 import { AdminPanelRoleGuard } from 'src/infra/guards/admin-panel-role.guard';
 import { AdminPanelRoles } from 'src/infra/decorators/admin-panel-roles.decorator';
 import { AdminPanelRole } from 'src/infra/enums/admin-panel-role.enum';
-import { MarketingNotificationAuditService } from 'src/notifications/services/marketing-notification-audit.service';
+import { ChaveDeIdempotencia } from 'src/infra/idempotencia/chave-de-idempotencia.decorator';
 import { UpsertPopupDto } from 'src/notifications/dto/upsert-popup.dto';
 import { SendSituacaoCadastroNotificationDto } from 'src/notifications/dto/send-situacao-cadastro-notification.dto';
 import { SituacaoCadastroNotificationService } from 'src/notifications/services/situacao-cadastro-notification.service';
 import { MarketingAgendamentoService } from 'src/notifications/services/marketing-agendamento.service';
 import { PopupAuditService } from 'src/notifications/services/popup-audit.service';
+import { LIMITE_IMAGEM } from 'src/infra/storage/limites-de-upload';
+import { PushDisparoConsultaService } from 'src/notifications/services/push-disparo-consulta.service';
 
 @Controller('notifications')
 export class NotificationsController {
@@ -50,22 +51,28 @@ export class NotificationsController {
 
   constructor(
     private readonly notificationsService: NotificationsService,
-    @InjectQueue(NOTIFICATION_QUEUE) private readonly notificationQueue: Queue,
-    private readonly marketingNotificationAuditService: MarketingNotificationAuditService,
+    private readonly produtor: ProdutorDeFilas,
     private readonly situacaoCadastroNotificationService: SituacaoCadastroNotificationService,
     private readonly marketingAgendamentoService: MarketingAgendamentoService,
     private readonly popupAuditService: PopupAuditService,
+    private readonly disparos: PushDisparoConsultaService,
   ) {}
 
   /**
    * POST /notifications/queue-test
    * Enfileira a notificação no BullMQ em vez de enviar diretamente.
    * Use este endpoint para verificar se a fila está operacional.
+   * Rota de diagnóstico: só token com `role` ADMIN (envia push de texto livre
+   * para qualquer Expo token).
    */
+  @UseGuards(JwtAuthGuard, AdminRoleGuard)
   @Post('queue-test')
   async queueTestNotification(@Body() dto: TestNotificationDto) {
     const data = { plate: dto.plate, ignition: dto.ignition };
-    const job = await this.notificationQueue.add(
+    // Diagnóstico com token livre: não há base conhecida para o job; o
+    // envelope leva só os metadados de rastreio. Retry: o padrão da fila.
+    const job = await this.produtor.enfileirar(
+      NOTIFICATION_QUEUE,
       'push-test',
       {
         userId: dto.userId ?? 1,
@@ -74,7 +81,6 @@ export class NotificationsController {
         body: dto.body,
         data,
       },
-      { attempts: 3, backoff: { type: 'exponential', delay: 2000 } },
     );
     return {
       queued: true,
@@ -84,6 +90,8 @@ export class NotificationsController {
     };
   }
 
+  /** Rota de diagnóstico: só token com `role` ADMIN. */
+  @UseGuards(JwtAuthGuard, AdminRoleGuard)
   @Post('test')
   async testNotification(@Body() dto: TestNotificationDto) {
     const data = {
@@ -255,49 +263,25 @@ export class NotificationsController {
 
   /**
    * POST /notifications/admin/marketing
-   * Envia notificacoes de marketing em massa (painel administrativo)
+   * Disparo de marketing em massa (painel administrativo). Com `agendarPara`,
+   * só agenda. Sem ele, cria o disparo, enfileira os lotes e responde na
+   * hora: `sentCount` = destinatários selecionados; as contagens finais
+   * ficam no histórico. Header opcional `Idempotency-Key`: a repetição do
+   * mesmo pedido recebe a primeira resposta.
    */
   @UseGuards(JwtAuthGuard, AdminRoleGuard, AdminPanelRoleGuard)
   @AdminPanelRoles(AdminPanelRole.MARKETING, AdminPanelRole.ADMIN)
   @Post('admin/marketing')
   @HttpCode(HttpStatus.OK)
-  async sendMarketingNotification(
+  sendMarketingNotification(
     @Body() dto: SendMarketingNotificationDto,
     @Request() req: any,
+    @ChaveDeIdempotencia() chaveDeIdempotencia?: string,
   ) {
-    // Com `agendarPara`, só agenda; sem ele, envio imediato (fluxo original).
-    if (dto.agendarPara) {
-      return this.marketingAgendamentoService.agendar(dto, req.user?.userId);
-    }
-
-    const auditId =
-      await this.marketingNotificationAuditService.createRequestAudit(
-        req.user?.userId,
-        dto,
-      );
-
-    try {
-      const result = await this.notificationsService.sendMarketingNotification(
-        dto,
-        req.user?.userId,
-      );
-
-      await this.marketingNotificationAuditService.markSuccess(
-        auditId,
-        result.sentCount,
-        result.skippedCount,
-      );
-
-      return result;
-    } catch (error) {
-      await this.marketingNotificationAuditService.markFailure(
-        auditId,
-        error?.message || 'Erro desconhecido',
-      );
-
-      this.logger.error(`[MARKETING] ❌ Erro: ${error.message}`, error.stack);
-      throw error;
-    }
+    return this.notificationsService.dispararMarketing(dto, {
+      adminUserId: req.user?.userId,
+      chaveDeIdempotencia,
+    });
   }
 
   /**
@@ -310,6 +294,19 @@ export class NotificationsController {
   @Get('admin/marketing/historico')
   listarHistoricoMarketing(@Query('limit') limit?: string) {
     return this.marketingAgendamentoService.listarHistorico(Number(limit));
+  }
+
+  /**
+   * GET /notifications/admin/disparos/:id
+   * Andamento e resultado de um disparo em massa (marketing ou planilha),
+   * pelo `disparoId` devolvido na criação: contagem das entregas por estado
+   * e os CPFs que ficaram sem push.
+   */
+  @UseGuards(JwtAuthGuard, AdminRoleGuard, AdminPanelRoleGuard)
+  @AdminPanelRoles(AdminPanelRole.MARKETING, AdminPanelRole.ADMIN)
+  @Get('admin/disparos/:id')
+  consultarDisparo(@Param('id', ParseIntPipe) id: number) {
+    return this.disparos.consultar(id);
   }
 
   /**
@@ -342,7 +339,9 @@ export class NotificationsController {
    * POST /notifications/admin/situacao-cadastro
    * Envia notificacao push em massa para os CPFs de uma planilha Excel
    * (mudanca de situacao no cadastro — ex.: Ativo -> Inadimplente).
-   * Acesso: perfis MARKETING e ADMIN do painel.
+   * Acesso: perfis MARKETING e ADMIN do painel. Responde depois de criar o
+   * disparo e enfileirar os lotes (`sentCount` = destinatários selecionados).
+   * Header opcional `Idempotency-Key`.
    */
   @UseGuards(JwtAuthGuard, AdminRoleGuard, AdminPanelRoleGuard)
   @AdminPanelRoles(AdminPanelRole.MARKETING, AdminPanelRole.ADMIN)
@@ -355,6 +354,7 @@ export class NotificationsController {
     @Body() dto: SendSituacaoCadastroNotificationDto,
     @UploadedFile() file: Express.Multer.File,
     @Request() req: any,
+    @ChaveDeIdempotencia() chaveDeIdempotencia?: string,
   ) {
     if (!file) {
       throw new BadRequestException(
@@ -373,52 +373,15 @@ export class NotificationsController {
       );
     }
 
-    // Corrige acentuação que chegou com encoding errado (latin1/cp1252)
-    const title = this.situacaoCadastroNotificationService.corrigirTextoUtf8(
-      dto.title,
+    return this.situacaoCadastroNotificationService.dispararPorPlanilha(
+      {
+        arquivo: file.buffer,
+        title: dto.title,
+        body: dto.body,
+        data: dto.data,
+      },
+      { adminUserId: req.user?.userId, chaveDeIdempotencia },
     );
-    const body = this.situacaoCadastroNotificationService.corrigirTextoUtf8(
-      dto.body,
-    );
-
-    const dataPayload =
-      this.situacaoCadastroNotificationService.parseDataPayload(dto.data);
-
-    const auditId =
-      await this.marketingNotificationAuditService.createRequestAudit(
-        req.user?.userId,
-        { title, body, data: dataPayload } as any,
-        { tipo: 'SITUACAO_CADASTRO' },
-      );
-
-    try {
-      const result =
-        await this.situacaoCadastroNotificationService.enviarPorPlanilha(
-          file.buffer,
-          title,
-          body,
-          dataPayload,
-        );
-
-      await this.marketingNotificationAuditService.markSuccess(
-        auditId,
-        result.sentCount,
-        result.skippedCount,
-      );
-
-      return result;
-    } catch (error) {
-      await this.marketingNotificationAuditService.markFailure(
-        auditId,
-        error?.message || 'Erro desconhecido',
-      );
-
-      this.logger.error(
-        `[SITUACAO-CADASTRO] ❌ Erro: ${error.message}`,
-        error.stack,
-      );
-      throw error;
-    }
   }
 
   @Get('popup')
@@ -430,7 +393,7 @@ export class NotificationsController {
   @Put('popup')
   @UseGuards(JwtAuthGuard, AdminRoleGuard, AdminPanelRoleGuard)
   @AdminPanelRoles(AdminPanelRole.MARKETING, AdminPanelRole.ADMIN)
-  @UseInterceptors(FileInterceptor('image'))
+  @UseInterceptors(FileInterceptor('image', LIMITE_IMAGEM))
   @HttpCode(HttpStatus.OK)
   async createPopup(
     @Body() dto: UpsertPopupDto,
@@ -450,7 +413,7 @@ export class NotificationsController {
   @Put('popup/:id')
   @UseGuards(JwtAuthGuard, AdminRoleGuard, AdminPanelRoleGuard)
   @AdminPanelRoles(AdminPanelRole.MARKETING, AdminPanelRole.ADMIN)
-  @UseInterceptors(FileInterceptor('image'))
+  @UseInterceptors(FileInterceptor('image', LIMITE_IMAGEM))
   @HttpCode(HttpStatus.OK)
   async updatePopup(
     @Param('id', ParseIntPipe) id: number,

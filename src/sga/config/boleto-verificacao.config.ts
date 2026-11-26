@@ -11,8 +11,17 @@
  * idade máxima e espaçamento entre chamadas.
  */
 
+/** Job repetível do formato antigo (um por boleto). Não é mais criado. */
 export const JOB_VERIFICAR_BOLETO = 'verificar-boleto';
 export const JOB_ID_PREFIXO_VERIFICACAO = 'boleto-verificacao-';
+
+/** Varredura única dos boletos com a consulta de pagamento vencida. */
+export const JOB_VARRER_BOLETOS = 'varrer-boletos';
+export const AGENDADOR_VARREDURA_BOLETOS = 'boleto-verificacao-varredura';
+/** De quanto em quanto tempo a varredura roda. */
+export const INTERVALO_VARREDURA_BOLETOS_MS = 60_000;
+/** Aviso de boleto pago (evento `boleto.pago` do outbox). */
+export const JOB_AVISAR_BOLETO_PAGO = 'avisar-boleto-pago';
 
 /**
  * Intervalo do repeatable no BullMQ (inalterado). A cadência real por idade

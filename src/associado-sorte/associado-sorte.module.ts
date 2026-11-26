@@ -2,7 +2,6 @@ import { Module } from '@nestjs/common';
 import { AssociadoSorteAdminController } from 'src/associado-sorte/controllers/associado-sorte-admin.controller';
 import { AssociadoSorteAppController } from 'src/associado-sorte/controllers/associado-sorte-app.controller';
 import { SorteCicloProcessor } from 'src/associado-sorte/processors/sorte-ciclo.processor';
-import { sorteRedisProvider } from 'src/associado-sorte/providers/sorte-redis.provider';
 import { SorteConfigRepository } from 'src/associado-sorte/repositories/sorte-config.repository';
 import { SorteCreditosRepository } from 'src/associado-sorte/repositories/sorte-creditos.repository';
 import { SorteGanhadoresRepository } from 'src/associado-sorte/repositories/sorte-ganhadores.repository';
@@ -38,6 +37,7 @@ import { SorteRaspadinhaService } from 'src/associado-sorte/services/sorte-raspa
 import { SorteTentativaService } from 'src/associado-sorte/services/sorte-tentativa.service';
 import { HinovaModule } from 'src/integrations/hinova/hinova.module';
 import { NotificationsModule } from 'src/notifications/notifications.module';
+import { paraPapel } from 'src/queue/queue.module';
 import { BeneficiosVeiculoModule } from 'src/sga/beneficios-veiculo/beneficios-veiculo.module';
 
 /**
@@ -54,7 +54,6 @@ import { BeneficiosVeiculoModule } from 'src/sga/beneficios-veiculo/beneficios-v
   imports: [NotificationsModule, HinovaModule, BeneficiosVeiculoModule],
   controllers: [AssociadoSorteAdminController, AssociadoSorteAppController],
   providers: [
-    sorteRedisProvider,
     // Dados
     SorteUnidadeTrabalho,
     SorteConfigRepository,
@@ -91,7 +90,7 @@ import { BeneficiosVeiculoModule } from 'src/sga/beneficios-veiculo/beneficios-v
     SorteDashboardService,
     // Job periódico
     SorteCicloService,
-    SorteCicloProcessor,
+    ...paraPapel('worker', [SorteCicloProcessor]),
   ],
 })
 export class AssociadoSorteModule {}

@@ -53,7 +53,7 @@ export class LogicaHistoricoService {
     dataFinal: string,
     baseOrigin: BaseOrigin,
   ): Promise<HistoricoResumoResponseDto> {
-    const viagens = await this.montarViagens(
+    const { viagens, trilhaCompleta } = await this.montarViagens(
       veiculo.id,
       dataInicial,
       dataFinal,
@@ -68,6 +68,9 @@ export class LogicaHistoricoService {
       period: this.montarPeriodo(dataInicial, dataFinal),
       summary,
       dias,
+      // A Lógica responde o período de uma vez: não há como apontar o dia.
+      parcial: !trilhaCompleta,
+      diasComFalha: [],
     };
   }
 
@@ -79,7 +82,7 @@ export class LogicaHistoricoService {
     dataFinal: string,
     baseOrigin: BaseOrigin,
   ): Promise<HistoricoRotasResponseDto> {
-    const viagens = await this.montarViagens(
+    const { viagens, trilhaCompleta } = await this.montarViagens(
       veiculo.id,
       dataInicial,
       dataFinal,
@@ -113,6 +116,9 @@ export class LogicaHistoricoService {
         routeFeatures: features,
         alarmFeatures: [],
       },
+      // A Lógica responde o período de uma vez: não há como apontar o dia.
+      parcial: !trilhaCompleta,
+      diasComFalha: [],
     };
   }
 
@@ -133,9 +139,11 @@ export class LogicaHistoricoService {
     dataInicial: string,
     dataFinal: string,
     baseOrigin: BaseOrigin,
-  ): Promise<ViagemLogica[]> {
+  ): Promise<{ viagens: ViagemLogica[]; trilhaCompleta: boolean }> {
     try {
       const token = this.tokenResolver.resolveLogicaToken(baseOrigin);
+      /** `false` quando o /mobile/posicao falhou e a trilha veio do /trajeto. */
+      let trilhaCompleta = true;
 
       const [resposta, posicoesCompletas] = await Promise.all([
         this.trajetos.obterTrajeto(
@@ -153,6 +161,9 @@ export class LogicaHistoricoService {
             this.logger.warn(
               `[${baseOrigin}] /mobile/posicao falhou (veiculoId=${veiculoId}); usando posicoes do /mobile/trajeto como fallback: ${mensagem}`,
             );
+            // O /mobile/trajeto trunca as posições: a resposta sai marcada
+            // como parcial.
+            trilhaCompleta = false;
             return [];
           }),
       ]);
@@ -175,12 +186,16 @@ export class LogicaHistoricoService {
       const viagens = segmentarViagens({
         ...relatorio,
         posicoes:
-          posicoesCompletas.length > 0
-            ? posicoesCompletas
-            : relatorio.posicoes,
+          posicoesCompletas.length > 0 ? posicoesCompletas : relatorio.posicoes,
       });
 
-      return enriquecerEnderecosComParadas(viagens, relatorio?.paradas ?? []);
+      return {
+        viagens: enriquecerEnderecosComParadas(
+          viagens,
+          relatorio?.paradas ?? [],
+        ),
+        trilhaCompleta,
+      };
     } catch (error) {
       const mensagem = error instanceof Error ? error.message : String(error);
       this.logger.error(

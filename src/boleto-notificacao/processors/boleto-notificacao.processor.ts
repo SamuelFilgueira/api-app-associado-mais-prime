@@ -1,8 +1,20 @@
-import { Processor, WorkerHost, InjectQueue } from '@nestjs/bullmq';
+import { Processor } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
-import { Job, Queue } from 'bullmq';
+import { Job } from 'bullmq';
+import { FilaDeMortosService } from 'src/queue/fila-de-mortos.service';
+import { baseDoJob } from 'src/queue/job-envelope';
+import { ProcessadorBase } from 'src/queue/processador-base';
+import { ProdutorDeFilas } from 'src/queue/produtor-de-filas.service';
 import { BOLETO_NOTIFICACAO_QUEUE } from 'src/queue/queue.module';
-import { parseDateBR } from 'src/shared/date.util';
+import { formatDateBR, parseDateBR } from 'src/shared/date.util';
+import { DomainError } from 'src/shared/erros/erros';
+import {
+  avaliarRegua,
+  basesJaConcluidas,
+  ProgressoDoJob,
+  progressoAposTentativa,
+  ReguaIncompletaError,
+} from 'src/boleto-notificacao/domain/regua-resultado';
 import {
   BoletoNotificacaoService,
   JOB_EXECUTAR_ROTINA,
@@ -17,6 +29,8 @@ interface ExecutarRotinaJobData {
   tenants?: string[];
   tipos?: TipoMensagem[];
   dryRun?: boolean;
+  /** Bases que uma tentativa anterior deste job já fechou, e para qual data. */
+  progresso?: ProgressoDoJob;
 }
 
 interface VerificarReceiptsJobData {
@@ -32,19 +46,24 @@ const MAX_TENTATIVAS_RECEIPTS = 3;
  *  - verificar-receipts: confirmação de entrega via receipts do Expo
  */
 @Processor(BOLETO_NOTIFICACAO_QUEUE as string)
-export class BoletoNotificacaoProcessor extends WorkerHost {
-  private readonly logger = new Logger(BoletoNotificacaoProcessor.name);
+export class BoletoNotificacaoProcessor extends ProcessadorBase<
+  ExecutarRotinaJobData | VerificarReceiptsJobData,
+  unknown
+> {
+  protected readonly logger = new Logger(BoletoNotificacaoProcessor.name);
 
   constructor(
     private readonly notificacaoService: BoletoNotificacaoService,
     private readonly receiptsService: BoletoNotificacaoReceiptsService,
-    @InjectQueue(BOLETO_NOTIFICACAO_QUEUE as string)
-    private readonly queue: Queue,
+    private readonly produtor: ProdutorDeFilas,
+    filaDeMortos: FilaDeMortosService,
   ) {
-    super();
+    super(filaDeMortos);
   }
 
-  async process(job: Job): Promise<unknown> {
+  protected async executar(
+    job: Job<ExecutarRotinaJobData | VerificarReceiptsJobData>,
+  ): Promise<unknown> {
     switch (job.name) {
       case JOB_EXECUTAR_ROTINA:
         return this.executarRotina(job as Job<ExecutarRotinaJobData>);
@@ -65,25 +84,49 @@ export class BoletoNotificacaoProcessor extends WorkerHost {
       : null;
 
     if (data.dataReferencia && !dataReferencia) {
-      throw new Error(
+      // Repetir não conserta a data: vai direto para a fila de mortos.
+      throw new DomainError(
+        'REGUA_DATA_INVALIDA',
         `dataReferencia inválida no job: "${data.dataReferencia}" (esperado dd/mm/yyyy)`,
       );
     }
 
+    // Retry: as bases que este job já fechou PARA esta data não repetem a
+    // varredura do SGA. O progresso de outra data é ignorado.
+    const referencia = data.dataReferencia ?? formatDateBR(new Date());
+    const jaConcluidas = basesJaConcluidas(data.progresso, referencia);
+
     this.logger.log(
-      `[BOLETO-NOTIF] job ${job.id} (${data.origem ?? 'AGENDADA'}) iniciado — tentativa ${job.attemptsMade + 1}`,
+      `[BOLETO-NOTIF] job ${job.id} (${data.origem ?? 'AGENDADA'}) iniciado — tentativa ${job.attemptsMade + 1}` +
+        (jaConcluidas.length > 0
+          ? ` — já concluídas: ${jaConcluidas.join(',')}`
+          : ''),
     );
 
     const resultados = await this.notificacaoService.executarRotina({
       origem: data.origem ?? 'AGENDADA',
-      dataReferencia: dataReferencia ?? undefined,
+      // Com progresso em mãos, a data fica presa à dele (a mesma de hoje).
+      dataReferencia:
+        dataReferencia ??
+        (jaConcluidas.length > 0
+          ? (parseDateBR(referencia) ?? undefined)
+          : undefined),
       tenants: data.tenants,
       tipos: data.tipos,
       dryRun: data.dryRun === true,
+      basesJaConcluidas: jaConcluidas.length > 0 ? jaConcluidas : undefined,
     });
 
-    // Falha em algum momento não derruba o job (idempotência garante reprocesso seguro),
-    // mas é registrada no retorno para inspeção no BullMQ.
+    // Base em falha (SGA fora, token bloqueado) ou com envio pendente: o job
+    // FALHA para a fila repetir. A idempotência por log garante que quem já
+    // recebeu não recebe de novo. Dry-run não envia nada: só relata.
+    const avaliacao = avaliarRegua(resultados);
+    if (avaliacao.incompleta && data.dryRun !== true) {
+      const progresso = progressoAposTentativa(avaliacao, jaConcluidas);
+      if (progresso) await job.updateData({ ...data, progresso });
+      throw new ReguaIncompletaError(avaliacao);
+    }
+
     return resultados.map((r) => ({
       tenant: r.tenant,
       tipo: r.tipo,
@@ -102,14 +145,18 @@ export class BoletoNotificacaoProcessor extends WorkerHost {
     // Receipts ainda não disponíveis: reagenda até o limite de tentativas
     if (resultado.pendentes > 0 && tentativa < MAX_TENTATIVAS_RECEIPTS) {
       const proxima = tentativa + 1;
-      await this.queue.add(
+      await this.produtor.enfileirar(
+        BOLETO_NOTIFICACAO_QUEUE,
         JOB_VERIFICAR_RECEIPTS,
         { execucaoId, tentativa: proxima },
         {
-          delay: 15 * 60_000,
-          jobId: `boleto-notificacao-receipts-${execucaoId}-${proxima}`,
-          removeOnComplete: 100,
-          removeOnFail: 100,
+          // A nova verificação herda a base (tenant da execução) do job atual.
+          base: baseDoJob(job.data),
+          // Tentativas, backoff e retenção vêm do padrão da fila (`filas.ts`).
+          opcoes: {
+            delay: 15 * 60_000,
+            jobId: `boleto-notificacao-receipts-${execucaoId}-${proxima}`,
+          },
         },
       );
       this.logger.log(

@@ -92,7 +92,7 @@ Tudo é opcional, mas a chave de assinatura é fortemente recomendada.
    `APP_URL` já existe e é usada como base das URLs dos assets. Se a API for
    servida em outro host para o app, defina `EXPO_UPDATES_PUBLIC_URL`.
 
-3. `docker compose up --build`. O volume `updates-data` já está no compose.
+3. `docker compose up -d --build api`. O volume `updates-data` já está no compose.
 
 4. Nginx/Traefik na frente: `client_max_body_size 200m` na rota
    `/api/expo-updates/admin/publicar` (o zip do export tem 5 a 30 MB).

@@ -10,6 +10,8 @@ jest.mock('@aws-sdk/client-sesv2', () => ({
   SendEmailCommand: jest.fn((input: unknown) => ({ input })),
 }));
 
+import * as nodemailer from 'nodemailer';
+import { MAIL_PRAZOS } from './mail.config';
 import { MailService } from './mail.service';
 
 /**
@@ -81,6 +83,30 @@ describe('MailService.sendPasswordReset — provedor por env', () => {
     await new MailService().sendPasswordReset('u@x.com', 'S3nh4');
     expect(sesSendMock).toHaveBeenCalledTimes(1);
     expect(sendMailMock).not.toHaveBeenCalled();
+  });
+
+  it('envio pelo SES leva sinal de cancelamento (SDK não tem timeout próprio)', async () => {
+    await new MailService().sendPasswordReset('u@x.com', 'S3nh4');
+
+    const opcoes = sesSendMock.mock.calls[0][1] as {
+      abortSignal: AbortSignal;
+    };
+    expect(opcoes.abortSignal).toBeInstanceOf(AbortSignal);
+    expect(opcoes.abortSignal.aborted).toBe(false);
+  });
+
+  it('transporte do Gmail é criado com prazos de conexão abaixo de 60 s', () => {
+    new MailService();
+
+    const opcoes = (nodemailer.createTransport as jest.Mock).mock
+      .calls[0][0] as Record<string, number>;
+    expect(opcoes.connectionTimeout).toBe(MAIL_PRAZOS.smtpConexaoMs);
+    expect(opcoes.greetingTimeout).toBe(MAIL_PRAZOS.smtpSaudacaoMs);
+    expect(opcoes.socketTimeout).toBe(MAIL_PRAZOS.smtpInatividadeMs);
+    expect(MAIL_PRAZOS.smtpConexaoMs + MAIL_PRAZOS.smtpSaudacaoMs).toBeLessThan(
+      60_000,
+    );
+    expect(MAIL_PRAZOS.sesTotalMs).toBeLessThan(60_000);
   });
 
   it('propaga erro do Gmail para o chamador', async () => {

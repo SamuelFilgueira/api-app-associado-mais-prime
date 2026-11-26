@@ -4,6 +4,7 @@ import {
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
+import { segredosIguais } from 'src/infra/auth/comparacao-segura';
 
 @Injectable()
 export class M7WebhookGuard implements CanActivate {
@@ -16,7 +17,7 @@ export class M7WebhookGuard implements CanActivate {
       throw new UnauthorizedException('Assinatura M7 não informada');
     }
 
-    if (signature !== process.env.M7_WEBHOOK_TOKEN) {
+    if (!segredosIguais(signature, process.env.M7_WEBHOOK_TOKEN)) {
       throw new UnauthorizedException('Assinatura M7 inválida');
     }
 

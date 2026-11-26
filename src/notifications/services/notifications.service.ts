@@ -1,19 +1,27 @@
-import {
-  Injectable,
-  NotFoundException,
-  ForbiddenException,
-  BadRequestException,
-  Logger,
-} from '@nestjs/common';
-import { Expo, ExpoPushMessage } from 'expo-server-sdk';
-import { PrismaService } from 'src/database/prisma.service';
-import { FileUploadService } from 'src/infra/storage/file-upload.service';
+import { Injectable } from '@nestjs/common';
 import { Notification } from '@prisma/client';
-import {
-  GetNotificationsResponseDto,
-  GetNotificationsListResponseDto,
-} from 'src/notifications/dto/get-notifications-response.dto';
+import { GetNotificationsListResponseDto } from 'src/notifications/dto/get-notifications-response.dto';
 import { SendMarketingNotificationDto } from 'src/notifications/dto/send-marketing-notification.dto';
+import {
+  AlertaVeiculoService,
+  OpcoesDoAlerta,
+} from 'src/notifications/services/alerta-veiculo.service';
+import { CaixaDeEntradaService } from 'src/notifications/services/caixa-de-entrada.service';
+import {
+  ContextoDoPedido,
+  MarketingDisparoService,
+  RespostaDoDisparo,
+} from 'src/notifications/services/marketing-disparo.service';
+import {
+  DadosDoPopup,
+  PopupService,
+} from 'src/notifications/services/popup.service';
+import { PushTokenService } from 'src/notifications/services/push-token.service';
+import {
+  PushUnitarioService,
+  RespostaDoPush,
+  paraRespostaDoPush,
+} from 'src/notifications/services/push-unitario.service';
 
 export type NotificationData = {
   plate?: string;
@@ -21,102 +29,53 @@ export type NotificationData = {
   [key: string]: any;
 };
 
+/**
+ * Fachada do módulo de notificações: mantém os métodos públicos que os
+ * outros módulos (rastreamento, abastecimento, Associado da Sorte) e o
+ * controller sempre chamaram. Não tem regra — cada método delega para o
+ * caso de uso dono do assunto:
+ *
+ *  - token de push ........ `PushTokenService`
+ *  - push para um usuário . `PushUnitarioService`
+ *  - caixa de entrada ..... `CaixaDeEntradaService`
+ *  - alerta de veículo .... `AlertaVeiculoService`
+ *  - disparo em massa ..... `MarketingDisparoService`
+ *  - pop-up ............... `PopupService`
+ */
 @Injectable()
 export class NotificationsService {
-  private expo = new Expo();
-  private readonly logger = new Logger(NotificationsService.name);
-
   constructor(
-    private prisma: PrismaService,
-    private readonly fileUploadService: FileUploadService,
+    private readonly tokens: PushTokenService,
+    private readonly caixa: CaixaDeEntradaService,
+    private readonly pushUnitario: PushUnitarioService,
+    private readonly alertas: AlertaVeiculoService,
+    private readonly marketing: MarketingDisparoService,
+    private readonly popups: PopupService,
   ) {}
 
-  private maskExpoPushToken(token?: string | null): string {
-    if (!token) return 'ausente';
-    if (token.length <= 16) return token;
-    return `${token.slice(0, 12)}...${token.slice(-4)}`;
-  }
-
-  private buildExpoMessage(
-    expoPushToken: string,
-    title: string,
-    body: string,
-    data: NotificationData,
-  ): ExpoPushMessage {
-    return {
-      to: expoPushToken,
-      title,
-      body,
-      data,
-      sound: 'default',
-      priority: 'high',
-      channelId: 'alerts_v2',
-      _contentAvailable: true,
-      mutableContent: true, // precisa bater com o canal do app
-      //_contentAvailable: true, // iOS background/killed
-      //mutableContent: true, // iOS compat
-      //ttl: 60 * 60, // 1h
-      //expiration: Math.floor(Date.now() / 1000) + 60 * 60,
-    };
-  }
-
-  async registerExpoPushToken(
+  registerExpoPushToken(
     userId: number,
     expoPushToken: string,
   ): Promise<{ success: boolean; message: string }> {
-    if (!Expo.isExpoPushToken(expoPushToken)) {
-      this.logger.warn(
-        `⚠️ [Token] expoPushToken inválido para user ${userId}: ${this.maskExpoPushToken(expoPushToken)}`,
-      );
-      return { success: false, message: 'Token Expo inválido.' };
-    }
-
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
-      select: { id: true },
-    });
-
-    if (!user) {
-      return {
-        success: false,
-        message: `Usuario com ID ${userId} nao encontrado no banco.`,
-      };
-    }
-
-    await this.prisma.user.update({
-      where: { id: userId },
-      data: { expoPushToken },
-    });
-
-    return { success: true, message: 'Token Expo registrado com sucesso.' };
+    return this.tokens.registrar(userId, expoPushToken);
   }
 
-  /**
-   * Salva uma notificação no banco de dados
-   */
-  async saveNotification(
+  /** Grava uma linha na caixa de entrada, sem enviar push. */
+  saveNotification(
     userId: number,
     expoPushToken: string,
     title: string,
     body: string,
     data: NotificationData,
   ): Promise<Notification> {
-    const notification = await this.prisma.notification.create({
-      data: {
-        userId,
-        expoPushToken,
-        title,
-        body,
-        data: data as any,
-        sentAt: new Date(),
-      },
-    });
-
-    return notification;
+    return this.caixa.gravar({ userId, expoPushToken, title, body, data });
   }
 
   /**
-   * Envia notificação push via Expo e salva no banco
+   * Envia um push para um usuário e grava a caixa de entrada. Nunca lança
+   * por falha de envio: devolve `success: false` (contrato das rotas e dos
+   * chamadores). Quem precisa repetir em falha de transporte usa a fila de
+   * alerta, onde o processor decide pelo resultado completo.
    */
   async sendPushNotification(
     userId: number,
@@ -124,568 +83,106 @@ export class NotificationsService {
     title: string,
     body: string,
     data: NotificationData,
-  ): Promise<{ success: boolean; message: string; notificationId?: number }> {
-    if (!Expo.isExpoPushToken(expoPushToken)) {
-      this.logger.warn(
-        `⚠️ [Push] expoPushToken inválido: ${this.maskExpoPushToken(expoPushToken)} (user ${userId})`,
-      );
-      return { success: false, message: 'Token Expo inválido.' };
-    }
-
-    // Verificar se o usuário existe no banco (importante para constraint FK)
-    const userExists = await this.prisma.user.findUnique({
-      where: { id: userId },
-      select: { notificacaoIgnicao: true },
-    });
-
-    if (!userExists) {
-      return {
-        success: false,
-        message: `Usuario com ID ${userId} nao encontrado no banco.`,
-      };
-    }
-
-    // Validar preferências de ignição se aplicável
-    if (data?.ignition && !userExists.notificacaoIgnicao) {
-      return {
-        success: false,
-        message: 'Preferencia de notificacao de ignicao desativada.',
-      };
-    }
-
-    // Salvar no banco ANTES de enviar
-    const savedNotification = await this.saveNotification(
-      userId,
-      expoPushToken,
-      title,
-      body,
-      data,
-    );
-
-    const message = this.buildExpoMessage(expoPushToken, title, body, data);
-
-    try {
-      const tickets = await this.expo.sendPushNotificationsAsync([message]);
-      const firstTicket = tickets?.[0];
-
-      const receiptIds = tickets
-        .filter((ticket) => ticket.status === 'ok')
-        .map((ticket) => ticket.id);
-
-      if (receiptIds.length) {
-        const receipts =
-          await this.expo.getPushNotificationReceiptsAsync(receiptIds);
-
-        for (const receiptId in receipts) {
-          const receipt = receipts[receiptId];
-
-          if (receipt.status === 'error') {
-            this.logger.error(
-              `❌ [Expo Receipt] erro na entrega: ${receipt.message}`,
-              receipt.details,
-            );
-          }
-        }
-      }
-
-      if (firstTicket?.status === 'error') {
-        this.logger.warn(
-          `⚠️ [Expo] Ticket erro para notificação #${savedNotification.id}: ${firstTicket.message ?? 'erro desconhecido'}`,
-        );
-        return {
-          success: false,
-          message: firstTicket.message || 'Erro no ticket Expo.',
-          notificationId: savedNotification.id,
-        };
-      }
-
-      return {
-        success: true,
-        message: 'Notificação enviada com sucesso.',
-        notificationId: savedNotification.id,
-      };
-    } catch (error) {
-      this.logger.error(
-        `❌ [Expo] Erro ao enviar notificação #${savedNotification.id}:`,
-        error,
-      );
-      return {
-        success: false,
-        message: 'Erro ao enviar notificação.',
-        notificationId: savedNotification.id,
-      };
-    }
-  }
-
-  /**
-   * Obtém notificações não lidas do usuário
-   */
-  async getUnreadNotifications(
-    userId: number,
-    limit: number = 50,
-    offset: number = 0,
-  ): Promise<GetNotificationsListResponseDto> {
-    const [notifications, unreadCount] = await Promise.all([
-      this.prisma.notification.findMany({
-        where: { userId, read: false, deleted: false },
-        orderBy: { sentAt: 'desc' },
-        skip: offset,
-        take: limit,
-      }),
-      this.prisma.notification.count({
-        where: { userId, read: false, deleted: false },
-      }),
-    ]);
-
-    const notificationDtos = notifications.map(
-      (n) => new GetNotificationsResponseDto(n),
-    );
-
-    return new GetNotificationsListResponseDto(
-      notificationDtos,
-      unreadCount,
-      unreadCount,
-    );
-  }
-
-  /**
-   * Obtém todas as notificações do usuário (lidas + não lidas)
-   */
-  async getAllNotifications(
-    userId: number,
-    limit: number = 50,
-    offset: number = 0,
-  ): Promise<GetNotificationsListResponseDto> {
-    const [notifications, total] = await Promise.all([
-      this.prisma.notification.findMany({
-        where: { userId, deleted: false },
-        orderBy: { sentAt: 'desc' },
-        skip: offset,
-        take: limit,
-      }),
-      this.prisma.notification.count({
-        where: { userId, deleted: false },
-      }),
-    ]);
-
-    const notificationDtos = notifications.map(
-      (n) => new GetNotificationsResponseDto(n),
-    );
-
-    return new GetNotificationsListResponseDto(notificationDtos, total);
-  }
-
-  /**
-   * Marca uma notificação como lida
-   */
-  async markAsRead(
-    userId: number,
-    notificationId: number,
-  ): Promise<Notification> {
-    const notification = await this.prisma.notification.findUnique({
-      where: { id: notificationId },
-    });
-
-    if (!notification) {
-      throw new NotFoundException(
-        `Notificação #${notificationId} não encontrada`,
-      );
-    }
-
-    if (notification.userId !== userId) {
-      throw new ForbiddenException('Acesso negado a esta notificação');
-    }
-
-    const updated = await this.prisma.notification.update({
-      where: { id: notificationId },
-      data: {
-        read: true,
-        readAt: new Date(),
-      },
-    });
-
-    return updated;
-  }
-
-  /**
-   * Marca todas as notificações como lidas
-   */
-  async markAllAsRead(userId: number): Promise<{ count: number }> {
-    const result = await this.prisma.notification.updateMany({
-      where: {
-        userId,
-        read: false,
-      },
-      data: {
-        read: true,
-        readAt: new Date(),
-      },
-    });
-
-    return { count: result.count };
-  }
-
-  /**
-   * Deleta uma notificação
-   */
-  async deleteNotification(
-    userId: number,
-    notificationId: number,
-  ): Promise<void> {
-    const notification = await this.prisma.notification.findUnique({
-      where: { id: notificationId },
-    });
-
-    if (!notification) {
-      throw new NotFoundException(
-        `Notificação #${notificationId} não encontrada`,
-      );
-    }
-
-    if (notification.userId !== userId) {
-      throw new ForbiddenException('Acesso negado a esta notificação');
-    }
-
-    if (notification.deleted) {
-      throw new NotFoundException(
-        `Notificação #${notificationId} já foi deletada`,
-      );
-    }
-
-    await this.prisma.notification.update({
-      where: { id: notificationId },
-      data: {
-        deleted: true,
-      },
-    });
-  }
-
-  /**
-   * Marca todas as notificações de um usuário como deletadas (soft delete)
-   */
-  async deleteAllUserNotifications(
-    userId: number,
-  ): Promise<{ deletedCount: number }> {
-    const result = await this.prisma.notification.updateMany({
-      where: { userId, deleted: false },
-      data: { deleted: true },
-    });
-
-    return { deletedCount: result.count };
-  }
-
-  /**
-   * Disparada pelo processador de webhook M7.
-   */
-  async dispararNotificacaoVeiculoWebhook(
-    chassi: string,
-    tipoevento: number | null,
-    evento: string | null,
-  ): Promise<{ sent: number; skipped: number }> {
-    const eventoLower = evento?.toLowerCase() ?? '';
-
-    const isIgnicaoLigada =
-      tipoevento === 32 ||
-      eventoLower.includes('igniçao ligada') ||
-      eventoLower.includes('ignição ligada');
-
-    const isAncoraViolada =
-      tipoevento === 16 ||
-      eventoLower.includes('violação de ancora') ||
-      eventoLower.includes('violacao de ancora');
-
-    if (!isIgnicaoLigada && !isAncoraViolada) {
-      this.logger.log(
-        `[Webhook] Evento sem mapeamento de notificação: tipoevento=${tipoevento}, evento="${evento}" — ignorando`,
-      );
-      return { sent: 0, skipped: 0 };
-    }
-
-    const userVehicles = await this.prisma.userVehicle.findMany({
-      where: {
-        chassi,
-        isActive: true,
-        user: { notificacaoIgnicao: true, isActive: true },
-      },
-      select: {
-        userId: true,
-        plate: true,
-      },
-    });
-
-    if (userVehicles.length === 0) {
-      this.logger.log(
-        `[Webhook] Nenhum usuário com notificacaoIgnicao ativa para chassi "${chassi}"`,
-      );
-      return { sent: 0, skipped: 0 };
-    }
-
-    const userIds = userVehicles.map((v) => v.userId);
-
-    const usersWithToken = await this.prisma.user.findMany({
-      where: {
-        id: { in: userIds },
-        isActive: true,
-        expoPushToken: { not: null },
-      },
-      select: { id: true, expoPushToken: true },
-    });
-
-    const tokenMap = new Map(
-      usersWithToken
-        .filter((u) => !!u.expoPushToken)
-        .map((u) => [u.id, u.expoPushToken as string]),
-    );
-    const plateMap = new Map(userVehicles.map((v) => [v.userId, v.plate]));
-
-    let sent = 0;
-    let skipped = 0;
-
-    for (const { userId } of userVehicles) {
-      const expoPushToken = tokenMap.get(userId);
-
-      if (!expoPushToken || !Expo.isExpoPushToken(expoPushToken)) {
-        this.logger.warn(
-          `[Webhook] Token inválido ou ausente para user ${userId} — ignorando`,
-        );
-        skipped++;
-        continue;
-      }
-
-      const plate = plateMap.get(userId);
-      const vehicleLabel = plate ? `placa ${plate}` : `chassi ${chassi}`;
-
-      let title: string;
-      let body: string;
-      let data: NotificationData;
-
-      if (isIgnicaoLigada) {
-        title = 'Ignição Ligada 🔑';
-        body = `A ignição do seu veículo (${vehicleLabel}) foi ligada.`;
-        data = {
-          chassi,
-          plate: plate ?? undefined,
-          ignition: 'on',
-          eventType: 'ignition_on',
-        };
-      } else {
-        title = 'Violação de Âncora ⚠️';
-        body = `Violação de âncora detectada no seu veículo (${vehicleLabel}).`;
-        data = {
-          chassi,
-          plate: plate ?? undefined,
-          eventType: 'ancora_violation',
-        };
-      }
-
-      const result = await this.sendPushNotification(
+  ): Promise<RespostaDoPush> {
+    return paraRespostaDoPush(
+      await this.pushUnitario.enviar({
         userId,
         expoPushToken,
         title,
         body,
         data,
-      );
-
-      if (result.success) {
-        sent++;
-      } else {
-        skipped++;
-        this.logger.warn(
-          `[Webhook] Falha ao enviar notificação para user ${userId}: ${result.message}`,
-        );
-      }
-    }
-
-    return { sent, skipped };
+      }),
+    );
   }
 
-  /**
-   * Limpa notificações antigas (>30 dias por padrão)
-   */
-  async cleanOldNotifications(
+  getUnreadNotifications(
+    userId: number,
+    limit: number = 50,
+    offset: number = 0,
+  ): Promise<GetNotificationsListResponseDto> {
+    return this.caixa.naoLidas(userId, limit, offset);
+  }
+
+  getAllNotifications(
+    userId: number,
+    limit: number = 50,
+    offset: number = 0,
+  ): Promise<GetNotificationsListResponseDto> {
+    return this.caixa.todas(userId, limit, offset);
+  }
+
+  markAsRead(userId: number, notificationId: number): Promise<Notification> {
+    return this.caixa.marcarComoLida(userId, notificationId);
+  }
+
+  markAllAsRead(userId: number): Promise<{ count: number }> {
+    return this.caixa.marcarTodasComoLidas(userId);
+  }
+
+  deleteNotification(userId: number, notificationId: number): Promise<void> {
+    return this.caixa.excluir(userId, notificationId);
+  }
+
+  deleteAllUserNotifications(
+    userId: number,
+  ): Promise<{ deletedCount: number }> {
+    return this.caixa.excluirTodas(userId);
+  }
+
+  cleanOldNotifications(
     daysOld: number = 30,
   ): Promise<{ deletedCount: number }> {
-    const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - daysOld);
-
-    const result = await this.prisma.notification.deleteMany({
-      where: {
-        createdAt: {
-          lt: cutoffDate,
-        },
-      },
-    });
-
-    this.logger.log(
-      `🧹 [Cleanup] ${result.count} notificações antigas removidas (>${daysOld} dias)`,
-    );
-    return { deletedCount: result.count };
+    return this.caixa.limparAntigas(daysOld);
   }
 
   /**
-   * Envia notificacoes de marketing para usuarios opt-in
-   * Apenas ADMIN pode chamar este método
+   * Disparada pelo processador de webhook da M7 (rastreamento). `opcoes` é
+   * opcional: com a chave do evento, o reprocessamento do mesmo webhook não
+   * gera outro push.
    */
-  async sendMarketingNotification(
-    payload: {
-      title: string;
-      body: string;
-      data?: SendMarketingNotificationDto['data'];
-    },
-    adminUserId?: number,
-  ): Promise<{ sentCount: number; skippedCount: number }> {
-    const dataPayload = payload.data ?? { type: 'marketing' };
-
-    const recipients = await this.prisma.user.findMany({
-      where: {
-        isActive: true,
-        acceptsMarketingNotifications: true,
-        expoPushToken: { not: null },
-      },
-      select: {
-        id: true,
-        expoPushToken: true,
-      },
-    });
-
-    // Remover duplicatas por ID (em caso de inconsistência)
-    const uniqueRecipients = new Map(recipients.map((r) => [r.id, r]));
-
-    const validRecipients: Array<{ id: number; expoPushToken: string }> = [];
-    for (const recipient of uniqueRecipients.values()) {
-      if (
-        recipient.expoPushToken &&
-        Expo.isExpoPushToken(recipient.expoPushToken)
-      ) {
-        validRecipients.push({
-          id: recipient.id,
-          expoPushToken: recipient.expoPushToken,
-        });
-      }
-    }
-
-    if (validRecipients.length === 0) {
-      this.logger.warn('[MARKETING] Nenhum recipiente válido encontrado');
-      return { sentCount: 0, skippedCount: recipients.length };
-    }
-
-    const messages: ExpoPushMessage[] = validRecipients.map((recipient) =>
-      this.buildExpoMessage(
-        recipient.expoPushToken,
-        payload.title,
-        payload.body,
-        dataPayload,
-      ),
+  dispararNotificacaoVeiculoWebhook(
+    chassi: string,
+    tipoevento: number | null,
+    evento: string | null,
+    opcoes?: OpcoesDoAlerta,
+  ): Promise<{ sent: number; skipped: number }> {
+    return this.alertas.dispararNotificacaoVeiculoWebhook(
+      chassi,
+      tipoevento,
+      evento,
+      opcoes,
     );
-
-    const chunks = this.expo.chunkPushNotifications(messages);
-    const sentNotifications: Array<{ id: number; expoPushToken: string }> = [];
-
-    for (let i = 0; i < chunks.length; i++) {
-      try {
-        const response = await this.expo.sendPushNotificationsAsync(chunks[i]);
-
-        // Registrar apenas as que foram enviadas com sucesso
-        for (let j = 0; j < response.length; j++) {
-          const ticket = response[j];
-          if (ticket.status === 'ok') {
-            sentNotifications.push(validRecipients[i * chunks[i].length + j]);
-          } else {
-            this.logger.warn(
-              `[MARKETING] Falha ao enviar para usuário: ${ticket.message}`,
-            );
-          }
-        }
-      } catch (error) {
-        this.logger.error(
-          `[MARKETING] Erro ao enviar chunk ${i + 1}: ${error.message}`,
-        );
-      }
-    }
-
-    // Salvar APENAS as que foram realmente enviadas
-    try {
-      await this.prisma.notification.createMany({
-        data: sentNotifications.map((recipient) => ({
-          userId: recipient.id,
-          expoPushToken: recipient.expoPushToken,
-          title: payload.title,
-          body: payload.body,
-          data: dataPayload as any,
-          sentAt: new Date(),
-        })),
-      });
-    } catch (error) {
-      this.logger.error(
-        `[MARKETING] Erro ao salvar notificações: ${error.message}`,
-      );
-    }
-
-    const skippedCount = validRecipients.length - sentNotifications.length;
-
-    return {
-      sentCount: sentNotifications.length,
-      skippedCount,
-    };
   }
 
-  async getActivePopup() {
-    return this.prisma.notificationPopup.findFirst({
-      where: { active: true },
-      orderBy: { createdAt: 'desc' },
-    });
+  /**
+   * Disparo de marketing imediato: registra o pedido, cria o disparo e
+   * enfileira os lotes. `sentCount` = destinatários selecionados.
+   */
+  sendMarketingNotification(
+    payload: Pick<SendMarketingNotificationDto, 'title' | 'body' | 'data'>,
+    adminUserId?: number,
+  ): Promise<RespostaDoDisparo> {
+    return this.marketing.dispararAgora(payload, adminUserId);
   }
 
-  async upsertPopup(
+  /** `POST /notifications/admin/marketing` (imediato ou agendado). */
+  dispararMarketing(
+    dto: SendMarketingNotificationDto,
+    contexto: ContextoDoPedido,
+  ) {
+    return this.marketing.disparar(dto, contexto);
+  }
+
+  getActivePopup() {
+    return this.popups.ativo();
+  }
+
+  upsertPopup(
     id: number | undefined,
-    data: {
-      imageUrl?: string;
-      linkUrl?: string;
-      linkLabel?: string;
-      active?: boolean;
-    },
+    data: DadosDoPopup,
     userId: number,
     image?: Express.Multer.File,
   ) {
-    let imageUrl = data.imageUrl;
-
-    if (image) {
-      const uploadedPath = await this.fileUploadService.uploadPopupPhoto(image);
-      imageUrl = this.fileUploadService.buildUrl(uploadedPath) ?? undefined;
-    }
-
-    const upsertData: any = {
-      linkUrl: data.linkUrl,
-      linkLabel: data.linkLabel,
-      active: data.active,
-      userId,
-    };
-
-    if (imageUrl) {
-      upsertData.imageUrl = imageUrl;
-    }
-
-    if (!imageUrl && upsertData.active) {
-      upsertData.active = false;
-    }
-
-    if (!imageUrl && !id) {
-      throw new BadRequestException('A imagem do pop-up é obrigatória');
-    }
-
-    if (id) {
-      const existing = await this.prisma.notificationPopup.findUnique({
-        where: { id },
-      });
-      if (!existing) {
-        throw new NotFoundException('Popup não encontrado');
-      }
-      return this.prisma.notificationPopup.update({
-        where: { id },
-        data: upsertData,
-      });
-    }
-
-    return this.prisma.notificationPopup.create({ data: upsertData });
+    return this.popups.gravar(id, data, userId, image);
   }
 }

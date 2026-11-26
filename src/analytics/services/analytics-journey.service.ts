@@ -8,6 +8,7 @@ import {
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { Prisma } from '@prisma/client';
+import { papelAtivo } from 'src/config/app.config';
 import { PrismaService } from 'src/database/prisma.service';
 import { ANALYTICS_QUEUE } from 'src/queue/queue.module';
 import {
@@ -16,9 +17,13 @@ import {
 } from 'src/analytics/dto/analytics-journey-query.dto';
 import {
   JOURNEY_ACTIVE_DEVICE_WINDOW_DAYS,
-  JOURNEY_CLEANUP_JOB,
   JOURNEY_CLEANUP_SCHEDULER_ID,
 } from 'src/analytics/constants/analytics-journey.constants';
+import { AnalyticsJornadaExpurgoService } from 'src/analytics/services/analytics-jornada-expurgo.service';
+import { ExpurgoService } from 'src/infra/manutencao/expurgo.service';
+
+/** Nome da rotina no resultado do expurgo diário. */
+export const ROTINA_DE_EXPURGO_DA_JORNADA = 'AnalyticsJourneyEvent';
 
 const DEFAULT_RANGE_DAYS = 7;
 const MAX_RANGE_DAYS = 92;
@@ -65,36 +70,45 @@ export class AnalyticsJourneyService implements OnModuleInit {
   constructor(
     private readonly prisma: PrismaService,
     @InjectQueue(ANALYTICS_QUEUE) private readonly analyticsQueue: Queue,
+    private readonly manutencao: ExpurgoService,
+    private readonly expurgoDaJornada: AnalyticsJornadaExpurgoService,
   ) {}
 
   /**
-   * Registra (ou remove) o job repetível de limpeza na fila de analytics.
-   * Roda 03:30 (America/Sao_Paulo) quando ANALYTICS_JOURNEY_ENABLED=true.
-   * Falha aqui não derruba o boot — só loga.
+   * Com `ANALYTICS_JOURNEY_ENABLED=true`, inclui a limpeza da jornada na
+   * rotina diária de manutenção do worker (03:30, America/Sao_Paulo).
    */
   async onModuleInit(): Promise<void> {
+    // Só o worker roda a manutenção e mexe em agendador.
+    if (!papelAtivo('worker')) return;
     const enabled = isTruthyEnv(process.env.ANALYTICS_JOURNEY_ENABLED);
+
+    if (enabled) {
+      // A limpeza entra na rodada diária da manutenção (03:30, sob trava),
+      // junto com os demais expurgos.
+      this.manutencao.registrarRotina(
+        ROTINA_DE_EXPURGO_DA_JORNADA,
+        async (agora) => {
+          const { removidos } =
+            await this.expurgoDaJornada.expurgarJornada(agora);
+          return removidos;
+        },
+      );
+      this.logger.log(
+        'Jornada do usuário ATIVA (ANALYTICS_JOURNEY_ENABLED=true) — limpeza diária na rotina de manutenção (03:30)',
+      );
+    }
+
+    // O agendador próprio na fila de analytics foi substituído pela rotina
+    // acima: remove o que uma versão anterior tenha criado. Falha aqui não
+    // derruba o boot — sobra, no máximo, uma limpeza em dobro (inofensiva).
     try {
-      if (enabled) {
-        await this.analyticsQueue.upsertJobScheduler(
-          JOURNEY_CLEANUP_SCHEDULER_ID,
-          { pattern: '30 3 * * *', tz: 'America/Sao_Paulo' },
-          {
-            name: JOURNEY_CLEANUP_JOB,
-            opts: { removeOnComplete: true, removeOnFail: 20 },
-          },
-        );
-        this.logger.log(
-          'Jornada do usuário ATIVA (ANALYTICS_JOURNEY_ENABLED=true) — limpeza diária agendada às 03:30',
-        );
-      } else {
-        await this.analyticsQueue.removeJobScheduler(
-          JOURNEY_CLEANUP_SCHEDULER_ID,
-        );
-      }
+      await this.analyticsQueue.removeJobScheduler(
+        JOURNEY_CLEANUP_SCHEDULER_ID,
+      );
     } catch (err) {
       this.logger.warn(
-        `Não foi possível configurar a limpeza da jornada: ${(err as Error).message}`,
+        `Não foi possível remover o agendador antigo da limpeza da jornada: ${(err as Error).message}`,
       );
     }
   }

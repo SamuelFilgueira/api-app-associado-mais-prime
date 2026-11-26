@@ -22,6 +22,7 @@ import {
   processarComConcorrencia,
 } from '../utils/period.utils';
 import { GeomPipelineProcessor } from '../processors/geom-pipeline.processor';
+import { avisoDeHistoricoParcial } from 'src/rastreamento/domain/historico-parcial';
 
 /** Máximo de requisições simultâneas à API Softruck no processamento de período */
 const MAX_CONCORRENCIA = 3;
@@ -161,6 +162,9 @@ export class HistoricoSoftruckService {
     const { vehicleData, deviceData } = resolucao;
 
     const accs = gerarListaAcc(dataInicial, dataFinal);
+    /** Dias cuja consulta falhou (diferente de "dia sem viagens"). */
+    const accsComFalha = new Set<number>();
+    const anotarFalha = (acc: number) => accsComFalha.add(acc);
 
     // FASE 1: by-keys para obter enterpriseId + dados de segmentos para sumário
     const resultadosByKeys = await processarComConcorrencia(
@@ -173,6 +177,7 @@ export class HistoricoSoftruckService {
           acc,
           baseOrigin,
           publicKey,
+          anotarFalha,
         );
       },
     );
@@ -222,6 +227,7 @@ export class HistoricoSoftruckService {
             acc,
             baseOrigin,
             publicKey,
+            anotarFalha,
           );
         },
       );
@@ -266,6 +272,7 @@ export class HistoricoSoftruckService {
         routeFeatures: pipeline.routeFeatures,
         alarmFeatures: pipeline.alarmFeatures,
       },
+      ...avisoDeHistoricoParcial(accsComFalha),
     };
   }
 }

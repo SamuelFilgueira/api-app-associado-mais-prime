@@ -171,19 +171,38 @@ export class SorteRaspadinhaService {
         raspadasPorDia: config.raspadasPorDia,
         intervaloMinimoMinutos: config.intervaloMinimoMinutos,
       });
-      if (janela.bloqueio === 'LIMITE_DIARIO') {
-        throw erro409(
-          'LIMITE_DIARIO',
-          'Você já usou todas as raspadas de hoje',
-          { proximaRaspadaEm: janela.proximaRaspadaEm, serverNow: agora },
-        );
-      }
-      if (janela.bloqueio === 'INTERVALO') {
-        throw erro409(
-          'INTERVALO',
-          'Sua próxima raspada ainda não foi liberada',
-          { proximaRaspadaEm: janela.proximaRaspadaEm, serverNow: agora },
-        );
+      if (
+        janela.bloqueio === 'LIMITE_DIARIO' ||
+        janela.bloqueio === 'INTERVALO'
+      ) {
+        // Campo aditivo: quem raspou e perdeu a resposta (rede caiu) recebe
+        // aqui o que ganhou, em vez de só o aviso de que já raspou.
+        const ultima = await tx.ultimaRaspadaDoDia(userId, hoje);
+        const extra = {
+          proximaRaspadaEm: janela.proximaRaspadaEm,
+          serverNow: agora,
+          ultimaRaspada: ultima
+            ? {
+                raspadaId: ultima.id,
+                resultado: ultima.resultado,
+                creditos: ultima.creditos,
+                bonusJornada: ultima.bonus,
+                momentoId: ultima.momentoId,
+                em: ultima.createdAt,
+              }
+            : null,
+        };
+        throw janela.bloqueio === 'LIMITE_DIARIO'
+          ? erro409(
+              'LIMITE_DIARIO',
+              'Você já usou todas as raspadas de hoje',
+              extra,
+            )
+          : erro409(
+              'INTERVALO',
+              'Sua próxima raspada ainda não foi liberada',
+              extra,
+            );
       }
 
       // 3. Jornada: a primeira raspada do dia conta para a sequência.

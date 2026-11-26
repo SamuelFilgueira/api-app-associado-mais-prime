@@ -1,109 +1,125 @@
-import { AlloyalPromotionDto } from 'src/beneficios/dto/alloyal-promotion.dto';
-import {
-  AlloyalCouponRedeemResponseDto,
-  AlloyalCouponOrderResponseDto,
-} from 'src/beneficios/dto/alloyal-coupon-redeem.dto';
-import { AlloyalCashbackTransferRequestDto } from 'src/beneficios/dto/alloyal-cashback-transfer-request.dto';
 import {
   Body,
   Controller,
   Get,
-  Post,
-  Patch,
-  Param,
-  Query,
   Headers,
-  Logger,
-  HttpException,
-  HttpStatus,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Request,
   UseGuards,
-  Optional,
 } from '@nestjs/common';
-import { AlloyalApiService } from 'src/beneficios/services/alloyal-api.service';
-import { AlloyalCategoryDto } from 'src/beneficios/dto/alloyal-category.dto';
-import { AlloyalOrganizationCategoryDto } from 'src/beneficios/dto/alloyal-organization.dto';
-import { AlloyalOrganizationListDto } from 'src/beneficios/dto/alloyal-organization-list.dto';
-import { AlloyalOrganizationNearestDto } from 'src/beneficios/dto/alloyal-organization-nearest.dto';
-import { AlloyalOrganizationHighlightDto } from 'src/beneficios/dto/alloyal-organization-highlight.dto';
-import { AlloyalOrganizationHighlightOnlineDto } from 'src/beneficios/dto/alloyal-organization-highlight-online.dto';
-import { AlloyalBranchDto } from 'src/beneficios/dto/alloyal-branch.dto';
-import { AlloyalOrganizationCouponDto } from 'src/beneficios/dto/alloyal-organization-coupon.dto';
 import { AlloyalBranchCouponDto } from 'src/beneficios/dto/alloyal-branch-coupon.dto';
-import { AlloyalCouponDetailDto } from 'src/beneficios/dto/alloyal-coupon-detail.dto';
+import { AlloyalBranchDto } from 'src/beneficios/dto/alloyal-branch.dto';
+import { AlloyalCashbackTransferRequestDto } from 'src/beneficios/dto/alloyal-cashback-transfer-request.dto';
 import { AlloyalCashbackRecordsResponseDto } from 'src/beneficios/dto/alloyal-cashback.dto';
-import { AlloyalUserDto } from 'src/beneficios/dto/alloyal-user.dto';
+import { AlloyalCategoryDto } from 'src/beneficios/dto/alloyal-category.dto';
+import { AlloyalCouponDetailDto } from 'src/beneficios/dto/alloyal-coupon-detail.dto';
+import {
+  AlloyalCouponOrderResponseDto,
+  AlloyalCouponRedeemResponseDto,
+} from 'src/beneficios/dto/alloyal-coupon-redeem.dto';
 import { AlloyalCreateUserRequestDto } from 'src/beneficios/dto/alloyal-create-user.dto';
-import { AlloyalUpdateUserRequestDto } from 'src/beneficios/dto/alloyal-update-user.dto';
 import {
   AlloyalLoginRequestDto,
   AlloyalLoginResponseDto,
 } from 'src/beneficios/dto/alloyal-login.dto';
-import { AlloyalSessionHeaders } from 'src/beneficios/services/alloyal-api.service';
-import { JwtAuthGuard } from 'src/infra/guards/jwt-auth.guard';
-import { AlloyalCategoriesCacheService } from 'src/beneficios/services/alloyal-categories-cache.service';
+import { AlloyalOrganizationCouponDto } from 'src/beneficios/dto/alloyal-organization-coupon.dto';
+import { AlloyalOrganizationHighlightOnlineDto } from 'src/beneficios/dto/alloyal-organization-highlight-online.dto';
+import { AlloyalOrganizationHighlightDto } from 'src/beneficios/dto/alloyal-organization-highlight.dto';
+import { AlloyalOrganizationListDto } from 'src/beneficios/dto/alloyal-organization-list.dto';
+import { AlloyalOrganizationNearestDto } from 'src/beneficios/dto/alloyal-organization-nearest.dto';
+import { AlloyalOrganizationCategoryDto } from 'src/beneficios/dto/alloyal-organization.dto';
+import { AlloyalPromotionDto } from 'src/beneficios/dto/alloyal-promotion.dto';
+import { AlloyalUpdateUserRequestDto } from 'src/beneficios/dto/alloyal-update-user.dto';
+import { AlloyalUserDto } from 'src/beneficios/dto/alloyal-user.dto';
+import {
+  CabecalhosDaSessao,
+  baseDoToken,
+  contextoComSessao,
+} from 'src/beneficios/helpers/alloyal-contexto';
+import {
+  RotaAlloyal,
+  comErroDeContrato,
+} from 'src/beneficios/helpers/alloyal-erro-de-contrato';
+import { AlloyalCashbackService } from 'src/beneficios/services/alloyal-cashback.service';
+import { AlloyalCatalogoService } from 'src/beneficios/services/alloyal-catalogo.service';
+import { AlloyalCuponsService } from 'src/beneficios/services/alloyal-cupons.service';
+import { AlloyalSessaoService } from 'src/beneficios/services/alloyal-sessao.service';
+import { AlloyalUsuariosService } from 'src/beneficios/services/alloyal-usuarios.service';
+import type { BaseOrigin as BaseOriginType } from 'src/config/tenant.config';
+import { UsuarioAutenticado } from 'src/infra/auth/usuario-autenticado';
 import { BaseOrigin } from 'src/infra/decorators/base-origin.decorator';
+import { JwtAuthGuard } from 'src/infra/guards/jwt-auth.guard';
+import { LimiteDeTaxa } from 'src/infra/rate-limit/limite-de-taxa.decorator';
+import { SessaoAlloyal } from 'src/integrations/alloyal/alloyal.gateway';
+
+type Requisicao = { user?: UsuarioAutenticado };
 
 /**
- * Controller responsável por expor endpoints da API Alloyal de benefícios
- * Gerencia categorias, organizações, filiais e cupons de desconto
+ * Rotas do clube de vantagens (Alloyal): sessão, catálogo, cashback,
+ * usuário do associado, cupons e pedidos.
+ *
+ * Cada rota só monta o contexto (base do JWT, sessão da Alloyal vinda dos
+ * cabeçalhos, usuário autenticado) e delega ao service do assunto. Toda
+ * falha sai com o status e a mensagem fixos da rota — a conversão vive num
+ * lugar só, `comErroDeContrato`, e é contrato com o app.
  */
 @Controller('alloyal')
 @UseGuards(JwtAuthGuard)
 export class AlloyalApiController {
-  private readonly logger = new Logger(AlloyalApiController.name);
   constructor(
-    private readonly alloyalApiService: AlloyalApiService,
-    // Opcional para não quebrar o contract spec, que monta só o service.
-    @Optional()
-    private readonly categoriesCache?: AlloyalCategoriesCacheService,
+    private readonly sessoes: AlloyalSessaoService,
+    private readonly catalogo: AlloyalCatalogoService,
+    private readonly cashback: AlloyalCashbackService,
+    private readonly usuarios: AlloyalUsuariosService,
+    private readonly cupons: AlloyalCuponsService,
   ) {}
 
-  private getSessionHeaders(
-    uid?: string,
-    client?: string,
-    accessToken?: string,
-  ): AlloyalSessionHeaders {
-    if (!uid || !client || !accessToken) {
-      throw new HttpException(
-        'Headers de autenticação da Alloyal ausentes (uid, client, access-token)',
-        HttpStatus.UNAUTHORIZED,
-      );
-    }
-
-    return { uid, client, accessToken };
+  /**
+   * Rota que usa a sessão do usuário na Alloyal: exige os três cabeçalhos e
+   * a base do token (dentro do contrato de erro) e delega.
+   */
+  private comSessao<T>(
+    rota: RotaAlloyal,
+    baseOrigin: string | undefined,
+    cabecalhos: CabecalhosDaSessao,
+    delegar: (base: BaseOriginType, sessao: SessaoAlloyal) => Promise<T>,
+  ): Promise<T> {
+    return comErroDeContrato(rota, () => {
+      const { base, sessao } = contextoComSessao(baseOrigin, cabecalhos);
+      return delegar(base, sessao);
+    });
   }
 
+  // ---------------------------------------------------------------- sessão
+
   /**
-   * Realiza login na API Alloyal com credenciais do usuário.
-   * Retorna os tokens (uid/client/access-token) para serem enviados nas demais rotas.
+   * Login na Alloyal com as credenciais do usuário. Devolve
+   * uid/client/accessToken, que o app envia como cabeçalhos nas demais rotas.
    */
+  @LimiteDeTaxa('autenticacao_alloyal')
   @Post('login')
-  async login(
+  login(
     @Body() dto: AlloyalLoginRequestDto,
+    @BaseOrigin({ opcional: true }) baseOrigin?: BaseOriginType,
   ): Promise<AlloyalLoginResponseDto> {
-    try {
-      const session = await this.alloyalApiService.login(dto.cpf, dto.password);
+    return comErroDeContrato('login', async () => {
+      const sessao = await this.sessoes.login(
+        baseDoToken(baseOrigin),
+        dto.cpf,
+        dto.password,
+      );
       return {
-        uid: session.uid,
-        client: session.client,
-        accessToken: session.accessToken,
+        uid: sessao.uid,
+        client: sessao.client,
+        accessToken: sessao.accessToken,
       };
-    } catch (error) {
-      this.logger.error(
-        `[login] Falha no login | status upstream: ${error?.response?.status ?? '(sem resposta)'} | data upstream: ${JSON.stringify(error?.response?.data ?? null)}`,
-        error.stack,
-      );
-      throw new HttpException(
-        'Erro ao fazer login na API Alloyal',
-        HttpStatus.UNAUTHORIZED,
-      );
-    }
+    });
   }
 
-  /**
-   * Endpoint de teste para validar autenticação na API Alloyal
-   * @returns Headers de autenticação gerados
-   */
+  /** Orientação para quem chama a rota antiga de teste. */
   @Get('test-login')
   testLogin(): { message: string } {
     return {
@@ -111,42 +127,27 @@ export class AlloyalApiController {
     };
   }
 
-  /**
-   * Lista todas as categorias de benefícios disponíveis
-   * @returns Array de categorias
-   */
+  // -------------------------------------------------------------- catálogo
+
+  /** Categorias de benefícios da base. */
   @Get('categories')
-  async getCategories(
+  getCategories(
     @Headers('uid') uid: string,
     @Headers('client') client: string,
     @Headers('access-token') accessToken: string,
-    @BaseOrigin() baseOrigin?: string,
+    @BaseOrigin({ opcional: true }) baseOrigin?: BaseOriginType,
   ): Promise<AlloyalCategoryDto[]> {
-    try {
-      const session = this.getSessionHeaders(uid, client, accessToken);
-      const categorias = await this.alloyalApiService.getCategories(session);
-      // Alimenta o cache por base usado pelo painel de parceiros diretos (§5.0)
-      void this.categoriesCache?.armazenar(baseOrigin, categorias);
-      return categorias;
-    } catch (error) {
-      this.logger.error('Erro ao buscar categorias', error.stack);
-      throw new HttpException(
-        'Erro ao buscar categorias',
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
+    return this.comSessao(
+      'categorias',
+      baseOrigin,
+      { uid, client, accessToken },
+      (base, sessao) => this.catalogo.categorias(base, sessao),
+    );
   }
 
-  /**
-   * Lista organizações de uma categoria específica
-   * @param id ID da categoria
-   * @param page Número da página (opcional)
-   * @param lat Latitude para cálculo de distância (opcional)
-   * @param lng Longitude para cálculo de distância (opcional)
-   * @returns Array de organizações da categoria
-   */
+  /** Organizações de uma categoria (`page`, `lat` e `lng` opcionais). */
   @Get('categories/:id/organizations')
-  async getOrganizationsByCategory(
+  getOrganizationsByCategory(
     @Param('id') id: string,
     @Query('page') page?: string,
     @Query('lat') lat?: string,
@@ -154,40 +155,27 @@ export class AlloyalApiController {
     @Headers('uid') uid?: string,
     @Headers('client') client?: string,
     @Headers('access-token') accessToken?: string,
+    @BaseOrigin({ opcional: true }) baseOrigin?: BaseOriginType,
   ): Promise<AlloyalOrganizationCategoryDto[]> {
-    try {
-      const session = this.getSessionHeaders(uid, client, accessToken);
-      return await this.alloyalApiService.getOrganizationsByCategory(
-        id,
-        page ? Number(page) : 1,
-        lat,
-        lng,
-        session,
-      );
-    } catch (error) {
-      this.logger.error(
-        `Erro ao buscar organizações da categoria ${id}`,
-        error.stack,
-      );
-      throw new HttpException(
-        'Erro ao buscar organizações da categoria',
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
+    return this.comSessao(
+      'organizacoesDaCategoria',
+      baseOrigin,
+      { uid, client, accessToken },
+      (base, sessao) =>
+        this.catalogo.organizacoesDaCategoria(base, sessao, id, {
+          page,
+          lat,
+          lng,
+        }),
+    );
   }
 
   /**
-   * Lista todas as organizações com filtros opcionais
-   * @param page Número da página (opcional)
-   * @param lat Latitude para cálculo de distância (opcional)
-   * @param lng Longitude para cálculo de distância (opcional)
-   * @param organization_type Tipo de organização - online/física (opcional)
-   * @param search Termo de busca (opcional)
-   * @param category_id ID da categoria para filtrar (opcional)
-   * @returns Array de organizações
+   * Organizações, com filtros opcionais: página, coordenadas, tipo
+   * (online/física), termo de busca e categoria.
    */
   @Get('organizations')
-  async getOrganizations(
+  getOrganizations(
     @Query('page') page?: string,
     @Query('lat') lat?: string,
     @Query('lng') lng?: string,
@@ -197,174 +185,108 @@ export class AlloyalApiController {
     @Headers('uid') uid?: string,
     @Headers('client') client?: string,
     @Headers('access-token') accessToken?: string,
+    @BaseOrigin({ opcional: true }) baseOrigin?: BaseOriginType,
   ): Promise<AlloyalOrganizationListDto[]> {
-    try {
-      const session = this.getSessionHeaders(uid, client, accessToken);
-      return await this.alloyalApiService.getOrganizations(
-        page ? Number(page) : 1,
-        lat,
-        lng,
-        organization_type,
-        search,
-        category_id ? Number(category_id) : undefined,
-        session,
-      );
-    } catch (error) {
-      this.logger.error('Erro ao buscar organizações', error.stack);
-      throw new HttpException(
-        'Erro ao buscar organizações',
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
+    return this.comSessao(
+      'organizacoes',
+      baseOrigin,
+      { uid, client, accessToken },
+      (base, sessao) =>
+        this.catalogo.organizacoes(base, sessao, {
+          page,
+          lat,
+          lng,
+          organization_type,
+          search,
+          category_id,
+        }),
+    );
   }
 
-  /* #region Métodos para organizações físicas e filiais */
-
   /**
-   * Lista organizações físicas mais próximas baseado em coordenadas - É necessário utilizar o método  getBranchesByOrganization para obter as filiais próximas e informações de localização detalhadas
-   * @param lat Latitude de referência (opcional)
-   * @param lng Longitude de referência (opcional)
-   * @returns Array de organizações próximas ordenadas por distância
+   * Organizações físicas mais próximas das coordenadas. Para as filiais e o
+   * endereço de cada uma, use `organizations/:organization_id/branches`.
    */
   @Get('organizations/nearest')
-  async getNearestOrganizations(
+  getNearestOrganizations(
     @Query('lat') lat?: string,
     @Query('lng') lng?: string,
     @Headers('uid') uid?: string,
     @Headers('client') client?: string,
     @Headers('access-token') accessToken?: string,
+    @BaseOrigin({ opcional: true }) baseOrigin?: BaseOriginType,
   ): Promise<AlloyalOrganizationNearestDto[]> {
-    try {
-      const session = this.getSessionHeaders(uid, client, accessToken);
-      return await this.alloyalApiService.getNearestOrganizations(
-        lat,
-        lng,
-        session,
-      );
-    } catch (error) {
-      this.logger.error(
-        'Erro ao buscar organizações mais próximas',
-        error.stack,
-      );
-      throw new HttpException(
-        'Erro ao buscar organizações mais próximas',
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
+    return this.comSessao(
+      'organizacoesProximas',
+      baseOrigin,
+      { uid, client, accessToken },
+      (base, sessao) =>
+        this.catalogo.organizacoesProximas(base, sessao, { lat, lng }),
+    );
   }
 
-  /**
-   * Lista todas as filiais físicas de uma organização
-   * @param organization_id ID da organização
-   * @param lat Latitude para cálculo de distância (opcional)
-   * @param lng Longitude para cálculo de distância (opcional)
-   * @returns Array de filiais da organização
-   */
+  /** Filiais físicas de uma organização (distância até `lat`/`lng`). */
   @Get('organizations/:organization_id/branches')
-  async getBranchesByOrganization(
+  getBranchesByOrganization(
     @Param('organization_id') organization_id: string,
     @Query('lat') lat?: string,
     @Query('lng') lng?: string,
     @Headers('uid') uid?: string,
     @Headers('client') client?: string,
     @Headers('access-token') accessToken?: string,
+    @BaseOrigin({ opcional: true }) baseOrigin?: BaseOriginType,
   ): Promise<AlloyalBranchDto[]> {
-    try {
-      const session = this.getSessionHeaders(uid, client, accessToken);
-      return await this.alloyalApiService.getBranchesByOrganization(
-        Number(organization_id),
-        lat,
-        lng,
-        session,
-      );
-    } catch (error) {
-      this.logger.error(
-        `Erro ao buscar filiais da organização ${organization_id}`,
-        error.stack,
-      );
-      throw new HttpException(
-        'Erro ao buscar filiais da organização',
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
+    return this.comSessao(
+      'filiais',
+      baseOrigin,
+      { uid, client, accessToken },
+      (base, sessao) =>
+        this.catalogo.filiais(base, sessao, organization_id, { lat, lng }),
+    );
   }
-  /* #endregion */
 
-  /* #region Métodos para organizações em destaque */
-
-  /**
-   * Lista organizações em destaque próximas baseado em coordenadas(não é necessário utilizar no momento)
-   * @param lat Latitude de referência (opcional)
-   * @param lng Longitude de referência (opcional)
-   * @returns Array de organizações em destaque próximas
-   */
+  /** Organizações em destaque próximas das coordenadas. */
   @Get('organizations/highlights_nearby')
-  async getHighlightsNearby(
+  getHighlightsNearby(
     @Query('lat') lat?: string,
     @Query('lng') lng?: string,
     @Headers('uid') uid?: string,
     @Headers('client') client?: string,
     @Headers('access-token') accessToken?: string,
+    @BaseOrigin({ opcional: true }) baseOrigin?: BaseOriginType,
   ): Promise<AlloyalOrganizationHighlightDto[]> {
-    try {
-      const session = this.getSessionHeaders(uid, client, accessToken);
-      return await this.alloyalApiService.getHighlightsNearby(
-        lat,
-        lng,
-        session,
-      );
-    } catch (error) {
-      this.logger.error(
-        'Erro ao buscar organizações em destaque próximas',
-        error.stack,
-      );
-      throw new HttpException(
-        'Erro ao buscar organizações em destaque próximas',
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
+    return this.comSessao(
+      'destaquesProximos',
+      baseOrigin,
+      { uid, client, accessToken },
+      (base, sessao) =>
+        this.catalogo.destaquesProximos(base, sessao, { lat, lng }),
+    );
   }
 
-  /**
-   * Lista organizações online em destaque
-   * @returns Array de organizações online em destaque
-   */
+  /** Organizações online em destaque. */
   @Get('organizations/highlights_online')
-  async getHighlightsOnline(
+  getHighlightsOnline(
     @Headers('uid') uid?: string,
     @Headers('client') client?: string,
     @Headers('access-token') accessToken?: string,
+    @BaseOrigin({ opcional: true }) baseOrigin?: BaseOriginType,
   ): Promise<AlloyalOrganizationHighlightOnlineDto[]> {
-    try {
-      const session = this.getSessionHeaders(uid, client, accessToken);
-      return await this.alloyalApiService.getHighlightsOnline(session);
-    } catch (error) {
-      this.logger.error(
-        'Erro ao buscar organizações online em destaque',
-        error.stack,
-      );
-      throw new HttpException(
-        'Erro ao buscar organizações online em destaque',
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
+    return this.comSessao(
+      'destaquesOnline',
+      baseOrigin,
+      { uid, client, accessToken },
+      (base, sessao) => this.catalogo.destaquesOnline(base, sessao),
+    );
   }
-  /* #endregion */
 
   /**
-   * Lista promoções disponíveis
-   * @param page Página para paginação (opcional)
-   * @param lat Latitude (opcional)
-   * @param lng Longitude (opcional)
-   * @param redeem_type Tipo do resgate: "physical" ou "online" (opcional)
-   * @param category_id ID da categoria (opcional)
-   * @param organization_id ID da marca (opcional)
-   * @param distance_km Distância máxima em km (opcional, padrão 30, máximo 30)
-   * @param term Termo de busca (opcional)
-   * @returns Lista de promoções
+   * Promoções. Filtros opcionais: página, coordenadas, `redeem_type`
+   * ("physical" ou "online"), categoria, organização, `distance_km` (até 30)
+   * e termo de busca.
    */
   @Get('promotions')
-  async getPromotions(
+  getPromotions(
     @Query('page') page?: string,
     @Query('lat') lat?: string,
     @Query('lng') lng?: string,
@@ -376,317 +298,232 @@ export class AlloyalApiController {
     @Headers('uid') uid?: string,
     @Headers('client') client?: string,
     @Headers('access-token') accessToken?: string,
+    @BaseOrigin({ opcional: true }) baseOrigin?: BaseOriginType,
   ): Promise<AlloyalPromotionDto[]> {
-    try {
-      const session = this.getSessionHeaders(uid, client, accessToken);
-      return await this.alloyalApiService.getPromotions(
-        page ? Number(page) : undefined,
-        lat,
-        lng,
-        redeem_type,
-        category_id ? Number(category_id) : undefined,
-        organization_id ? Number(organization_id) : undefined,
-        distance_km ? Number(distance_km) : undefined,
-        term,
-        session,
-      );
-    } catch (error) {
-      this.logger.error('Erro ao buscar promoções', error.stack);
-      throw new HttpException(
-        'Erro ao buscar promoções',
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
+    return this.comSessao(
+      'promocoes',
+      baseOrigin,
+      { uid, client, accessToken },
+      (base, sessao) =>
+        this.catalogo.promocoes(base, sessao, {
+          page,
+          lat,
+          lng,
+          redeem_type,
+          category_id,
+          organization_id,
+          distance_km,
+          term,
+        }),
+    );
   }
 
-  /**
-   * Lista transações de cashback do usuário (saldo e utilização)
-   * @returns Resumo de cashback e lista de transações
-   */
+  // -------------------------------------------------------------- cashback
+
+  /** Saldo e lançamentos de cashback do usuário. */
   @Get('cashback_records')
-  async getCashbackRecords(
+  getCashbackRecords(
     @Headers('uid') uid: string,
     @Headers('client') client: string,
     @Headers('access-token') accessToken: string,
+    @BaseOrigin({ opcional: true }) baseOrigin?: BaseOriginType,
   ): Promise<AlloyalCashbackRecordsResponseDto> {
-    try {
-      const session = this.getSessionHeaders(uid, client, accessToken);
-      return await this.alloyalApiService.getCashbackRecords(session);
-    } catch (error) {
-      this.logger.error('Erro ao buscar transações de cashback', error.stack);
-      throw new HttpException(
-        'Erro ao buscar transações de cashback',
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
+    return this.comSessao(
+      'cashbackExtrato',
+      baseOrigin,
+      { uid, client, accessToken },
+      (base, sessao) => this.cashback.extrato(base, sessao),
+    );
   }
 
-  /**
-   * Solicita resgate de cashback para chave PIX vinculada ao CPF
-   * @param dto CPF do usuário solicitante
-   */
+  /** Resgate do cashback para a chave PIX vinculada ao CPF. */
   @Post('cashback_transfer_requests')
-  async requestCashbackTransfer(
+  requestCashbackTransfer(
     @Body() dto: AlloyalCashbackTransferRequestDto,
     @Headers('uid') uid: string,
     @Headers('client') client: string,
     @Headers('access-token') accessToken: string,
+    @BaseOrigin({ opcional: true }) baseOrigin?: BaseOriginType,
   ): Promise<void> {
-    try {
-      const session = this.getSessionHeaders(uid, client, accessToken);
-      await this.alloyalApiService.requestCashbackTransfer(dto, session);
-    } catch (error) {
-      this.logger.error('Erro ao solicitar resgate de cashback', error.stack);
-      throw new HttpException(
-        'Erro ao solicitar resgate de cashback',
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
+    return this.comSessao(
+      'cashbackResgate',
+      baseOrigin,
+      { uid, client, accessToken },
+      (base, sessao) => this.cashback.solicitarResgate(base, sessao, dto),
+    );
   }
 
-  /**
-   * Cria um novo usuário na plataforma Alloyal
-   * @param dto Dados do usuário (name, cpf, email, password)
-   * @returns Dados do usuário criado
-   */
+  // ------------------------------------------------- usuário do associado
+  // A posse (o associado só mexe no usuário do próprio CPF) é conferida
+  // pelo `AlloyalUsuariosService`, antes de qualquer chamada à Alloyal.
+
+  /** Cadastra o associado na Alloyal (name, cpf, email, password). */
   @Post('users')
-  async createUser(
+  createUser(
     @Body() dto: AlloyalCreateUserRequestDto,
+    @Request() req: Requisicao,
+    @BaseOrigin({ opcional: true }) baseOrigin?: BaseOriginType,
   ): Promise<AlloyalUserDto> {
-    try {
-      return await this.alloyalApiService.createUser(dto);
-    } catch (error) {
-      this.logger.error('Erro ao criar usuário na API Alloyal', error.stack);
-      throw new HttpException(
-        'Erro ao criar usuário na API Alloyal',
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
+    return comErroDeContrato('usuarioCriar', () =>
+      this.usuarios.criar({ usuario: req.user, base: baseOrigin }, dto),
+    );
   }
 
   /**
-   * Atualiza dados de um usuário na plataforma Alloyal
-   * @param cpf CPF do usuário a ser atualizado (identificador no path, conforme doc da Alloyal)
-   * @param dto Campos a serem atualizados (name, email, cellphone, password, active, user_tags - todos opcionais)
-   * @returns Dados atualizados do usuário
+   * Altera o usuário na Alloyal. O parâmetro se chama `cpf`, mas o app envia
+   * o id do usuário na Alloyal; os dois são aceitos.
    */
   @Patch('users/:cpf')
-  async updateUser(
+  updateUser(
     @Param('cpf') cpf: string,
     @Body() dto: AlloyalUpdateUserRequestDto,
+    @Request() req: Requisicao,
+    @BaseOrigin({ opcional: true }) baseOrigin?: BaseOriginType,
   ): Promise<AlloyalUserDto> {
-    try {
-      return await this.alloyalApiService.updateUser(cpf, dto);
-    } catch (error) {
-      this.logger.error(
-        'Erro ao atualizar usuário na API Alloyal',
-        error.stack,
-      );
-      throw new HttpException(
-        'Erro ao atualizar usuário na API Alloyal',
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
+    return comErroDeContrato('usuarioAtualizar', () =>
+      this.usuarios.atualizar(
+        { usuario: req.user, base: baseOrigin },
+        cpf,
+        dto,
+      ),
+    );
   }
 
-  /**
-   * Busca usuários associados por CPF
-   * @param cpf CPF do usuário (com ou sem caracteres especiais)
-   * @returns Array de usuários encontrados ou array vazio
-   */
+  /** Usuários da Alloyal com o CPF informado (com ou sem máscara). */
   @Get('users/search/:cpf')
-  async searchUserByCpf(@Param('cpf') cpf: string): Promise<AlloyalUserDto[]> {
-    try {
-      return await this.alloyalApiService.searchUserByCpf(cpf);
-    } catch (error) {
-      this.logger.error('Erro ao buscar usuário por CPF', error.stack);
-      throw new HttpException(
-        'Erro ao buscar usuário por CPF',
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
+  searchUserByCpf(
+    @Param('cpf') cpf: string,
+    @Request() req: Requisicao,
+    @BaseOrigin({ opcional: true }) baseOrigin?: BaseOriginType,
+  ): Promise<AlloyalUserDto[]> {
+    return comErroDeContrato('usuarioBuscar', () =>
+      this.usuarios.buscarPorCpf({ usuario: req.user, base: baseOrigin }, cpf),
+    );
   }
 
-  /* #region Métodos para cupons de desconto */
+  // ------------------------------------------------------ cupons e pedidos
 
-  /**
-   * Lista cupons de uma organização específica
-   * @param organization_id ID da organização
-   * @param usage_type Tipo de uso do cupom - online/presencial (opcional)
-   * @returns Array de cupons da organização
-   */
+  /** Cupons de uma organização (`usage_type`: online por padrão). */
   @Get('organizations/:organization_id/coupons')
-  async getOrganizationCoupons(
+  getOrganizationCoupons(
     @Param('organization_id') organization_id: string,
     @Query('usage_type') usage_type?: string,
     @Headers('uid') uid?: string,
     @Headers('client') client?: string,
     @Headers('access-token') accessToken?: string,
+    @BaseOrigin({ opcional: true }) baseOrigin?: BaseOriginType,
   ): Promise<AlloyalOrganizationCouponDto[]> {
-    try {
-      const session = this.getSessionHeaders(uid, client, accessToken);
-      return await this.alloyalApiService.getOrganizationCoupons(
-        Number(organization_id),
-        usage_type,
-        session,
-      );
-    } catch (error) {
-      this.logger.error(
-        `Erro ao buscar cupons da organização ${organization_id}`,
-        error.stack,
-      );
-      throw new HttpException(
-        'Erro ao buscar cupons da organização',
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
+    return this.comSessao(
+      'cuponsDaOrganizacao',
+      baseOrigin,
+      { uid, client, accessToken },
+      (base, sessao) =>
+        this.cupons.cuponsDaOrganizacao(
+          base,
+          sessao,
+          organization_id,
+          usage_type,
+        ),
+    );
   }
 
-  /**
-   * Lista cupons de uma filial específica
-   * @param organization_id ID da organização
-   * @param branch_id ID da filial
-   * @param page Número da página (opcional)
-   * @returns Array de cupons da filial
-   */
+  /** Cupons de uma filial (paginado). */
   @Get('organizations/:organization_id/branches/:branch_id/coupons')
-  async getBranchCoupons(
+  getBranchCoupons(
     @Param('organization_id') organization_id: string,
     @Param('branch_id') branch_id: string,
     @Query('page') page?: string,
     @Headers('uid') uid?: string,
     @Headers('client') client?: string,
     @Headers('access-token') accessToken?: string,
+    @BaseOrigin({ opcional: true }) baseOrigin?: BaseOriginType,
   ): Promise<AlloyalBranchCouponDto[]> {
-    try {
-      const session = this.getSessionHeaders(uid, client, accessToken);
-      return await this.alloyalApiService.getBranchCoupons(
-        Number(organization_id),
-        Number(branch_id),
-        page ? Number(page) : 1,
-        session,
-      );
-    } catch (error) {
-      this.logger.error(
-        `Erro ao buscar cupons da filial ${branch_id} da organização ${organization_id}`,
-        error.stack,
-      );
-      throw new HttpException(
-        'Erro ao buscar cupons da filial',
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
+    return this.comSessao(
+      'cuponsDaFilial',
+      baseOrigin,
+      { uid, client, accessToken },
+      (base, sessao) =>
+        this.cupons.cuponsDaFilial(
+          base,
+          sessao,
+          organization_id,
+          branch_id,
+          page,
+        ),
+    );
   }
 
   /**
-   * Busca detalhes completos de um cupom específico - Esse endpoint por padrão retorna cupons de ativação com url para uso em lojas online no parâmetro activation_url. Caso esse parâmetro esteja vazio, o cupom é para uso em lojas físicas e o código do cupom estará disponível no parâmetro code.
-   * @param organization_id ID da organização
-   * @param coupon_id ID do cupom
-   * @returns Detalhes completos do cupom
+   * Detalhe de um cupom. Com `activation_url` preenchida é cupom de loja
+   * online; vazia, o cupom é de loja física e o código vem em `code`.
    */
   @Get('organizations/:organization_id/coupons/:coupon_id')
-  async getCouponDetail(
+  getCouponDetail(
     @Param('organization_id') organization_id: string,
     @Param('coupon_id') coupon_id: string,
     @Headers('uid') uid?: string,
     @Headers('client') client?: string,
     @Headers('access-token') accessToken?: string,
+    @BaseOrigin({ opcional: true }) baseOrigin?: BaseOriginType,
   ): Promise<AlloyalCouponDetailDto> {
-    try {
-      const session = this.getSessionHeaders(uid, client, accessToken);
-      return await this.alloyalApiService.getCouponDetail(
-        Number(organization_id),
-        Number(coupon_id),
-        session,
-      );
-    } catch (error) {
-      this.logger.error(
-        `Erro ao buscar detalhes do cupom ${coupon_id} da organização ${organization_id}`,
-        error.stack,
-      );
-      throw new HttpException(
-        'Erro ao buscar detalhes do cupom',
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
+    return this.comSessao(
+      'cupomDetalhe',
+      baseOrigin,
+      { uid, client, accessToken },
+      (base, sessao) =>
+        this.cupons.detalheDoCupom(base, sessao, organization_id, coupon_id),
+    );
   }
-  /* #endregion */
 
-  /**
-   * Resgatar cupom com código (coupon_code)
-   * GET /organizations/:organization_id/orders
-   */
+  /** Resgata um cupom com código (`coupon_id` na query). */
   @Get('organizations/:organization_id/orders')
-  async redeemCouponWithCode(
+  redeemCouponWithCode(
     @Param('organization_id') organization_id: string,
     @Query('coupon_id') coupon_id: string,
     @Headers('uid') uid?: string,
     @Headers('client') client?: string,
     @Headers('access-token') accessToken?: string,
+    @BaseOrigin({ opcional: true }) baseOrigin?: BaseOriginType,
   ): Promise<AlloyalCouponRedeemResponseDto> {
-    try {
-      const session = this.getSessionHeaders(uid, client, accessToken);
-      return await this.alloyalApiService.redeemCouponWithCode(
-        Number(organization_id),
-        { coupon_id: Number(coupon_id) },
-        session,
-      );
-    } catch (error) {
-      this.logger.error('Erro ao resgatar cupom com código', error.stack);
-      throw new HttpException(
-        'Erro ao resgatar cupom com código',
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
+    return this.comSessao(
+      'cupomResgatarComCodigo',
+      baseOrigin,
+      { uid, client, accessToken },
+      (base, sessao) =>
+        this.cupons.resgatarComCodigo(base, sessao, organization_id, coupon_id),
+    );
   }
 
-  /**
-   * Listar todos os resgates de cupom
-   * GET /orders
-   */
+  /** Resgates de cupom já feitos pelo usuário. */
   @Get('orders')
-  async listAllCouponOrders(
+  listAllCouponOrders(
     @Headers('uid') uid?: string,
     @Headers('client') client?: string,
     @Headers('access-token') accessToken?: string,
+    @BaseOrigin({ opcional: true }) baseOrigin?: BaseOriginType,
   ): Promise<AlloyalCouponOrderResponseDto[]> {
-    try {
-      const session = this.getSessionHeaders(uid, client, accessToken);
-      return await this.alloyalApiService.listAllCouponOrders(session);
-    } catch (error) {
-      this.logger.error('Erro ao listar resgates de cupons', error.stack);
-      throw new HttpException(
-        'Erro ao listar resgates de cupons',
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
+    return this.comSessao(
+      'pedidos',
+      baseOrigin,
+      { uid, client, accessToken },
+      (base, sessao) => this.cupons.pedidos(base, sessao),
+    );
   }
 
-  /**
-   * Resgatar cupom genérico
-   * POST /orders
-   */
+  /** Resgate genérico de um cupom (`coupon_id` na query). */
   @Get('orders/redeem')
-  async redeemCouponGeneric(
+  redeemCouponGeneric(
     @Query('coupon_id') coupon_id: string,
     @Headers('uid') uid?: string,
     @Headers('client') client?: string,
     @Headers('access-token') accessToken?: string,
+    @BaseOrigin({ opcional: true }) baseOrigin?: BaseOriginType,
   ): Promise<AlloyalCouponRedeemResponseDto> {
-    try {
-      const session = this.getSessionHeaders(uid, client, accessToken);
-      return await this.alloyalApiService.redeemCouponGeneric(
-        {
-          coupon_id: Number(coupon_id),
-        },
-        session,
-      );
-    } catch (error) {
-      this.logger.error('Erro ao resgatar cupom genérico', error.stack);
-      throw new HttpException(
-        'Erro ao resgatar cupom genérico',
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
+    return this.comSessao(
+      'cupomResgatar',
+      baseOrigin,
+      { uid, client, accessToken },
+      (base, sessao) => this.cupons.resgatar(base, sessao, coupon_id),
+    );
   }
 }

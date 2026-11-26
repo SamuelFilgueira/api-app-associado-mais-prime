@@ -1,16 +1,10 @@
-import { buildLogicaUrl, isLogicaTokenInvalidResponse, LOGICA_REQUEST_TIMEOUT } from 'src/rastreamento/logica/constants/logica.constants';
 import {
-  Injectable,
-  InternalServerErrorException,
-  Logger,
-  NotFoundException,
-} from '@nestjs/common';
+  buildLogicaUrl,
+  isLogicaTokenInvalidResponse,
+  LOGICA_REQUEST_TIMEOUT,
+} from 'src/rastreamento/logica/constants/logica.constants';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import axios from 'axios';
-import {
-  IRastreamentoProvider,
-  RastreamentoBaseContext,
-  RastreamentoCandidatoResult,
-} from 'src/rastreamento/providers/rastreamento-provider.interface';
 import { LogicaAuthService } from 'src/rastreamento/logica/services/logica-auth.service';
 
 /** Timeout padrão para chamadas HTTP à API Lógica Soluções (em ms) */
@@ -67,34 +61,16 @@ interface LogicaListaResponsePayload {
   [key: string]: unknown;
 }
 
+/**
+ * Client da Lógica para a última posição. O contrato de provedor
+ * (`ProvedorDeRastreamento`) é cumprido por `ProvedorLogica`, que resolve a
+ * credencial da base e chama este client.
+ */
 @Injectable()
-export class LogicaRastreamentoService implements IRastreamentoProvider {
+export class LogicaRastreamentoService {
   private readonly logger = new Logger(LogicaRastreamentoService.name);
-  readonly providerName = 'logica' as const;
 
   constructor(private readonly logicaAuth: LogicaAuthService) {}
-
-  // -------------------------------------------------------------------------
-  // IRastreamentoProvider
-  // -------------------------------------------------------------------------
-
-  async obterUltimaPosicao(params: {
-    cnpj: string;
-    chassi: string;
-    baseContext: RastreamentoBaseContext;
-  }): Promise<RastreamentoCandidatoResult> {
-    const { chassi, baseContext } = params;
-    const data = await this.ultimaPosicao(chassi, baseContext.logicaToken, {
-      baseOrigin: baseContext.baseOrigin,
-      tokenKey: baseContext.logicaTokenKey,
-    });
-    return {
-      dataOriginal: data.ultimaTrasmissao,
-      timestamp: this.parseDateToTimestamp(data.ultimaTrasmissao),
-      data: data as unknown as Record<string, unknown>,
-      origem: 'logica',
-    };
-  }
 
   // -------------------------------------------------------------------------
   // Consulta principal
@@ -113,7 +89,7 @@ export class LogicaRastreamentoService implements IRastreamentoProvider {
       );
     }
 
-    const usedToken = this.logicaAuth.obterTokenInicial(
+    const usedToken = await this.logicaAuth.obterTokenInicial(
       context?.baseOrigin,
       token,
     );
@@ -136,6 +112,7 @@ export class LogicaRastreamentoService implements IRastreamentoProvider {
       );
       const refreshedToken = await this.logicaAuth.renovarToken(
         context?.baseOrigin,
+        usedToken,
       );
       data = await this.consultarListaVeiculo(normalizedChassi, refreshedToken);
     }
@@ -209,30 +186,5 @@ export class LogicaRastreamentoService implements IRastreamentoProvider {
 
   private isTokenInvalidResponse(data: unknown): boolean {
     return isLogicaTokenInvalidResponse(data);
-  }
-
-  // TODO(dedupe/B11): há 3 parsers de data BR->timestamp com fallbacks divergentes (0 aqui; throw em rastreamento.service; MAX_SAFE_INTEGER em trajetos.service) — unificar muda comportamento de ordenação/erro.
-  private parseDateToTimestamp(dateValue: string): number {
-    const dateTrimmed = dateValue?.trim() ?? '';
-    const parsedNative = Date.parse(dateTrimmed.replace(' ', 'T'));
-    if (!Number.isNaN(parsedNative)) return parsedNative;
-
-    const brDateMatch = dateTrimmed.match(
-      /^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})(?::(\d{2}))?$/,
-    );
-    if (brDateMatch) {
-      const [, day, month, year, hour, minute, second] = brDateMatch;
-      const parsed = new Date(
-        Number(year),
-        Number(month) - 1,
-        Number(day),
-        Number(hour),
-        Number(minute),
-        Number(second ?? '0'),
-      ).getTime();
-      if (!Number.isNaN(parsed)) return parsed;
-    }
-
-    return 0;
   }
 }

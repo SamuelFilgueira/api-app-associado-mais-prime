@@ -8,6 +8,8 @@ import { HistoricoResumoService } from 'src/rastreamento/softruck/services/histo
 import { HistoricoProviderResolverService } from 'src/rastreamento/softruck/services/historico-provider-resolver.service';
 import { HistoricoPdfSoftruckService } from 'src/rastreamento/softruck/pdf/historico-pdf-softruck.service';
 import { GeomPipelineProcessor } from 'src/rastreamento/softruck/processors/geom-pipeline.processor';
+import { SoftruckCredenciais } from 'src/rastreamento/softruck/services/softruck-credenciais';
+import { ProvedorSoftruck } from 'src/rastreamento/softruck/services/softruck-provedor';
 
 /**
  * Provedor de rastreamento Softruck (posição, histórico, resumo, PDF).
@@ -19,12 +21,19 @@ import { GeomPipelineProcessor } from 'src/rastreamento/softruck/processors/geom
   controllers: [HistoricoResumoController],
   providers: [
     RastreamentoSoftruck,
+    SoftruckCredenciais,
+    ProvedorSoftruck,
     HistoricoSoftruckService,
     HistoricoResumoService,
     HistoricoProviderResolverService,
     HistoricoPdfSoftruckService,
     GeomPipelineProcessor,
   ],
-  exports: [RastreamentoSoftruck, HistoricoSoftruckService],
+  exports: [
+    RastreamentoSoftruck,
+    SoftruckCredenciais,
+    ProvedorSoftruck,
+    HistoricoSoftruckService,
+  ],
 })
 export class SoftruckModule {}

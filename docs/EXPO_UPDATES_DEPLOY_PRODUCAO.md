@@ -1,5 +1,7 @@
 # OTA em produção — plano de deploy passo a passo
 
+> **Atualização (novembro de 2026).** O comando de deploy continua o mesmo (`docker compose up -d --build api`). Mudou o que ele faz por baixo: o Redis passa a ser publicado só em `127.0.0.1`, a imagem roda como usuário `node` (o compose acerta o dono dos volumes sozinho) e há uma topologia opcional em processos separados (`docker-compose.escala.yml`). Ver `docs/OPERACAO_E_DEPLOY.md`.
+
 Plano para colocar o servidor de atualizações OTA (`src/expo-updates`) em
 produção na VPS da Mais Prime (MAIS_PRIME + MAIS_PRIME_RS) e liberar o primeiro
 binário do app que consome essas atualizações.

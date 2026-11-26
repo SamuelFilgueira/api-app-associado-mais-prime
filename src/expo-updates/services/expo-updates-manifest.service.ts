@@ -36,8 +36,12 @@ const HEADERS_PROTOCOLO = (versao: 0 | 1): Record<string, string> => ({
  * (https://docs.expo.dev/technical-specs/expo-updates-1/).
  *
  * Manifests são calculados uma vez por (release, plataforma, urlBase) e mantidos
- * em memória — releases são imutáveis, então o cache nunca expira.
+ * em memória — releases são imutáveis, então o cache não expira por tempo; ele
+ * só tem um teto de entradas (`MAX_MANIFESTS_EM_CACHE`).
  */
+/** Manifests guardados em memória (release × plataforma × URL base). */
+export const MAX_MANIFESTS_EM_CACHE = 64;
+
 @Injectable()
 export class ExpoUpdatesManifestService {
   private readonly logger = new Logger(ExpoUpdatesManifestService.name);
@@ -112,14 +116,28 @@ export class ExpoUpdatesManifestService {
   ): Promise<ManifestExpo> {
     const chave = `${release.caminho}|${plataforma}|${urlBase}`;
     let pendente = this.cache.get(chave);
-    if (!pendente) {
-      pendente = this.montarManifest(release, plataforma, urlBase).catch(
-        (err) => {
-          this.cache.delete(chave);
-          throw err;
-        },
-      );
+    if (pendente) {
+      // Reinsere para manter a ordem de uso (LRU simples sobre Map).
+      this.cache.delete(chave);
       this.cache.set(chave, pendente);
+      return pendente;
+    }
+
+    pendente = this.montarManifest(release, plataforma, urlBase).catch(
+      (err) => {
+        this.cache.delete(chave);
+        throw err;
+      },
+    );
+    this.cache.set(chave, pendente);
+
+    // Teto de entradas. Sem URL pública fixa, `urlBase` vem do host da
+    // requisição (`X-Forwarded-Host`), que o cliente controla: sem teto,
+    // cada host inventado deixava um manifest novo na memória para sempre.
+    while (this.cache.size > MAX_MANIFESTS_EM_CACHE) {
+      const maisAntiga = this.cache.keys().next().value as string | undefined;
+      if (maisAntiga === undefined) break;
+      this.cache.delete(maisAntiga);
     }
     return pendente;
   }

@@ -11,6 +11,7 @@ import { SorteApuracaoService } from 'src/associado-sorte/services/sorte-apuraca
 import { SorteCampanhaService } from 'src/associado-sorte/services/sorte-campanha.service';
 import { SorteLembreteRaspadaService } from 'src/associado-sorte/services/sorte-lembrete-raspada.service';
 import { SorteNotificacoesService } from 'src/associado-sorte/services/sorte-notificacoes.service';
+import { papelAtivo } from 'src/config/app.config';
 import { ASSOCIADO_SORTE_QUEUE } from 'src/queue/queue.module';
 
 export interface CicloResultado {
@@ -43,8 +44,13 @@ export class SorteCicloService implements OnModuleInit {
    * Registra o agendador quando `ASSOCIADO_SORTE_AGENDADOR=true`. Desligado
    * (padrão), remove o agendador que tenha ficado no Redis e não loga nada:
    * nenhum lembrete, apuração ou alerta roda. Falha aqui não derruba o boot.
+   *
+   * Só o papel `worker` cria ou remove o agendador. Com vários processos, a
+   * `api`/`pdf` não toca nele: um processo com a flag desligada apagaria o
+   * agendador que o worker criou.
    */
   async onModuleInit(): Promise<void> {
+    if (!papelAtivo('worker')) return;
     const config = associadoSorteConfig();
     if (!config.agendadorAtivo) {
       // Silencioso: só garante que nenhum agendador antigo continue rodando.

@@ -2,9 +2,14 @@ import { Injectable, Logger } from '@nestjs/common';
 import * as nodemailer from 'nodemailer';
 import { join } from 'path';
 import { debugLog } from 'src/shared/debug-log.util';
+import { escapeHtml } from 'src/shared/html.util';
 import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2';
 import { TENANT } from 'src/config/tenant.config';
-import { MailConfig, carregarMailConfig } from 'src/infra/mail/mail.config';
+import {
+  MAIL_PRAZOS,
+  MailConfig,
+  carregarMailConfig,
+} from 'src/infra/mail/mail.config';
 
 @Injectable()
 export class MailService {
@@ -22,6 +27,11 @@ export class MailService {
         user: process.env.GMAIL_USER,
         pass: process.env.SENHA_APP,
       },
+      // Sem estes prazos o nodemailer espera 2 min pela conexão — mais que o
+      // timeout do proxy e do app. Ver MAIL_PRAZOS em mail.config.ts.
+      connectionTimeout: MAIL_PRAZOS.smtpConexaoMs,
+      greetingTimeout: MAIL_PRAZOS.smtpSaudacaoMs,
+      socketTimeout: MAIL_PRAZOS.smtpInatividadeMs,
     });
 
     this.sesClient = new SESv2Client({
@@ -80,7 +90,11 @@ export class MailService {
     });
 
     try {
-      await this.sesClient.send(command);
+      // O SDK não tem timeout por padrão: o sinal cancela a requisição de
+      // verdade (e as tentativas internas) quando o prazo total estoura.
+      await this.sesClient.send(command, {
+        abortSignal: AbortSignal.timeout(MAIL_PRAZOS.sesTotalMs),
+      });
     } catch (error) {
       this.logger.error(`Falha ao enviar e-mail via SES para ${to}`, error);
       throw error;
@@ -160,8 +174,15 @@ export class MailService {
     chassi: string,
     plate: string | null,
     debugId?: string,
+    /** Algo que ficou para a equipe fazer à mão (texto simples). */
+    pendencia?: string,
   ): Promise<void> {
     const safePlate = plate ?? 'N/A';
+    const blocoDaPendencia = pendencia
+      ? `<div style="margin-top: 20px; padding: 12px 16px; border-left: 4px solid #e65100; background: #fff3e0; color: #222;">
+            <strong>Ação necessária:</strong> ${escapeHtml(pendencia)}
+          </div>`
+      : '';
 
     const mailOptions: nodemailer.SendMailOptions = {
       from: `"${TENANT.appName}" <${process.env.GMAIL_USER}>`,
@@ -176,6 +197,7 @@ export class MailService {
             Placa: ${safePlate}
           </div>
           <p style="margin-top: 20px;">As fotos foram verificadas e a revistoria foi concluída com êxito.</p>
+          ${blocoDaPendencia}
           <p style="color: #888; font-size: 12px;">Em caso de dúvidas, entre em contato com o suporte.</p>
         </div>
       `,

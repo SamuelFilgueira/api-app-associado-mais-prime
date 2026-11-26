@@ -7,6 +7,8 @@ import { M7ReverseGeocodeService } from 'src/rastreamento/m7/services/m7-reverse
 import { M7ViagensBuilderService } from 'src/rastreamento/m7/services/m7-viagens-builder.service';
 import { ContestacaoV2PdfKitService } from 'src/rastreamento/m7/pdf/contestacao-v2-pdfkit.service';
 import { m7RedisProvider } from 'src/rastreamento/m7/providers/m7-redis.provider';
+import { M7AuthService } from 'src/rastreamento/m7/services/m7-auth.service';
+import { ProvedorM7 } from 'src/rastreamento/m7/services/m7-provedor';
 
 /**
  * Provedor de rastreamento M7 (posição, histórico, PDF, reverse geocode).
@@ -16,13 +18,15 @@ import { m7RedisProvider } from 'src/rastreamento/m7/providers/m7-redis.provider
   controllers: [HistoricoM7Controller],
   providers: [
     m7RedisProvider,
+    M7AuthService,
     RastreamentoM7,
+    ProvedorM7,
     HistoricoM7Service,
     HistoricoPdfM7Service,
     ContestacaoV2PdfKitService,
     M7ReverseGeocodeService,
     M7ViagensBuilderService,
   ],
-  exports: [RastreamentoM7, M7ReverseGeocodeService],
+  exports: [RastreamentoM7, ProvedorM7, M7ReverseGeocodeService],
 })
 export class M7Module {}

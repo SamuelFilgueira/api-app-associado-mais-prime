@@ -339,8 +339,16 @@ export class SorteCampanhaService {
    */
   async publicar(id: number, dto: PublicarCampanhaDto, autor: SorteAutor) {
     const agora = new Date();
+    // Lida fora da transação só para saber qual base travar.
+    const base = (await this.repository.buscar(id))?.baseOrigin;
+    if (!base) throw new NotFoundException('Campanha não encontrada');
+
     const hash = await this.uow.executar(
       async (tx) => {
+        // Primeira leitura da transação: serializa as publicações da base.
+        // Sem isto, dois rascunhos publicados ao mesmo tempo passavam os dois
+        // pela checagem de "já existe campanha publicada" e ficavam no ar.
+        await tx.travarCampanhasDaBase(base);
         const campanha = await this.travar(tx, id);
         this.exigirRascunho(campanha);
         if (

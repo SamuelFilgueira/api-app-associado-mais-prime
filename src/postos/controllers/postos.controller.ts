@@ -12,8 +12,9 @@ import { PostosService } from 'src/postos/services/postos.service';
 import { PostosRequestDto } from 'src/postos/dto/postos-request.dto';
 import { BaseOrigin } from 'src/infra/decorators/base-origin.decorator';
 import type { BaseOrigin as BaseOriginType } from 'src/config/tenant.config';
+import { SomenteAssociadoGuard } from 'src/infra/guards/somente-associado.guard';
 
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, SomenteAssociadoGuard)
 @Controller('postos')
 export class PostosController {
   private readonly logger = new Logger(PostosController.name);

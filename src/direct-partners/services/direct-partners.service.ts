@@ -47,7 +47,7 @@ import {
 } from 'src/direct-partners/repositories/direct-partners.repository';
 import { FileUploadService } from 'src/infra/storage/file-upload.service';
 
-/** Erros com `code` (§7). O `HttpExceptionFilter` devolve o objeto como veio. */
+/** Erros com `code` (§7). O filtro global (`AllExceptionsFilter`) devolve o objeto como veio. */
 function erro422(code: string, message: string): UnprocessableEntityException {
   return new UnprocessableEntityException({ statusCode: 422, code, message });
 }

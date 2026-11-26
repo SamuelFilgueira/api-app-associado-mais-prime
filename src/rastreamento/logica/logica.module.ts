@@ -5,6 +5,7 @@ import { LogicaAuthService } from 'src/rastreamento/logica/services/logica-auth.
 import { TrajetosService } from 'src/rastreamento/logica/services/trajetos.service';
 import { TrajetoPdfLogicaService } from 'src/rastreamento/logica/pdf/trajeto-pdf-logica.service';
 import { LogicaHistoricoService } from 'src/rastreamento/logica/services/logica-historico.service';
+import { ProvedorLogica } from 'src/rastreamento/logica/services/logica-provedor';
 
 /**
  * Provedor de rastreamento Lógica Soluções (posição, trajetos, histórico, PDF).
@@ -13,11 +14,17 @@ import { LogicaHistoricoService } from 'src/rastreamento/logica/services/logica-
   controllers: [TrajetosController],
   providers: [
     LogicaRastreamentoService,
+    ProvedorLogica,
     LogicaAuthService,
     TrajetosService,
     TrajetoPdfLogicaService,
     LogicaHistoricoService,
   ],
-  exports: [LogicaRastreamentoService, TrajetosService, LogicaHistoricoService],
+  exports: [
+    LogicaRastreamentoService,
+    ProvedorLogica,
+    TrajetosService,
+    LogicaHistoricoService,
+  ],
 })
 export class LogicaModule {}

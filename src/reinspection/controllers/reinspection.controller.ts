@@ -1,5 +1,4 @@
 import {
-  BadRequestException,
   Body,
   Controller,
   Get,
@@ -12,21 +11,13 @@ import {
   Post,
   Query,
   Req,
-  Logger,
   UploadedFile,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 
-/** Trecho do `request.user` usado para auditoria de quem acionou a rota. */
-interface RequestComUsuarioPainel {
-  user?: { userId?: number | string; email?: string };
-}
-import {
-  ReinspectionHinovaEnvioOrigem,
-  ReinspectionStatus,
-} from '@prisma/client';
+import { UsuarioAutenticado } from 'src/infra/auth/usuario-autenticado';
 import { BoletoReativacaoService } from 'src/sga/services/boleto-reativacao.service';
 import { JwtAuthGuard } from 'src/infra/guards/jwt-auth.guard';
 import { ReinspectionService } from 'src/reinspection/services/reinspection.service';
@@ -45,6 +36,19 @@ import {
   ALL_ADMIN_PANEL_ROLES,
 } from 'src/infra/enums/admin-panel-role.enum';
 
+/** `request.user` montado pelo `JwtStrategy` (app ou painel). */
+interface RequisicaoAutenticada {
+  user: UsuarioAutenticado;
+}
+
+/** Usuário do painel que acionou a rota, para a auditoria. */
+function atorDoPainel(req: RequisicaoAutenticada) {
+  return {
+    userId: Number(req.user?.userId) || undefined,
+    email: req.user?.email,
+  };
+}
+
 /**
  * Rotas de revistoria.
  *
@@ -56,6 +60,11 @@ import {
  *   REVISTORIA): listar, detalhar, aprovar/reprovar fotos, aprovar a
  *   revistoria, templates e o envio/reenvio à Hinova.
  *
+ * Posse: nas rotas do app o associado só alcança revistoria de veículo
+ * dele (`userVehicle.userId`); token com `role` ADMIN (painel e ADMIN
+ * legado) é isento. A checagem fica nos casos de uso, que recebem
+ * `req.user`.
+ *
  * A ordem das rotas importa: as rotas com segmento fixo (`all`, `totals`,
  * `template`, `regra`, `regras`, `status`, `search`, `rejected-photos`, `hinova/...`) ficam
  * antes de `:id` para o Express não capturá-las como id.
@@ -63,7 +72,6 @@ import {
 @UseGuards(JwtAuthGuard)
 @Controller('reinspection')
 export class ReinspectionController {
-  private readonly logger = new Logger(ReinspectionController.name);
   constructor(
     private readonly reinspectionService: ReinspectionService,
     private readonly reinspectionHinovaService: ReinspectionHinovaService,
@@ -78,12 +86,12 @@ export class ReinspectionController {
    * para enviar as fotos em lotes e POST /:id/submit para finalizar.
    */
   @Post()
-  async create(
+  create(
     @Body() dto: CreateReinspectionDto,
-    @Req() req: any,
+    @Req() req: RequisicaoAutenticada,
     @Headers('x-debug-id') debugId?: string,
   ) {
-    return this.reinspectionService.create(dto, req.user.id, debugId);
+    return this.reinspectionService.create(dto, req.user, debugId);
   }
 
   /**
@@ -96,9 +104,10 @@ export class ReinspectionController {
   addPhotos(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: AddPhotosDto,
+    @Req() req: RequisicaoAutenticada,
     @Headers('x-debug-id') debugId?: string,
   ) {
-    return this.reinspectionService.addPhotos(id, dto, debugId);
+    return this.reinspectionService.addPhotos(id, dto, req.user, debugId);
   }
 
   /**
@@ -110,9 +119,10 @@ export class ReinspectionController {
   @HttpCode(HttpStatus.OK)
   submitReinspection(
     @Param('id', ParseIntPipe) id: number,
+    @Req() req: RequisicaoAutenticada,
     @Headers('x-debug-id') debugId?: string,
   ) {
-    return this.reinspectionService.submitReinspection(id, debugId);
+    return this.reinspectionService.submitReinspection(id, req.user, debugId);
   }
 
   // ── Painel: listagens ─────────────────────────────────────────────────────
@@ -154,9 +164,9 @@ export class ReinspectionController {
   @AdminPanelRoles(AdminPanelRole.REVISTORIA)
   @HttpCode(HttpStatus.OK)
   @UseInterceptors(FileInterceptor('photo'))
-  async upsertTemplatePhoto(
+  upsertTemplatePhoto(
     @Body() dto: UpsertTemplatePhotoDto,
-    @UploadedFile() file: any,
+    @UploadedFile() file: Express.Multer.File,
   ) {
     return this.reinspectionService.upsertTemplatePhoto(dto, file);
   }
@@ -201,8 +211,12 @@ export class ReinspectionController {
   @HttpCode(HttpStatus.OK)
   getStatusByUserVehicleId(
     @Query('userVehicleId', ParseIntPipe) userVehicleId: number,
+    @Req() req: RequisicaoAutenticada,
   ) {
-    return this.reinspectionService.getStatusByUserVehicleId(userVehicleId);
+    return this.reinspectionService.getStatusByUserVehicleId(
+      userVehicleId,
+      req.user,
+    );
   }
 
   @Get('search')
@@ -224,8 +238,12 @@ export class ReinspectionController {
   @HttpCode(HttpStatus.OK)
   updateStatusByUserVehicleId(
     @Query('userVehicleId', ParseIntPipe) userVehicleId: number,
+    @Req() req: RequisicaoAutenticada,
   ) {
-    return this.reinspectionService.updateStatusByUserVehicleId(userVehicleId);
+    return this.reinspectionService.updateStatusByUserVehicleId(
+      userVehicleId,
+      req.user,
+    );
   }
 
   /**
@@ -237,8 +255,9 @@ export class ReinspectionController {
   @HttpCode(HttpStatus.OK)
   getRejectedPhotos(
     @Query('userVehicleId', ParseIntPipe) userVehicleId: number,
+    @Req() req: RequisicaoAutenticada,
   ) {
-    return this.reinspectionService.getRejectedPhotos(userVehicleId);
+    return this.reinspectionService.getRejectedPhotos(userVehicleId, req.user);
   }
 
   // ── Painel: envio à Hinova ────────────────────────────────────────────────
@@ -275,36 +294,20 @@ export class ReinspectionController {
   @UseGuards(AdminPanelRoleGuard)
   @AdminPanelRoles(AdminPanelRole.REVISTORIA)
   @HttpCode(HttpStatus.OK)
-  async reenviarHinova(
+  reenviarHinova(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: ReenviarHinovaDto,
-    @Req() req: RequestComUsuarioPainel,
+    @Req() req: RequisicaoAutenticada,
     @Headers('x-debug-id') debugId?: string,
   ) {
-    const resultado = await this.reinspectionHinovaService.enviarFotos(id, {
-      origem: ReinspectionHinovaEnvioOrigem.REENVIO_MANUAL,
-      adminPanelUserId: Number(req.user?.userId) || undefined,
-      adminPanelUserEmail: req.user?.email,
+    const ator = atorDoPainel(req);
+    return this.reinspectionHinovaService.reenviar(id, {
+      adminPanelUserId: ator.userId,
+      adminPanelUserEmail: ator.email,
       photoIds: dto.photoIds,
       forcar: dto.forcar === true,
       debugId,
     });
-
-    if (!resultado) {
-      return {
-        reinspectionId: id,
-        envioId: null,
-        status: null,
-        totalFotos: 0,
-        totalInseridas: 0,
-        totalFalhas: 0,
-        fotos: [],
-        mensagem:
-          'Nenhuma foto pendente de envio. Use forcar=true para reenviar fotos já inseridas.',
-      };
-    }
-
-    return resultado;
   }
 
   // ── Painel: boleto de reativação ──────────────────────────────────────────
@@ -332,20 +335,11 @@ export class ReinspectionController {
   @UseGuards(AdminPanelRoleGuard)
   @AdminPanelRoles(AdminPanelRole.REVISTORIA, AdminPanelRole.COBRANCA)
   @HttpCode(HttpStatus.OK)
-  async gerarBoleto(
+  gerarBoleto(
     @Param('id', ParseIntPipe) id: number,
     @Headers('x-debug-id') debugId?: string,
   ) {
-    const reinspection = await this.reinspectionService.getById(id);
-    if (reinspection.status !== ReinspectionStatus.APROVADA) {
-      throw new BadRequestException(
-        'Somente revistorias APROVADA podem gerar boleto de reativação',
-      );
-    }
-    return this.boletoReativacaoService.processar(id, {
-      origem: 'MANUAL',
-      debugId,
-    });
+    return this.reinspectionService.gerarBoleto(id, debugId);
   }
 
   // ── Painel: detalhe e avaliação ───────────────────────────────────────────
@@ -370,11 +364,11 @@ export class ReinspectionController {
   @HttpCode(HttpStatus.OK)
   finalizeByUserVehicleId(
     @Query('userVehicleId', ParseIntPipe) userVehicleId: number,
-    @Headers('x-debug-id') debugId?: string,
+    @Req() req: RequisicaoAutenticada,
   ) {
     return this.reinspectionService.finalizeByUserVehicleId(
       userVehicleId,
-      debugId,
+      req.user,
     );
   }
 
@@ -389,16 +383,13 @@ export class ReinspectionController {
   @HttpCode(HttpStatus.OK)
   approveByUserVehicleId(
     @Query('userVehicleId', ParseIntPipe) userVehicleId: number,
-    @Req() req: RequestComUsuarioPainel,
+    @Req() req: RequisicaoAutenticada,
     @Headers('x-debug-id') debugId?: string,
   ) {
     return this.reinspectionService.approveByUserVehicleId(
       userVehicleId,
       debugId,
-      {
-        userId: Number(req.user?.userId) || undefined,
-        email: req.user?.email,
-      },
+      atorDoPainel(req),
     );
   }
 
@@ -435,9 +426,15 @@ export class ReinspectionController {
   resendPhoto(
     @Param('photoId', ParseIntPipe) photoId: number,
     @Body() dto: ResendPhotoDto,
+    @Req() req: RequisicaoAutenticada,
     @Headers('x-debug-id') debugId?: string,
   ) {
-    return this.reinspectionService.resendPhoto(photoId, dto.base64, debugId);
+    return this.reinspectionService.resendPhoto(
+      photoId,
+      dto.base64,
+      req.user,
+      debugId,
+    );
   }
 
   /**

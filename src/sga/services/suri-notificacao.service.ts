@@ -2,6 +2,9 @@ import { Injectable, Logger } from '@nestjs/common';
 import axios from 'axios';
 import { debugLog } from 'src/shared/debug-log.util';
 
+/** Prazo de cada envio à Suri. */
+const SURI_TIMEOUT_MS = 15_000;
+
 /** Limite do corpo da resposta da Suri gravado no log de erro. */
 const RESPOSTA_MAX_CHARS = 500;
 
@@ -21,16 +24,19 @@ const RESPOSTA_MAX_CHARS = 500;
 export class SuriNotificacaoService {
   private readonly logger = new Logger(SuriNotificacaoService.name);
 
-  async enviarTemplate(params: {
-    nome: string;
-    telefoneCelular: string;
-    templateId: string | undefined;
-    /** Parâmetros do template após o primeiro nome (ex.: link do boleto). */
-    parametrosExtras?: string[];
-    /** Identifica o fluxo no log de erro (ex.: `boleto-reativacao`). */
-    contexto?: string;
-    debugId?: string;
-  }): Promise<void> {
+  /** Envia o template; resposta de erro da Suri só vai para o log. */
+  async enviarTemplate(params: EnvioDeTemplateSuri): Promise<void> {
+    await this.enviarTemplateComResultado(params);
+  }
+
+  /**
+   * Mesmo envio, devolvendo se a Suri aceitou (`aceito`) e o status HTTP —
+   * para quem precisa decidir entre tentar de novo (429/5xx) e desistir
+   * (4xx: template inexistente, telefone inválido).
+   */
+  async enviarTemplateComResultado(
+    params: EnvioDeTemplateSuri,
+  ): Promise<{ aceito: boolean; status: number }> {
     const primeiroNome = params.nome.trim().split(/\s+/)[0] ?? '';
     const primeiroNomeFormatado = primeiroNome
       ? `${primeiroNome.charAt(0).toUpperCase()}${primeiroNome.slice(1).toLowerCase()}`
@@ -66,11 +72,15 @@ export class SuriNotificacaoService {
           Authorization: `Bearer ${process.env.token_suri}`,
           'Content-Type': 'application/json',
         },
+        // Sem prazo, uma Suri pendurada segura o job do boleto (e a fila,
+        // que tem concorrência 1) até o processo reiniciar.
+        timeout: SURI_TIMEOUT_MS,
         validateStatus: () => true,
       },
     );
 
-    if (response.status < 200 || response.status >= 300) {
+    const aceito = response.status >= 200 && response.status < 300;
+    if (!aceito) {
       this.logger.error(
         debugLog(
           SuriNotificacaoService.name,
@@ -84,7 +94,19 @@ export class SuriNotificacaoService {
         ),
       );
     }
+    return { aceito, status: response.status };
   }
+}
+
+export interface EnvioDeTemplateSuri {
+  nome: string;
+  telefoneCelular: string;
+  templateId: string | undefined;
+  /** Parâmetros do template após o primeiro nome (ex.: link do boleto). */
+  parametrosExtras?: string[];
+  /** Identifica o fluxo no log de erro (ex.: `boleto-reativacao`). */
+  contexto?: string;
+  debugId?: string;
 }
 
 /** `5531988887777` → `55319****7777` (mantém DDI/DDD e os 4 finais). */

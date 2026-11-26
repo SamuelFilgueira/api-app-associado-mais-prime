@@ -8,10 +8,18 @@ import {
 } from '@nestjs/common';
 import { Queue } from 'bullmq';
 import { PrismaService } from 'src/database/prisma.service';
+import { TravaService } from 'src/infra/redis/trava.service';
+import {
+  chaveDeConteudo,
+  serializarEstavel,
+} from 'src/notifications/domain/push-disparo';
 import { SendMarketingNotificationDto } from 'src/notifications/dto/send-marketing-notification.dto';
+import { PushDisparoRepository } from 'src/notifications/repositories/push-disparo.repository';
 import { MarketingNotificationAuditService } from 'src/notifications/services/marketing-notification-audit.service';
-import { NotificationsService } from 'src/notifications/services/notifications.service';
+import { PushDisparoService } from 'src/notifications/services/push-disparo.service';
+import { ProdutorDeFilas } from 'src/queue/produtor-de-filas.service';
 import { MARKETING_AGENDADA_QUEUE } from 'src/queue/queue.module';
+import { DomainError } from 'src/shared/erros/erros';
 
 export const JOB_MARKETING_AGENDADA = 'enviar-marketing-agendada';
 
@@ -23,12 +31,12 @@ export interface MarketingAgendadaJobData {
 const ANTECEDENCIA_MINIMA_MS = 60_000;
 const ANTECEDENCIA_MAXIMA_MS = 365 * 24 * 60 * 60 * 1000;
 /**
- * Agendamento encontrado no boot já vencido há mais que isto NÃO é enviado
- * (ex.: servidor parado por horas): campanha fora de hora é pior que falha.
+ * Agendamento já vencido há mais que isto NÃO é enviado (ex.: servidor
+ * parado por horas): campanha fora de hora é pior que falha.
  */
 const TOLERANCIA_ATRASO_MS = 6 * 60 * 60 * 1000;
-/** `SENDING` há mais que isto no boot = envio interrompido por reinício. */
-const ENVIO_TRAVADO_MS = 10 * 60 * 1000;
+/** Trava do pedido de agendamento (só enquanto ele é gravado). */
+const TRAVA_DO_AGENDAMENTO_MS = 30_000;
 
 const jobIdDoAgendamento = (auditId: number) => `marketing-agendada-${auditId}`;
 
@@ -36,10 +44,11 @@ const jobIdDoAgendamento = (auditId: number) => `marketing-agendada-${auditId}`;
  * Disparo de push de marketing agendado.
  *
  * A fonte da verdade é o `MarketingNotificationAuditLog` (status `SCHEDULED`
- * + `scheduledFor`); o job atrasado no Redis é só o despertador e é recriado
- * no boot por `reconciliarPendentes`. Os destinatários são calculados na hora
- * do envio (mesmo `NotificationsService.sendMarketingNotification` do disparo
- * imediato), não na hora do agendamento.
+ * + `scheduledFor`); o job atrasado no Redis é só o despertador, recriado
+ * pela varredura periódica (`reconciliarPendentes`). Na hora marcada o job
+ * NÃO envia: cria o disparo (`PushDisparo`), grava as entregas e enfileira
+ * os lotes — o mesmo caminho do disparo imediato. Os destinatários são
+ * calculados nesse momento, não na hora do agendamento.
  *
  * Status: SCHEDULED → SENDING → SENT | FAILED; SCHEDULED → CANCELED.
  */
@@ -50,7 +59,10 @@ export class MarketingAgendamentoService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: MarketingNotificationAuditService,
-    private readonly notificationsService: NotificationsService,
+    private readonly repo: PushDisparoRepository,
+    private readonly disparos: PushDisparoService,
+    private readonly produtor: ProdutorDeFilas,
+    private readonly trava: TravaService,
     @InjectQueue(MARKETING_AGENDADA_QUEUE) private readonly fila: Queue,
   ) {}
 
@@ -73,25 +85,50 @@ export class MarketingAgendamentoService {
       );
     }
 
-    const auditId = await this.audit.createRequestAudit(adminUserId, dto, {
-      agendarPara,
+    // Dois cliques em "Agendar" com o mesmo texto e a mesma hora são o mesmo
+    // agendamento: o segundo recebe o registro do primeiro.
+    const chave = chaveDeConteudo({
+      tipo: 'MARKETING',
+      titulo: dto.title,
+      corpo: dto.body,
+      dados: { carga: dto.data ?? null, quando: agendarPara.toISOString() },
     });
-    if (!auditId) {
-      // Sem o registro não há o que o job enviar nem quem responsabilizar.
-      throw new BadRequestException(
-        'Não foi possível registrar o agendamento para o usuário logado',
+    const execucao = await this.trava.tentar(
+      `marketing-agendar:${chave}`,
+      TRAVA_DO_AGENDAMENTO_MS,
+      async () => {
+        const existente = await this.agendamentoIdentico(dto, agendarPara);
+        const auditId =
+          existente ??
+          (await this.audit.createRequestAudit(adminUserId, dto, {
+            agendarPara,
+          }));
+        if (!auditId) {
+          // Sem o registro não há o que o job enviar nem quem responsabilizar.
+          throw new BadRequestException(
+            'Não foi possível registrar o agendamento para o usuário logado',
+          );
+        }
+        await this.garantirJob(auditId, agendarPara);
+        return { auditId, repetido: existente !== null };
+      },
+    );
+    if (!execucao.executou) {
+      throw new DomainError(
+        'DISPARO_EM_ANDAMENTO',
+        'Este agendamento já está sendo registrado. Confira o histórico de disparos.',
+        { status: 409 },
       );
     }
 
-    await this.garantirJob(auditId, agendarPara);
-
     return {
       agendado: true,
-      id: auditId,
+      id: execucao.valor.auditId,
       agendarPara: agendarPara.toISOString(),
       // Mesmos campos do envio imediato, para clientes que só leem estes.
       sentCount: 0,
       skippedCount: 0,
+      ...(execucao.valor.repetido ? { repetido: true } : {}),
     };
   }
 
@@ -120,6 +157,8 @@ export class MarketingAgendamentoService {
       );
     }
 
+    // O cancelamento já vale pelo status: se o despertador ficar no Redis,
+    // o job encontra o disparo fora de `SCHEDULED` e não faz nada.
     await this.fila.remove(jobIdDoAgendamento(auditId)).catch(() => undefined);
 
     this.logger.log(
@@ -128,84 +167,41 @@ export class MarketingAgendamentoService {
     return { cancelado: true, id: auditId };
   }
 
-  /** Executado pelo job: envia se o disparo ainda estiver agendado. */
+  /**
+   * Executado pelo job na hora marcada. Reivindica o agendamento e cria o
+   * disparo na mesma transação; depois grava as entregas e enfileira os
+   * lotes. Qualquer falha LANÇA (o job repete): a nova tentativa encontra o
+   * disparo já criado e continua de onde parou.
+   */
   async executar(auditId: number): Promise<void> {
-    // Reivindica o envio: cancelado/duplicado/já enviado não passa daqui.
-    const { count } =
-      await this.prisma.marketingNotificationAuditLog.updateMany({
-        where: { id: auditId, status: 'SCHEDULED' },
-        data: { status: 'SENDING' },
-      });
-    if (count === 0) {
+    const disparo =
+      (await this.repo.reivindicarAgendado(auditId)) ??
+      (await this.repo.disparoDoLog(auditId));
+
+    if (!disparo) {
       this.logger.warn(
         `[MARKETING][AGENDADO] disparo #${auditId} ignorado: não está mais agendado`,
       );
       return;
     }
 
-    const disparo =
-      await this.prisma.marketingNotificationAuditLog.findUniqueOrThrow({
-        where: { id: auditId },
-        select: {
-          title: true,
-          body: true,
-          messagePayload: true,
-          adminPanelUserId: true,
-        },
-      });
-
-    try {
-      const resultado =
-        await this.notificationsService.sendMarketingNotification(
-          {
-            title: disparo.title,
-            body: disparo.body,
-            data: disparo.messagePayload as SendMarketingNotificationDto['data'],
-          },
-          disparo.adminPanelUserId,
-        );
-      await this.audit.markSuccess(
-        auditId,
-        resultado.sentCount,
-        resultado.skippedCount,
-      );
-      this.logger.log(
-        `[MARKETING][AGENDADO] disparo #${auditId} enviado: ${resultado.sentCount} enviados, ${resultado.skippedCount} ignorados`,
-      );
-    } catch (error) {
-      const mensagem = error instanceof Error ? error.message : String(error);
-      await this.audit.markFailure(auditId, mensagem);
-      this.logger.error(
-        `[MARKETING][AGENDADO] disparo #${auditId} falhou: ${mensagem}`,
-      );
-    }
+    const criado = await this.disparos.retomar(
+      disparo,
+      this.disparos.fonteDeMarketing(),
+    );
+    this.logger.log(
+      `[MARKETING][AGENDADO] disparo #${auditId} → push #${criado.disparoId} (${criado.estado}): ${criado.totalDestinatarios} destinatário(s)`,
+    );
   }
 
   /**
-   * No boot: recria o job de todo agendamento pendente (reinício/Redis limpo),
-   * descarta os vencidos além da tolerância e fecha envios interrompidos.
+   * Chamado pela varredura periódica: recria o despertador de todo
+   * agendamento pendente (reinício, Redis limpo, job esgotado) e fecha como
+   * falho o que venceu além da tolerância.
    */
-  async reconciliarPendentes(): Promise<{
-    agendados: number;
-    perdidos: number;
-    interrompidos: number;
-  }> {
-    const agora = Date.now();
-
-    const interrompidos =
-      await this.prisma.marketingNotificationAuditLog.updateMany({
-        where: {
-          status: 'SENDING',
-          updatedAt: { lt: new Date(agora - ENVIO_TRAVADO_MS) },
-        },
-        data: {
-          status: 'FAILED',
-          errorMessage:
-            'Envio interrompido por reinício do servidor; não foi reenviado para evitar duplicidade.',
-          processedAt: new Date(),
-        },
-      });
-
+  async reconciliarPendentes(
+    agora: Date = new Date(),
+  ): Promise<{ agendados: number; perdidos: number }> {
     const pendentes = await this.prisma.marketingNotificationAuditLog.findMany({
       where: { status: 'SCHEDULED', scheduledFor: { not: null } },
       select: { id: true, scheduledFor: true },
@@ -215,24 +211,25 @@ export class MarketingAgendamentoService {
     let perdidos = 0;
     for (const pendente of pendentes) {
       const quando = pendente.scheduledFor as Date;
-      if (agora - quando.getTime() > TOLERANCIA_ATRASO_MS) {
-        await this.prisma.marketingNotificationAuditLog.updateMany({
-          where: { id: pendente.id, status: 'SCHEDULED' },
-          data: {
-            status: 'FAILED',
-            errorMessage:
-              'Horário agendado perdido (servidor indisponível); disparo não enviado.',
-            processedAt: new Date(),
-          },
-        });
-        perdidos++;
+      if (agora.getTime() - quando.getTime() > TOLERANCIA_ATRASO_MS) {
+        const { count } =
+          await this.prisma.marketingNotificationAuditLog.updateMany({
+            where: { id: pendente.id, status: 'SCHEDULED' },
+            data: {
+              status: 'FAILED',
+              errorMessage:
+                'Horário agendado perdido (servidor indisponível); disparo não enviado.',
+              processedAt: agora,
+            },
+          });
+        perdidos += count;
         continue;
       }
       await this.garantirJob(pendente.id, quando);
       agendados++;
     }
 
-    return { agendados, perdidos, interrompidos: interrompidos.count };
+    return { agendados, perdidos };
   }
 
   /** Histórico de disparos (imediatos e agendados) com quem pediu e quando. */
@@ -286,21 +283,55 @@ export class MarketingAgendamentoService {
     }));
   }
 
-  /** Cria o job atrasado se ainda não existir (jobId determinístico). */
+  /** Agendamento ainda pendente com o mesmo texto, carga e horário. */
+  private async agendamentoIdentico(
+    dto: SendMarketingNotificationDto,
+    agendarPara: Date,
+  ): Promise<number | null> {
+    const candidatos = await this.prisma.marketingNotificationAuditLog.findMany(
+      {
+        where: {
+          status: 'SCHEDULED',
+          tipo: 'MARKETING',
+          title: dto.title,
+          scheduledFor: agendarPara,
+        },
+        select: { id: true, body: true, messagePayload: true },
+        orderBy: { id: 'asc' },
+        take: 20,
+      },
+    );
+    const carga = serializarEstavel(dto.data ?? { type: 'marketing' });
+    const igual = candidatos.find(
+      (c) =>
+        c.body === dto.body && serializarEstavel(c.messagePayload) === carga,
+    );
+    return igual?.id ?? null;
+  }
+
+  /**
+   * Garante o job atrasado do agendamento (id determinístico). Um job que
+   * já rodou até o fim ou esgotou as tentativas, com o disparo ainda
+   * `SCHEDULED`, não serve mais de despertador: é trocado por um novo.
+   */
   private async garantirJob(auditId: number, quando: Date): Promise<void> {
     const jobId = jobIdDoAgendamento(auditId);
-    if (await this.fila.getJob(jobId)) return;
+    const existente = await this.fila.getJob(jobId);
+    if (existente) {
+      const estado = await existente.getState();
+      if (estado !== 'completed' && estado !== 'failed') return;
+      await existente.remove();
+    }
 
-    await this.fila.add(
+    await this.produtor.enfileirar<MarketingAgendadaJobData>(
+      MARKETING_AGENDADA_QUEUE,
       JOB_MARKETING_AGENDADA,
-      { auditId } satisfies MarketingAgendadaJobData,
+      { auditId },
       {
         jobId,
-        delay: Math.max(0, quando.getTime() - Date.now()),
-        // Tentativa única: reenviar um push em massa duplicaria a campanha.
-        attempts: 1,
-        removeOnComplete: true,
-        removeOnFail: true,
+        atrasoMs: Math.max(0, quando.getTime() - Date.now()),
+        // Só um despertador: depois de tocar não precisa ficar no Redis.
+        opcoes: { removeOnComplete: true },
       },
     );
   }

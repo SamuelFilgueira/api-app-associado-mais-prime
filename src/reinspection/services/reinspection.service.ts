@@ -1,1188 +1,157 @@
-import {
-  BadRequestException,
-  Injectable,
-  Logger,
-  NotFoundException,
-} from '@nestjs/common';
-import {
-  ReinspectionHinovaEnvioOrigem,
-  ReinspectionPhotoStatus,
-  ReinspectionStatus,
-  ReinspectionVehicleType,
-} from '@prisma/client';
-import { PrismaService } from 'src/database/prisma.service';
-import { FileUploadService } from 'src/infra/storage/file-upload.service';
-import { CreateReinspectionDto } from 'src/reinspection/dto/create-reinspection.dto';
+import { Injectable } from '@nestjs/common';
+import { UsuarioAutenticado } from 'src/infra/auth/usuario-autenticado';
 import { AddPhotosDto } from 'src/reinspection/dto/add-photos.dto';
+import { CreateReinspectionDto } from 'src/reinspection/dto/create-reinspection.dto';
 import { UpsertTemplatePhotoDto } from 'src/reinspection/dto/upsert-template-photo.dto';
-import { MailService } from 'src/infra/mail/mail.service';
-import { BoletoReativacaoService } from 'src/sga/services/boleto-reativacao.service';
-import { ReinspectionHinovaService } from 'src/reinspection/services/reinspection-hinova.service';
-import { debugLog } from 'src/shared/debug-log.util';
-import { comRetryEmConflito } from 'src/database/conflito-escrita.util';
+import { ReinspectionAndamentoService } from 'src/reinspection/services/reinspection-andamento.service';
+import {
+  ReinspectionActor,
+  ReinspectionAprovacaoService,
+} from 'src/reinspection/services/reinspection-aprovacao.service';
+import { ReinspectionAvaliacaoService } from 'src/reinspection/services/reinspection-avaliacao.service';
+import { ReinspectionConsultaService } from 'src/reinspection/services/reinspection-consulta.service';
+import { ReinspectionEnvioService } from 'src/reinspection/services/reinspection-envio.service';
+import { ReinspectionSubmissaoService } from 'src/reinspection/services/reinspection-submissao.service';
+import { ReinspectionTemplateService } from 'src/reinspection/services/reinspection-template.service';
 
-/** Usuário do painel que disparou a ação (para auditoria do envio à Hinova). */
-export interface ReinspectionActor {
-  userId?: number;
-  email?: string;
-}
+export type { ReinspectionActor };
 
+/**
+ * Fachada da revistoria: o controller fala só com ela. NÃO tem regra — cada
+ * método delega a um caso de uso:
+ *
+ * | Caso de uso                    | Operações                                   |
+ * |--------------------------------|---------------------------------------------|
+ * | `ReinspectionEnvioService`     | abrir, adicionar fotos (app)                |
+ * | `ReinspectionSubmissaoService` | submeter para análise (app)                 |
+ * | `ReinspectionAndamentoService` | EM_ANALISE, reenviar foto, finalizar (app)  |
+ * | `ReinspectionAvaliacaoService` | aprovar/reprovar foto (painel)              |
+ * | `ReinspectionAprovacaoService` | aprovar revistoria, boleto manual (painel)  |
+ * | `ReinspectionConsultaService`  | listagens, detalhe, status, reprovadas      |
+ * | `ReinspectionTemplateService`  | fotos de template                           |
+ *
+ * Regra nova nasce no caso de uso (ou em `domain/`), nunca aqui.
+ */
 @Injectable()
 export class ReinspectionService {
-  private readonly logger = new Logger(ReinspectionService.name);
-
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly mailService: MailService,
-    private readonly fileUploadService: FileUploadService,
-    private readonly boletoReativacaoService: BoletoReativacaoService,
-    private readonly reinspectionHinovaService: ReinspectionHinovaService,
+    private readonly envio: ReinspectionEnvioService,
+    private readonly submissao: ReinspectionSubmissaoService,
+    private readonly andamento: ReinspectionAndamentoService,
+    private readonly avaliacao: ReinspectionAvaliacaoService,
+    private readonly aprovacao: ReinspectionAprovacaoService,
+    private readonly consulta: ReinspectionConsultaService,
+    private readonly templates: ReinspectionTemplateService,
   ) {}
 
-  private log(
-    debugId: string | undefined,
-    message: string,
-    meta?: Record<string, unknown>,
+  // ── App ───────────────────────────────────────────────────────────────────
+
+  create(
+    dto: CreateReinspectionDto,
+    usuario: UsuarioAutenticado,
+    debugId?: string,
   ) {
-    this.logger.log(debugLog(ReinspectionService.name, message, debugId, meta));
+    return this.envio.criar(dto, usuario, debugId);
   }
 
-  private warn(
-    debugId: string | undefined,
-    message: string,
-    meta?: Record<string, unknown>,
+  addPhotos(
+    reinspectionId: number,
+    dto: AddPhotosDto,
+    usuario: UsuarioAutenticado,
+    debugId?: string,
   ) {
-    this.logger.warn(
-      debugLog(ReinspectionService.name, message, debugId, meta),
-    );
+    return this.envio.adicionarFotos(reinspectionId, dto, usuario, debugId);
   }
 
-  private error(
-    debugId: string | undefined,
-    message: string,
-    meta?: Record<string, unknown>,
+  submitReinspection(
+    reinspectionId: number,
+    usuario: UsuarioAutenticado,
+    debugId?: string,
   ) {
-    this.logger.error(
-      debugLog(ReinspectionService.name, message, debugId, meta),
-    );
+    return this.submissao.submeter(reinspectionId, usuario, debugId);
   }
 
-  async create(dto: CreateReinspectionDto, _userId: unknown, debugId?: string) {
-    const vehicle = await this.prisma.userVehicle.findUnique({
-      where: { id: dto.userVehicleId },
-    });
-
-    if (!vehicle) {
-      this.warn(debugId, 'Validação falhou no create: veículo não encontrado', {
-        userVehicleId: dto.userVehicleId,
-      });
-      throw new NotFoundException('Veículo não encontrado');
-    }
-
-    const reinspection = await this.prisma.reinspection.create({
-      data: {
-        userVehicleId: dto.userVehicleId,
-        vehicleType: dto.vehicleType,
-        codigoVeiculo: dto.codigoVeiculo ?? null,
-      },
-    });
-
-    return {
-      reinspectionId: reinspection.id,
-      status: reinspection.status,
-      createdAt: reinspection.createdAt,
-    };
+  getStatusByUserVehicleId(userVehicleId: number, usuario: UsuarioAutenticado) {
+    return this.consulta.statusDoVeiculo(userVehicleId, usuario);
   }
 
-  async getDashboardTotals() {
-    const [aprovadas, emAnalise, reprovadas, totalRevistorias] =
-      await this.prisma.$transaction([
-        this.prisma.reinspection.count({
-          where: { status: ReinspectionStatus.APROVADA },
-        }),
-        this.prisma.reinspection.count({
-          where: { status: ReinspectionStatus.EM_ANALISE },
-        }),
-        this.prisma.reinspection.count({
-          where: { status: ReinspectionStatus.REPROVADA },
-        }),
-        this.prisma.reinspection.count(),
-      ]);
-
-    return {
-      aprovadas,
-      emAnalise,
-      reprovadas,
-      totalRevistorias,
-    };
+  updateStatusByUserVehicleId(
+    userVehicleId: number,
+    usuario: UsuarioAutenticado,
+  ) {
+    return this.andamento.marcarEmAnalise(userVehicleId, usuario);
   }
 
-  /**
-   * Adiciona um lote de fotos a uma revistoria existente com status PENDENTE.
-   * Pode ser chamado múltiplas vezes para envio incremental.
-   */
-  async addPhotos(reinspectionId: number, dto: AddPhotosDto, debugId?: string) {
-    const reinspection = await this.prisma.reinspection.findUnique({
-      where: { id: reinspectionId },
-      select: { id: true, status: true },
-    });
-
-    if (!reinspection) {
-      throw new NotFoundException('Revistoria não encontrada');
-    }
-
-    if (reinspection.status !== 'PENDENTE') {
-      throw new BadRequestException(
-        'Fotos só podem ser adicionadas a revistorias com status PENDENTE',
-      );
-    }
-
-    const invalidPhoto = dto.photos.find((p) => !p.nomeArquivo || !p.binario);
-    if (invalidPhoto) {
-      throw new BadRequestException(
-        'Cada foto precisa informar nomeArquivo e binario',
-      );
-    }
-
-    let photosWithUrl: Array<{
-      nomeArquivo: string;
-      codigoTipo?: number;
-      templatePhotoId?: number;
-      url: string;
-    }>;
-
-    try {
-      photosWithUrl = await Promise.all(
-        dto.photos.map(async (photo) => {
-          const url =
-            await this.fileUploadService.uploadReinspectionPhotoFromBase64(
-              photo.binario,
-              photo.nomeArquivo,
-            );
-          return {
-            nomeArquivo: photo.nomeArquivo,
-            codigoTipo: photo.codigoTipo,
-            templatePhotoId: photo.templatePhotoId,
-            url,
-          };
-        }),
-      );
-    } catch (error) {
-      this.error(debugId, 'Falha ao salvar fotos', {
-        reinspectionId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      throw new BadRequestException(
-        'Falha ao processar as fotos em base64 para armazenamento local',
-      );
-    }
-
-    await this.prisma.reinspectionPhoto.createMany({
-      data: photosWithUrl.map((p) => ({
-        reinspectionId,
-        nomeArquivo: p.nomeArquivo,
-        codigoTipo: p.codigoTipo ?? null,
-        templatePhotoId: p.templatePhotoId ?? null,
-        url: p.url,
-        status: 'PENDENTE' as unknown as ReinspectionPhotoStatus,
-        sentToHinova: false,
-      })),
-    });
-
-    const totalPhotos = await this.prisma.reinspectionPhoto.count({
-      where: { reinspectionId },
-    });
-
-    return {
-      reinspectionId,
-      photosAdded: dto.photos.length,
-      totalPhotos,
-    };
+  finalizeByUserVehicleId(userVehicleId: number, usuario: UsuarioAutenticado) {
+    return this.andamento.finalizar(userVehicleId, usuario);
   }
 
-  /**
-   * Finaliza o envio das fotos, disparando o e-mail de notificação para os analistas.
-   * Requer ao menos uma foto e status PENDENTE.
-   */
-  async submitReinspection(reinspectionId: number, debugId?: string) {
-    const reinspection = await this.prisma.reinspection.findUnique({
-      where: { id: reinspectionId },
-      select: {
-        id: true,
-        userVehicleId: true,
-        status: true,
-        photos: { select: { url: true } },
-        userVehicle: { select: { chassi: true, plate: true } },
-      },
-    });
-
-    if (!reinspection) {
-      throw new NotFoundException('Revistoria não encontrada');
-    }
-
-    if (reinspection.status !== 'PENDENTE') {
-      throw new BadRequestException(
-        'Somente revistorias com status PENDENTE podem ser submetidas',
-      );
-    }
-
-    if (reinspection.photos.length === 0) {
-      throw new BadRequestException(
-        'É necessário enviar pelo menos uma foto antes de submeter a revistoria',
-      );
-    }
-
-    try {
-      await this.mailService.sendRevistoriaEmail(
-        reinspection.userVehicle.chassi,
-        reinspection.userVehicle.plate,
-        debugId,
-        reinspection.photos
-          .map((p) => p.url)
-          .filter((url): url is string => url !== null),
-      );
-    } catch (emailError) {
-      this.error(debugId, 'Falha ao enviar e-mail de revistoria', {
-        reinspectionId,
-        error:
-          emailError instanceof Error ? emailError.message : String(emailError),
-      });
-    }
-
-    return {
-      reinspectionId: reinspection.id,
-      status: reinspection.status,
-      totalPhotos: reinspection.photos.length,
-    };
+  getRejectedPhotos(userVehicleId: number, usuario: UsuarioAutenticado) {
+    return this.consulta.fotosReprovadas(userVehicleId, usuario);
   }
 
-  async listAll() {
-    const reinspections = await this.prisma.reinspection.findMany({
-      orderBy: { createdAt: 'desc' },
-      select: {
-        id: true,
-        userVehicleId: true,
-        vehicleType: true,
-        status: true,
-        hinovaEnvioStatus: true,
-        hinovaUltimoEnvioEm: true,
-        boletoStatus: true,
-        boletoTentativas: true,
-        boletoUltimaTentativaEm: true,
-        boletoProximaTentativaEm: true,
-        boletoUltimoErro: true,
-        boletoNossoNumero: true,
-        boletoOrigem: true,
-        createdAt: true,
-        updatedAt: true,
-        userVehicle: {
-          select: {
-            chassi: true,
-            plate: true,
-          },
-        },
-        _count: {
-          select: {
-            photos: true,
-          },
-        },
-      },
-    });
-
-    return reinspections.map(({ userVehicle, ...reinspection }) => ({
-      ...reinspection,
-      chassi: userVehicle.chassi,
-      plate: userVehicle.plate,
-    }));
+  resendPhoto(
+    photoId: number,
+    base64: string,
+    usuario: UsuarioAutenticado,
+    debugId?: string,
+  ) {
+    return this.andamento.reenviarFoto(photoId, base64, usuario, debugId);
   }
 
-  async upsertTemplatePhoto(dto: UpsertTemplatePhotoDto, file: any) {
-    if (!file) {
-      throw new BadRequestException('Foto do template é obrigatória');
-    }
+  // ── Painel ────────────────────────────────────────────────────────────────
 
-    const photoUrl =
-      await this.fileUploadService.uploadReinspectionTemplatePhoto(file);
-
-    // Se já existe um registro com esse vehicleType + ordem, remove a foto antiga
-    const existing = await this.prisma.reinspectionTemplatePhoto.findUnique({
-      where: {
-        vehicleType_ordem: {
-          vehicleType: dto.vehicleType,
-          ordem: dto.ordem,
-        },
-      },
-    });
-
-    if (existing) {
-      await this.fileUploadService.deleteReinspectionTemplatePhoto(
-        existing.photoUrl,
-      );
-    }
-
-    const result = await this.prisma.reinspectionTemplatePhoto.upsert({
-      where: {
-        vehicleType_ordem: {
-          vehicleType: dto.vehicleType,
-          ordem: dto.ordem,
-        },
-      },
-      create: {
-        vehicleType: dto.vehicleType,
-        ordem: dto.ordem,
-        photoUrl,
-      },
-      update: {
-        photoUrl,
-      },
-    });
-
-    return {
-      id: result.id,
-      vehicleType: result.vehicleType,
-      ordem: result.ordem,
-      photoUrl: this.fileUploadService.buildUrl(result.photoUrl),
-    };
+  getDashboardTotals() {
+    return this.consulta.totais();
   }
 
-  async getTemplatePhotos(vehicleType?: string) {
-    const where = vehicleType
-      ? { vehicleType: vehicleType as ReinspectionVehicleType }
-      : undefined;
-
-    const photos = await this.prisma.reinspectionTemplatePhoto.findMany({
-      where,
-      orderBy: { ordem: 'asc' },
-      select: {
-        photoUrl: true,
-        ordem: true,
-        vehicleType: true,
-      },
-    });
-
-    return photos.map((p) => ({
-      ...p,
-      photoUrl: this.fileUploadService.buildUrl(p.photoUrl),
-    }));
+  listAll() {
+    return this.consulta.listarTodas();
   }
 
-  async listRecent(limit?: number) {
-    const normalizedLimit = Math.min(limit ?? 20, 100);
-
-    const reinspections = await this.prisma.reinspection.findMany({
-      take: normalizedLimit,
-      orderBy: { createdAt: 'desc' },
-      select: {
-        id: true,
-        userVehicleId: true,
-        vehicleType: true,
-        status: true,
-        hinovaEnvioStatus: true,
-        hinovaUltimoEnvioEm: true,
-        boletoStatus: true,
-        boletoTentativas: true,
-        boletoUltimaTentativaEm: true,
-        boletoProximaTentativaEm: true,
-        boletoUltimoErro: true,
-        boletoNossoNumero: true,
-        boletoOrigem: true,
-        createdAt: true,
-        updatedAt: true,
-        userVehicle: {
-          select: {
-            chassi: true,
-            plate: true,
-          },
-        },
-        _count: {
-          select: {
-            photos: true,
-          },
-        },
-      },
-    });
-
-    return reinspections.map(({ userVehicle, ...reinspection }) => ({
-      ...reinspection,
-      chassi: userVehicle.chassi,
-      plate: userVehicle.plate,
-    }));
+  listRecent(limit?: number) {
+    return this.consulta.listarRecentes(limit);
   }
 
-  async getPhotosByReinspectionId(reinspectionId: number) {
-    const reinspection = await this.prisma.reinspection.findUnique({
-      where: { id: reinspectionId },
-      select: {
-        id: true,
-        userVehicle: {
-          select: {
-            chassi: true,
-            plate: true,
-          },
-        },
-      },
-    });
-
-    if (!reinspection) {
-      throw new NotFoundException('Revistoria não encontrada');
-    }
-
-    const photos = await this.prisma.reinspectionPhoto.findMany({
-      where: { reinspectionId },
-      orderBy: { id: 'asc' },
-      select: {
-        id: true,
-        reinspectionId: true,
-        nomeArquivo: true,
-        codigoTipo: true,
-        url: true,
-        status: true,
-        hinovaSituacao: true,
-        sentToHinova: true,
-        hinovaEnviadaEm: true,
-        hinovaTentativas: true,
-        hinovaUltimoErro: true,
-        createdAt: true,
-      },
-    });
-
-    return {
-      reinspectionId,
-      chassi: reinspection.userVehicle.chassi,
-      plate: reinspection.userVehicle.plate,
-      totalPhotos: photos.length,
-      photos: photos.map((p) => ({
-        ...p,
-        url: this.fileUploadService.buildUrl(p.url),
-      })),
-    };
+  searchByChassiOrPlate(chassi?: string, plate?: string) {
+    return this.consulta.buscarPorChassiOuPlaca(chassi, plate);
   }
 
-  /** Detalhe de uma revistoria pelo id (painel). */
-  async getById(reinspectionId: number) {
-    const reinspection = await this.prisma.reinspection.findUnique({
-      where: { id: reinspectionId },
-      select: {
-        id: true,
-        userVehicleId: true,
-        vehicleType: true,
-        status: true,
-        codigoVeiculo: true,
-        hinovaEnvioStatus: true,
-        hinovaUltimoEnvioEm: true,
-        boletoStatus: true,
-        boletoTentativas: true,
-        boletoUltimaTentativaEm: true,
-        boletoProximaTentativaEm: true,
-        boletoUltimoErro: true,
-        boletoNossoNumero: true,
-        boletoOrigem: true,
-        createdAt: true,
-        updatedAt: true,
-        userVehicle: { select: { chassi: true, plate: true } },
-        _count: { select: { photos: true, hinovaEnvios: true } },
-      },
-    });
-
-    if (!reinspection) {
-      throw new NotFoundException('Revistoria não encontrada');
-    }
-
-    const { userVehicle, _count, ...rest } = reinspection;
-    return {
-      ...rest,
-      chassi: userVehicle.chassi,
-      plate: userVehicle.plate,
-      _count,
-    };
+  getById(reinspectionId: number) {
+    return this.consulta.detalhe(reinspectionId);
   }
 
-  async getStatusByUserVehicleId(userVehicleId: number) {
-    const vehicle = await this.prisma.userVehicle.findUnique({
-      where: { id: userVehicleId },
-      select: { id: true, chassi: true, plate: true },
-    });
-
-    if (!vehicle) {
-      throw new NotFoundException('Veículo não encontrado');
-    }
-
-    const latestReinspection = await this.prisma.reinspection.findFirst({
-      where: { userVehicleId },
-      orderBy: { createdAt: 'desc' },
-      select: {
-        id: true,
-        status: true,
-        createdAt: true,
-        updatedAt: true,
-      },
-    });
-
-    if (!latestReinspection) {
-      return {
-        userVehicleId,
-        chassi: vehicle.chassi,
-        plate: vehicle.plate,
-        hasReinspection: false,
-        status: null,
-      };
-    }
-
-    return {
-      userVehicleId,
-      chassi: vehicle.chassi,
-      plate: vehicle.plate,
-      hasReinspection: true,
-      reinspectionId: latestReinspection.id,
-      status: latestReinspection.status,
-      createdAt: latestReinspection.createdAt,
-      updatedAt: latestReinspection.updatedAt,
-    };
+  getPhotosByReinspectionId(reinspectionId: number) {
+    return this.consulta.fotosDaRevistoria(reinspectionId);
   }
 
-  async updateStatusByUserVehicleId(userVehicleId: number) {
-    const vehicle = await this.prisma.userVehicle.findUnique({
-      where: { id: userVehicleId },
-      select: { id: true },
-    });
-
-    if (!vehicle) {
-      throw new NotFoundException('Veículo não encontrado');
-    }
-
-    const latestReinspection = await this.prisma.reinspection.findFirst({
-      where: { userVehicleId },
-      orderBy: { createdAt: 'desc' },
-      select: { id: true },
-    });
-
-    if (!latestReinspection) {
-      return {
-        userVehicleId,
-        hasReinspection: false,
-        status: null,
-      };
-    }
-
-    const updatedReinspection = await this.prisma.reinspection.update({
-      where: { id: latestReinspection.id },
-      data: { status: 'EM_ANALISE' },
-      select: {
-        id: true,
-        status: true,
-        createdAt: true,
-        updatedAt: true,
-      },
-    });
-
-    return {
-      userVehicleId,
-      hasReinspection: true,
-      reinspectionId: updatedReinspection.id,
-      status: updatedReinspection.status,
-      createdAt: updatedReinspection.createdAt,
-      updatedAt: updatedReinspection.updatedAt,
-    };
-  }
-
-  async finalizeByUserVehicleId(userVehicleId: number, debugId?: string) {
-    const vehicle = await this.prisma.userVehicle.findUnique({
-      where: { id: userVehicleId },
-      select: { id: true },
-    });
-
-    if (!vehicle) {
-      throw new NotFoundException('Veículo não encontrado');
-    }
-
-    const latestReinspection = await this.prisma.reinspection.findFirst({
-      where: { userVehicleId },
-      orderBy: { createdAt: 'desc' },
-      select: { id: true, status: true },
-    });
-
-    if (!latestReinspection) {
-      throw new NotFoundException(
-        'Nenhuma revistoria encontrada para este veículo',
-      );
-    }
-
-    const updated = await this.prisma.reinspection.update({
-      where: { id: latestReinspection.id },
-      data: { status: 'FINALIZADA' },
-      select: {
-        id: true,
-        userVehicleId: true,
-        status: true,
-        updatedAt: true,
-      },
-    });
-
-    return {
-      reinspectionId: updated.id,
-      userVehicleId: updated.userVehicleId,
-      status: updated.status,
-      updatedAt: updated.updatedAt,
-    };
-  }
-
-  async approveByUserVehicleId(
+  approveByUserVehicleId(
     userVehicleId: number,
     debugId?: string,
-    actor?: ReinspectionActor,
+    ator?: ReinspectionActor,
   ) {
-    const vehicle = await this.prisma.userVehicle.findUnique({
-      where: { id: userVehicleId },
-      select: { id: true, chassi: true, plate: true },
-    });
-
-    if (!vehicle) {
-      throw new NotFoundException('Veículo não encontrado');
-    }
-
-    const latestReinspection = await this.prisma.reinspection.findFirst({
-      where: { userVehicleId },
-      orderBy: { createdAt: 'desc' },
-      select: { id: true, userVehicleId: true },
-    });
-
-    if (!latestReinspection) {
-      throw new NotFoundException(
-        'Nenhuma revistoria encontrada para este veículo',
-      );
-    }
-
-    const hasRejectedPhoto = await this.prisma.reinspectionPhoto.findFirst({
-      where: {
-        reinspectionId: latestReinspection.id,
-        status: ReinspectionPhotoStatus.REPROVADA,
-      },
-      select: { id: true },
-    });
-
-    if (hasRejectedPhoto) {
-      throw new BadRequestException(
-        'Não é possível aprovar uma revistoria com foto reprovada',
-      );
-    }
-
-    const updated = await this.prisma.reinspection.update({
-      where: { id: latestReinspection.id },
-      data: { status: 'APROVADA' },
-      select: {
-        id: true,
-        userVehicleId: true,
-        status: true,
-        createdAt: true,
-        updatedAt: true,
-      },
-    });
-
-    // Envio à Hinova: cada tentativa fica registrada em ReinspectionHinovaEnvio.
-    // Falhas não bloqueiam a aprovação; o painel reenvia por
-    // POST /reinspection/:id/hinova/reenviar.
-    try {
-      const envio = await this.reinspectionHinovaService.enviarFotos(
-        updated.id,
-        {
-          origem: ReinspectionHinovaEnvioOrigem.APROVACAO,
-          adminPanelUserId: actor?.userId,
-          adminPanelUserEmail: actor?.email,
-          debugId,
-        },
-      );
-      if (envio && envio.totalFalhas > 0) {
-        this.warn(debugId, 'Envio à Hinova na aprovação com falhas', {
-          reinspectionId: updated.id,
-          envioId: envio.envioId,
-          status: envio.status,
-          totalFalhas: envio.totalFalhas,
-        });
-      }
-    } catch (error) {
-      this.error(debugId, 'Falha ao enviar revistoria aprovada para Hinova', {
-        reinspectionId: updated.id,
-        userVehicleId: updated.userVehicleId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-
-    // Boleto de reativação + e-mail de aprovação (o e-mail só sai quando o
-    // boleto existe; em instabilidade do SGA entra o retry de 5 em 5 min e,
-    // em falha definitiva, a cobrança recebe e-mail para gerar à mão).
-    // Falhas aqui nunca desfazem a aprovação nem derrubam a resposta.
-    let boleto: {
-      status: string;
-      nossoNumero: string | null;
-      tentativas: number;
-      proximaTentativaEm: Date | null;
-      erro: string | null;
-    } | null = null;
-    try {
-      const resultado = await this.boletoReativacaoService.processar(
-        updated.id,
-        { origem: 'APROVACAO', debugId },
-      );
-      boleto = {
-        status: resultado.status,
-        nossoNumero: resultado.nossoNumero,
-        tentativas: resultado.tentativas,
-        proximaTentativaEm: resultado.proximaTentativaEm,
-        erro: resultado.erro,
-      };
-    } catch (boletoError) {
-      this.error(debugId, 'Falha inesperada no boleto de reativação', {
-        reinspectionId: updated.id,
-        userVehicleId: updated.userVehicleId,
-        error:
-          boletoError instanceof Error
-            ? boletoError.message
-            : String(boletoError),
-      });
-    }
-
-    return {
-      reinspectionId: updated.id,
-      userVehicleId: updated.userVehicleId,
-      status: updated.status,
-      createdAt: updated.createdAt,
-      updatedAt: updated.updatedAt,
-      // Campo aditivo: o painel atual ignora.
-      boleto,
-    };
+    return this.aprovacao.aprovar(userVehicleId, debugId, ator);
   }
 
-  async getRejectedPhotos(userVehicleId: number) {
-    const vehicle = await this.prisma.userVehicle.findUnique({
-      where: { id: userVehicleId },
-      select: { id: true, chassi: true, plate: true },
-    });
-
-    if (!vehicle) {
-      throw new NotFoundException('Veículo não encontrado');
-    }
-
-    const latestReinspection = await this.prisma.reinspection.findFirst({
-      where: { userVehicleId },
-      orderBy: { createdAt: 'desc' },
-      select: { id: true, status: true },
-    });
-
-    if (!latestReinspection) {
-      throw new NotFoundException(
-        'Nenhuma revistoria encontrada para este veículo',
-      );
-    }
-
-    const rejectedPhotos = await this.prisma.reinspectionPhoto.findMany({
-      where: {
-        reinspectionId: latestReinspection.id,
-        status: ReinspectionPhotoStatus.REPROVADA,
-      },
-      orderBy: { id: 'asc' },
-      select: {
-        id: true,
-        url: true,
-        templatePhotoId: true,
-        templatePhoto: {
-          select: {
-            id: true,
-            photoUrl: true,
-            ordem: true,
-            vehicleType: true,
-          },
-        },
-      },
-    });
-
-    return {
-      reinspectionId: latestReinspection.id,
-      chassi: vehicle.chassi,
-      plate: vehicle.plate,
-      reinspectionStatus: latestReinspection.status,
-      rejectedPhotos: rejectedPhotos.map((p) => ({
-        photoId: p.id,
-        photoUrl: this.fileUploadService.buildUrl(p.url),
-        templatePhotoId: p.templatePhotoId,
-        templatePhotoUrl: this.fileUploadService.buildUrl(
-          p.templatePhoto?.photoUrl ?? null,
-        ),
-        ordem: p.templatePhoto?.ordem ?? null,
-        templatePhoto: p.templatePhoto
-          ? {
-              id: p.templatePhoto.id,
-              vehicleType: p.templatePhoto.vehicleType,
-              ordem: p.templatePhoto.ordem,
-              photoUrl: this.fileUploadService.buildUrl(
-                p.templatePhoto.photoUrl,
-              ),
-            }
-          : null,
-      })),
-    };
+  gerarBoleto(reinspectionId: number, debugId?: string) {
+    return this.aprovacao.gerarBoleto(reinspectionId, debugId);
   }
 
-  async searchByChassiOrPlate(chassi?: string, plate?: string) {
-    const normalizedChassi = chassi?.trim();
-    const normalizedPlate = plate?.trim();
-
-    if (!normalizedChassi && !normalizedPlate) {
-      throw new BadRequestException(
-        'Informe ao menos um parâmetro de busca: chassi ou plate',
-      );
-    }
-
-    const vehicleFilters = [
-      ...(normalizedChassi
-        ? [
-            {
-              userVehicle: {
-                chassi: {
-                  contains: normalizedChassi,
-                },
-              },
-            },
-          ]
-        : []),
-      ...(normalizedPlate
-        ? [
-            {
-              userVehicle: {
-                plate: {
-                  contains: normalizedPlate,
-                },
-              },
-            },
-          ]
-        : []),
-    ];
-
-    const reinspections = await this.prisma.reinspection.findMany({
-      where: {
-        OR: vehicleFilters,
-      },
-      orderBy: { createdAt: 'desc' },
-      select: {
-        id: true,
-        userVehicleId: true,
-        vehicleType: true,
-        status: true,
-        hinovaEnvioStatus: true,
-        hinovaUltimoEnvioEm: true,
-        boletoStatus: true,
-        boletoTentativas: true,
-        boletoUltimaTentativaEm: true,
-        boletoProximaTentativaEm: true,
-        boletoUltimoErro: true,
-        boletoNossoNumero: true,
-        boletoOrigem: true,
-        createdAt: true,
-        updatedAt: true,
-        userVehicle: {
-          select: {
-            chassi: true,
-            plate: true,
-          },
-        },
-        _count: {
-          select: {
-            photos: true,
-          },
-        },
-      },
-    });
-
-    return reinspections.map(({ userVehicle, ...reinspection }) => ({
-      ...reinspection,
-      chassi: userVehicle.chassi,
-      plate: userVehicle.plate,
-    }));
+  reprovePhoto(photoId: number) {
+    return this.avaliacao.reprovarFoto(photoId);
   }
 
-  async resendPhoto(photoId: number, base64: string, debugId?: string) {
-    const photo = await this.prisma.reinspectionPhoto.findUnique({
-      where: { id: photoId },
-      select: {
-        id: true,
-        reinspectionId: true,
-        nomeArquivo: true,
-        codigoTipo: true,
-        status: true,
-        reinspection: {
-          select: {
-            id: true,
-            codigoVeiculo: true,
-            userVehicle: {
-              select: { chassi: true, plate: true },
-            },
-          },
-        },
-      },
-    });
-
-    if (!photo) {
-      throw new NotFoundException('Foto de revistoria não encontrada');
-    }
-
-    if (photo.status !== ReinspectionPhotoStatus.REPROVADA) {
-      throw new BadRequestException(
-        'Somente fotos reprovadas podem ser reenviadas',
-      );
-    }
-
-    // Faz upload do novo arquivo
-    const newUrl =
-      await this.fileUploadService.uploadReinspectionPhotoFromBase64(
-        base64,
-        photo.nomeArquivo,
-      );
-
-    // Atualiza a foto e a revistoria em transação
-    const [updatedPhoto, updatedReinspection] = await this.prisma.$transaction([
-      this.prisma.reinspectionPhoto.update({
-        where: { id: photo.id },
-        data: {
-          url: newUrl,
-          status: 'PENDENTE' as unknown as ReinspectionPhotoStatus,
-          sentToHinova: false,
-          hinovaSituacao: null,
-        },
-        select: {
-          id: true,
-          reinspectionId: true,
-          nomeArquivo: true,
-          codigoTipo: true,
-          url: true,
-          status: true,
-        },
-      }),
-      this.prisma.reinspection.update({
-        where: { id: photo.reinspectionId },
-        data: { status: 'EM_ANALISE' },
-        select: {
-          id: true,
-          userVehicleId: true,
-          status: true,
-          codigoVeiculo: true,
-        },
-      }),
-    ]);
-
-    // Envia e-mail com assunto específico
-    try {
-      await this.mailService.sendFotoRecusadaReenviadaEmail(
-        photo.reinspection.userVehicle.chassi,
-        photo.reinspection.userVehicle.plate,
-        debugId,
-        [newUrl],
-      );
-    } catch (emailError) {
-      this.error(debugId, 'Falha ao enviar e-mail de foto reenviada', {
-        photoId,
-        error:
-          emailError instanceof Error ? emailError.message : String(emailError),
-      });
-    }
-
-    return {
-      photoId: updatedPhoto.id,
-      reinspectionId: updatedReinspection.id,
-      reinspectionStatus: updatedReinspection.status,
-      photoStatus: updatedPhoto.status,
-      photoUrl: this.fileUploadService.buildUrl(updatedPhoto.url),
-    };
+  approvePhoto(photoId: number) {
+    return this.avaliacao.aprovarFoto(photoId);
   }
 
-  async reprovePhoto(photoId: number) {
-    const photo = await this.prisma.reinspectionPhoto.findUnique({
-      where: { id: photoId },
-      select: {
-        id: true,
-        reinspectionId: true,
-        templatePhotoId: true,
-        nomeArquivo: true,
-        reinspection: {
-          select: {
-            vehicleType: true,
-          },
-        },
-      },
-    });
+  // ── Templates (app e painel) ──────────────────────────────────────────────
 
-    if (!photo) {
-      throw new NotFoundException('Foto de revistoria não encontrada');
-    }
-
-    const templatePhotoIdToUse = await this.resolveTemplatePhotoIdForReprove(
-      photo.templatePhotoId,
-      photo.nomeArquivo,
-      photo.reinspection.vehicleType,
-    );
-
-    // Reprovações simultâneas da mesma revistoria gravam a mesma linha
-    // `Reinspection`: repete em conflito de escrita (idempotente).
-    const [updatedPhoto, updatedReinspection] = await comRetryEmConflito(() =>
-      this.prisma.$transaction([
-        this.prisma.reinspectionPhoto.update({
-          where: { id: photo.id },
-          data: {
-            status: ReinspectionPhotoStatus.REPROVADA,
-            templatePhotoId: templatePhotoIdToUse,
-          },
-          select: {
-            id: true,
-            reinspectionId: true,
-            nomeArquivo: true,
-            templatePhotoId: true,
-            status: true,
-          },
-        }),
-        this.prisma.reinspection.update({
-          where: { id: photo.reinspectionId },
-          data: {
-            status: 'REPROVADA',
-          },
-          select: {
-            id: true,
-            userVehicleId: true,
-            status: true,
-            updatedAt: true,
-          },
-        }),
-      ]),
-    );
-
-    this.logger.warn(
-      `Foto reprovada e revistoria atualizada para REPROVADA | photoId=${updatedPhoto.id} | reinspectionId=${updatedReinspection.id} | templatePhotoId=${updatedPhoto.templatePhotoId ?? 'N/A'}`,
-    );
-
-    return {
-      photo: updatedPhoto,
-      reinspection: {
-        reinspectionId: updatedReinspection.id,
-        userVehicleId: updatedReinspection.userVehicleId,
-        status: updatedReinspection.status,
-        updatedAt: updatedReinspection.updatedAt,
-      },
-    };
+  upsertTemplatePhoto(dto: UpsertTemplatePhotoDto, file: Express.Multer.File) {
+    return this.templates.salvar(dto, file);
   }
 
-  async approvePhoto(photoId: number) {
-    const photo = await this.prisma.reinspectionPhoto.findUnique({
-      where: { id: photoId },
-      select: {
-        id: true,
-        reinspectionId: true,
-      },
-    });
-
-    if (!photo) {
-      throw new NotFoundException('Foto de revistoria não encontrada');
-    }
-
-    const [updatedPhoto, hasRejectedPhoto] = await this.prisma.$transaction([
-      this.prisma.reinspectionPhoto.update({
-        where: { id: photo.id },
-        data: {
-          status: ReinspectionPhotoStatus.APROVADA,
-        },
-        select: {
-          id: true,
-          reinspectionId: true,
-          nomeArquivo: true,
-          templatePhotoId: true,
-          status: true,
-        },
-      }),
-      this.prisma.reinspectionPhoto.findFirst({
-        where: {
-          reinspectionId: photo.reinspectionId,
-          status: ReinspectionPhotoStatus.REPROVADA,
-          NOT: { id: photo.id },
-        },
-        select: { id: true },
-      }),
-    ]);
-
-    const reinspectionStatus = hasRejectedPhoto ? 'REPROVADA' : 'EM_ANALISE';
-
-    // O painel aprova todas as fotos em paralelo e cada aprovação grava a
-    // mesma linha `Reinspection`. `updateMany` é um UPDATE único (sem leitura
-    // prévia na transação), que não conflita sob `innodb_snapshot_isolation`
-    // do MariaDB; a leitura do retorno vem depois.
-    await comRetryEmConflito(() =>
-      this.prisma.reinspection.updateMany({
-        where: { id: photo.reinspectionId },
-        data: { status: reinspectionStatus },
-      }),
-    );
-    const updatedReinspection =
-      await this.prisma.reinspection.findUniqueOrThrow({
-        where: { id: photo.reinspectionId },
-        select: {
-          id: true,
-          userVehicleId: true,
-          status: true,
-          updatedAt: true,
-        },
-      });
-
-    return {
-      photo: updatedPhoto,
-      reinspection: {
-        reinspectionId: updatedReinspection.id,
-        userVehicleId: updatedReinspection.userVehicleId,
-        status: updatedReinspection.status,
-        updatedAt: updatedReinspection.updatedAt,
-      },
-    };
-  }
-
-  private async resolveTemplatePhotoIdForReprove(
-    currentTemplatePhotoId: number | null,
-    nomeArquivo: string,
-    vehicleType: ReinspectionVehicleType,
-  ): Promise<number | null> {
-    if (currentTemplatePhotoId != null) {
-      return currentTemplatePhotoId;
-    }
-
-    const ordem = this.extractOrdemFromNomeArquivo(nomeArquivo);
-    if (ordem == null) {
-      this.logger.warn(
-        `Não foi possível inferir templatePhotoId: ordem ausente no nome do arquivo | nomeArquivo=${nomeArquivo}`,
-      );
-      return null;
-    }
-
-    const templatePhoto =
-      await this.prisma.reinspectionTemplatePhoto.findUnique({
-        where: {
-          vehicleType_ordem: {
-            vehicleType,
-            ordem,
-          },
-        },
-        select: { id: true },
-      });
-
-    if (!templatePhoto) {
-      this.logger.warn(
-        `Não foi possível inferir templatePhotoId: template não encontrado | vehicleType=${vehicleType} | ordem=${ordem}`,
-      );
-      return null;
-    }
-
-    return templatePhoto.id;
-  }
-
-  private extractOrdemFromNomeArquivo(nomeArquivo: string): number | null {
-    const match = nomeArquivo.match(/ordem[_-]?(\d+)/i);
-    if (!match) {
-      return null;
-    }
-
-    const ordem = Number.parseInt(match[1], 10);
-    return Number.isNaN(ordem) ? null : ordem;
+  getTemplatePhotos(vehicleType?: string) {
+    return this.templates.listar(vehicleType);
   }
 }

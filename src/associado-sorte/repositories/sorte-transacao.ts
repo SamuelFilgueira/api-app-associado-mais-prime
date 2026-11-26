@@ -464,6 +464,20 @@ export class SorteTx {
     await this.tx.sorteCampanha.update({ where: { id }, data });
   }
 
+  /**
+   * Trava TODAS as campanhas da base, em ordem de id. Deve ser a primeira
+   * leitura da transação que publica: duas publicações da mesma base passam
+   * a rodar uma depois da outra, e a segunda já enxerga a campanha que a
+   * primeira publicou. A ordem fixa evita deadlock entre as duas.
+   */
+  async travarCampanhasDaBase(baseOrigin: string): Promise<void> {
+    await this.tx.$queryRaw`
+      SELECT id FROM SorteCampanha
+      WHERE baseOrigin = ${baseOrigin}
+      ORDER BY id
+      FOR UPDATE`;
+  }
+
   contarCampanhasPublicadas(
     baseOrigin: string,
     excetoId: number,
@@ -529,6 +543,26 @@ export class SorteTx {
       _max: { createdAt: true },
     });
     return { total: r._count._all, ultimaEm: r._max.createdAt ?? null };
+  }
+
+  /**
+   * Última raspada do dia. Vai no corpo do 409 de limite/intervalo: quem
+   * raspou e perdeu a resposta (rede caiu) recebe o resultado na nova
+   * tentativa, em vez de só "você já raspou".
+   */
+  async ultimaRaspadaDoDia(userId: number, dia: string) {
+    return this.tx.sorteRaspada.findFirst({
+      where: { userId, dia: diaParaDate(dia) },
+      orderBy: { id: 'desc' },
+      select: {
+        id: true,
+        resultado: true,
+        momentoId: true,
+        creditos: true,
+        bonus: true,
+        createdAt: true,
+      },
+    });
   }
 
   /** Último voucher ganho depois de `desde` (carência), ou `null`. */

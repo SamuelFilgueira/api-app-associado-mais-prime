@@ -1,7 +1,5 @@
-import { InjectQueue } from '@nestjs/bullmq';
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Prisma, SorteNotificacaoAdmin } from '@prisma/client';
-import { Queue } from 'bullmq';
 import {
   associadoSorteConfig,
   SORTE_EMAIL_RETIRADA_JOB,
@@ -34,6 +32,7 @@ import {
   SorteConfigService,
 } from 'src/associado-sorte/services/sorte-config.service';
 import { MailService } from 'src/infra/mail/mail.service';
+import { ProdutorDeFilas } from 'src/queue/produtor-de-filas.service';
 import { ASSOCIADO_SORTE_QUEUE } from 'src/queue/queue.module';
 import { baseTag } from 'src/shared/log.util';
 
@@ -55,7 +54,7 @@ export class SorteNotificacoesAdminService {
     private readonly ganhadoresRepository: SorteGanhadoresRepository,
     private readonly config: SorteConfigService,
     private readonly mail: MailService,
-    @InjectQueue(ASSOCIADO_SORTE_QUEUE) private readonly fila: Queue,
+    private readonly produtor: ProdutorDeFilas,
   ) {}
 
   /**
@@ -112,14 +111,18 @@ export class SorteNotificacoesAdminService {
   async enfileirarEmailRetirada(notificacaoId: number): Promise<void> {
     const notificacao = await this.repository.buscar(notificacaoId);
     if (!notificacao?.emailDestinatarios) return;
-    await this.fila.add(
+    await this.produtor.enfileirar(
+      ASSOCIADO_SORTE_QUEUE,
       SORTE_EMAIL_RETIRADA_JOB,
       { notificacaoId } satisfies EmailRetiradaJob,
       {
-        attempts: 3,
-        backoff: { type: 'exponential', delay: 30_000 },
-        removeOnComplete: true,
-        removeOnFail: 50,
+        base: notificacao.baseOrigin,
+        opcoes: {
+          attempts: 3,
+          backoff: { type: 'exponential', delay: 30_000 },
+          removeOnComplete: true,
+          removeOnFail: 50,
+        },
       },
     );
   }

@@ -167,10 +167,11 @@ export class SorteInscricaoService {
     for (const veiculo of veiculosCandidatos(resposta.data?.veiculos)) {
       const codigo = String(veiculo.codigo_veiculo).trim();
       try {
-        const beneficios = await this.beneficiosVeiculo.getBeneficiosVeiculo(
-          baseOrigin,
-          codigo,
-        );
+        const beneficios =
+          await this.beneficiosVeiculo.getBeneficiosVeiculoAtual(
+            baseOrigin,
+            codigo,
+          );
         const produtos = Array.isArray(beneficios?.produtos)
           ? beneficios.produtos
           : [];

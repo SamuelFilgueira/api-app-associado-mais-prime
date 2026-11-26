@@ -4,20 +4,12 @@ import {
   Injectable,
   InternalServerErrorException,
   Logger,
-  OnModuleDestroy,
-  OnModuleInit,
 } from '@nestjs/common';
 import axios from 'axios';
-import {
-  BaseOrigin,
-  TokenResolverService,
-} from 'src/shared/token-resolver.service';
-import { mapTenantBases, TENANT } from 'src/config/tenant.config';
-import {
-  IRastreamentoProvider,
-  RastreamentoBaseContext,
-  RastreamentoCandidatoResult,
-} from 'src/rastreamento/providers/rastreamento-provider.interface';
+import type { BaseOrigin } from 'src/config/tenant.config';
+import { M7AuthService } from 'src/rastreamento/m7/services/m7-auth.service';
+import { ErroDeAplicacao } from 'src/shared/erros/erros';
+import { exigirBase } from 'src/shared/tenant/tenant-context';
 
 // ---------------------------------------------------------------------------
 // Constantes
@@ -29,14 +21,6 @@ const M7_REQUEST_TIMEOUT = 15_000;
 // ---------------------------------------------------------------------------
 // Tipos e interfaces
 // ---------------------------------------------------------------------------
-
-/** Estado interno do token de autenticação para uma base de origem. */
-type TokenState = {
-  token: string | null;
-  tokenExpires: number | null;
-  /** Promise em andamento de renovação, usada como mutex. */
-  tokenRenewalPromise: Promise<void> | null;
-};
 
 /** Resposta da consulta de última posição do veículo na API M7. */
 export interface UltimaPosicaoM7Response {
@@ -78,134 +62,57 @@ export interface EventoPadraoM7Response {
   evtIgn: boolean;
 }
 
+/**
+ * Erro que já saiu com status e mensagem definidos (500 do próprio client,
+ * erro tipado da aplicação): atravessa os `catch` sem ser reembrulhado.
+ */
+function ehErroJaClassificado(error: unknown): boolean {
+  return (
+    error instanceof InternalServerErrorException ||
+    error instanceof ErroDeAplicacao
+  );
+}
+
+/**
+ * A M7 recusou o comando (404 com mensagem). O status continua 400; o texto
+ * da M7 fica no log e o app recebe uma mensagem neutra com `code`.
+ */
+function comandoRecusado(mensagem: string): BadRequestException {
+  return new BadRequestException({
+    statusCode: 400,
+    message: mensagem,
+    error: 'Bad Request',
+    code: 'RASTREAMENTO_COMANDO_RECUSADO',
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Classe principal
 // ---------------------------------------------------------------------------
 
 @Injectable()
-export class RastreamentoM7
-  implements IRastreamentoProvider, OnModuleInit, OnModuleDestroy
-{
+export class RastreamentoM7 {
   private readonly logger = new Logger(RastreamentoM7.name);
-  readonly providerName = 'm7' as const;
 
-  // -------------------------------------------------------------------------
-  // Estado interno
-  // -------------------------------------------------------------------------
-
-  private readonly bases: BaseOrigin[] = TENANT.baseNames;
-
-  /** Estado de token por base de origem. */
-  private readonly tokenState: Record<BaseOrigin, TokenState> = mapTenantBases(
-    () => ({ token: null, tokenExpires: null, tokenRenewalPromise: null }),
-  );
-
-  private renewalInterval: NodeJS.Timeout;
-
-  // -------------------------------------------------------------------------
-  // Inicialização
-  // -------------------------------------------------------------------------
-
-  constructor(private readonly tokenResolver: TokenResolverService) {}
-
-  async onModuleInit(): Promise<void> {
-    await Promise.allSettled(this.bases.map((b) => this.renovarToken(b)));
-
-    this.renewalInterval = setInterval(() => {
-      for (const base of this.bases) {
-        void this.renovarToken(base).catch(() => {});
-      }
-    }, 1_800_000);
-    this.renewalInterval.unref();
-  }
-
-  onModuleDestroy(): void {
-    clearInterval(this.renewalInterval);
-  }
-
-  // -------------------------------------------------------------------------
-  // IRastreamentoProvider
-  // -------------------------------------------------------------------------
-
-  async obterUltimaPosicao(params: {
-    cnpj: string;
-    chassi: string;
-    baseContext: RastreamentoBaseContext;
-  }): Promise<RastreamentoCandidatoResult> {
-    const { cnpj, chassi, baseContext } = params;
-    const data = await this.ultimaPosicaoM7(
-      cnpj,
-      chassi,
-      baseContext.baseOrigin,
-    );
-    return {
-      dataOriginal: data.data_gps,
-      timestamp: new Date(data.data_gps.replace(' ', 'T')).getTime(),
-      data: data as unknown as Record<string, unknown>,
-      origem: 'm7',
-    };
-  }
+  /**
+   * A sessão (token por base) vive no `M7AuthService`, compartilhada entre os
+   * processos pelo `VendorSessionStore`. Esta classe só faz as chamadas.
+   */
+  constructor(private readonly auth: M7AuthService) {}
 
   // -------------------------------------------------------------------------
   // Gerenciamento de token
   // -------------------------------------------------------------------------
 
   /**
-   * Renova o token M7 com mutex — chamadas concorrentes reutilizam
-   * a mesma promise de renovação, evitando múltiplos logins simultâneos.
+   * Força a renovação do token M7 da base (rota operacional).
+   *
+   * A base é obrigatória: sem ela a renovação falha (`BaseNaoResolvidaError`)
+   * em vez de renovar o token da base padrão.
    */
-  async renovarToken(baseOrigin: BaseOrigin = TENANT.defaultBase) {
-    const state = this.tokenState[baseOrigin];
-
-    if (state.tokenRenewalPromise) {
-      await state.tokenRenewalPromise;
-      return { token: state.token, expires_in: state.tokenExpires };
-    }
-
-    state.tokenRenewalPromise = this.executeRenovarToken(baseOrigin);
-
-    try {
-      await state.tokenRenewalPromise;
-      return { token: state.token, expires_in: state.tokenExpires };
-    } finally {
-      state.tokenRenewalPromise = null;
-    }
-  }
-
-  /**
-   * Executa efetivamente a chamada de login na API M7 e atualiza o estado
-   * interno do token para a base informada.
-   */
-  private async executeRenovarToken(baseOrigin: BaseOrigin): Promise<void> {
-    const apiM7Token =
-      process.env[this.tokenResolver.getTokenKey(baseOrigin, 'm7Token')];
-    const codigo =
-      process.env[this.tokenResolver.getTokenKey(baseOrigin, 'm7Codigo')];
-
-    try {
-      const response = await axios.post(
-        `${m7ApiBaseUrl()}login`,
-        { codigo, api_m7_token: apiM7Token },
-        { timeout: M7_REQUEST_TIMEOUT },
-      );
-
-      if (response.data && response.data.sucesso) {
-        this.tokenState[baseOrigin].token = response.data.token;
-        this.tokenState[baseOrigin].tokenExpires = response.data.expires_in;
-        return;
-      }
-
-      this.logger.error(
-        `[${baseOrigin}] Falha ao renovar token - sucesso=false`,
-      );
-      throw new InternalServerErrorException('Falha ao renovar token');
-    } catch (error) {
-      if (error instanceof InternalServerErrorException) throw error;
-      this.logger.error(
-        `[${baseOrigin}] Erro ao renovar token: ${error instanceof Error ? error.message : 'Erro desconhecido'}`,
-      );
-      throw new InternalServerErrorException('Erro ao renovar token');
-    }
+  async renovarToken(baseOrigin: BaseOrigin) {
+    const sessao = await this.auth.renovar(baseOrigin);
+    return { token: sessao.token, expires_in: sessao.expiresIn };
   }
 
   /**
@@ -229,24 +136,21 @@ export class RastreamentoM7
    * Wrapper genérico: executa o request fornecido e, em caso de token
    * inválido ou expirado, renova e repete a chamada uma única vez.
    *
-   * Público por ser o único gerenciador do token M7 — `HistoricoM7Service`
-   * reutiliza este cache em vez de manter um segundo login paralelo.
+   * Público por ser a única porta para a sessão da M7 — `HistoricoM7Service`
+   * reutiliza esta sessão em vez de manter um segundo login paralelo.
+   *
+   * Base que não pertence a este deploy falha com `BaseNaoResolvidaError`
+   * (antes: `TypeError` ao ler o estado de uma base inexistente).
    */
   async executarComReautenticacao<T>(
     baseOrigin: BaseOrigin,
     request: (token: string) => Promise<{ status: number; data: T }>,
   ): Promise<T> {
-    const state = this.tokenState[baseOrigin];
-
-    if (!state.token) {
-      this.logger.error(
-        `[${baseOrigin}] executarComReautenticacao - Token não disponível`,
-      );
-      throw new InternalServerErrorException('Token não disponível');
-    }
+    const base = exigirBase(baseOrigin, 'chamada à M7');
+    const token = await this.obterToken(base);
 
     try {
-      const response = await request(state.token);
+      const response = await request(token);
       return response.data;
     } catch (error) {
       if (
@@ -257,30 +161,38 @@ export class RastreamentoM7
             data: (error.response?.data as Record<string, unknown>) ?? null,
           }))
       ) {
-        this.logger.warn(`[${baseOrigin}] Token expirado/inválido, renovando`);
-        await this.renovarToken(baseOrigin);
-
-        if (!state.token) {
-          this.logger.error(
-            `[${baseOrigin}] Token ainda indisponível após renovação`,
-          );
-          throw new InternalServerErrorException(
-            'Token não disponível após renovação',
-          );
-        }
-
-        const retry = await request(state.token);
+        this.logger.warn(`[${base}] Token expirado/inválido, renovando`);
+        // Informa o token recusado: se outro processo já renovou, o token
+        // dele é adotado sem novo login.
+        const renovada = await this.auth.renovar(base, token);
+        const retry = await request(renovada.token);
         return retry.data;
       }
 
       if (axios.isAxiosError(error)) {
         const responseBody = error.response?.data;
         this.logger.error(
-          `[${baseOrigin}] Erro HTTP ${error.response?.status ?? 'sem resposta'} | url=${error.config?.url ?? 'N/A'} | body=${JSON.stringify(responseBody ?? null)}`,
+          `[${base}] Erro HTTP ${error.response?.status ?? 'sem resposta'} | url=${error.config?.url ?? 'N/A'} | body=${JSON.stringify(responseBody ?? null)}`,
         );
       }
 
       throw error;
+    }
+  }
+
+  /**
+   * Token da sessão da base. Sem sessão e sem conseguir autenticar, a chamada
+   * falha com o mesmo 500 de sempre ("Token não disponível"); o motivo fica
+   * no log.
+   */
+  private async obterToken(base: BaseOrigin): Promise<string> {
+    try {
+      return await this.auth.obterToken(base);
+    } catch (error) {
+      this.logger.error(
+        `[${base}] executarComReautenticacao - Token não disponível: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw new InternalServerErrorException('Token não disponível');
     }
   }
 
@@ -315,7 +227,7 @@ export class RastreamentoM7
 
       return this.mapearUltimaPosicaoM7(data as Record<string, unknown>);
     } catch (error) {
-      if (error instanceof InternalServerErrorException) throw error;
+      if (ehErroJaClassificado(error)) throw error;
       this.logger.error(
         `[${baseOrigin}] ultimaPosicaoM7 ERRO: ${error instanceof Error ? error.message : JSON.stringify(error)}`,
       );
@@ -351,7 +263,7 @@ export class RastreamentoM7
         evtIgn: Boolean(evento.ignicao_ligada),
       };
     } catch (error) {
-      if (error instanceof InternalServerErrorException) throw error;
+      if (ehErroJaClassificado(error)) throw error;
       this.logger.error(
         `[${baseOrigin}] getEventoPadraoM7 ERRO: ${error instanceof Error ? error.message : JSON.stringify(error)}`,
       );
@@ -412,7 +324,7 @@ export class RastreamentoM7
         baseOrigin,
       );
     } catch (error) {
-      if (error instanceof InternalServerErrorException) throw error;
+      if (ehErroJaClassificado(error)) throw error;
       const upstreamMessage = this.extractM7ErrorMessage(error);
 
       if (
@@ -420,8 +332,11 @@ export class RastreamentoM7
         error.response?.status === 404 &&
         upstreamMessage
       ) {
-        throw new BadRequestException(
-          `M7 rejeitou atualização da âncora: ${upstreamMessage}`,
+        this.logger.warn(
+          `[${baseOrigin}] M7 rejeitou atualização da âncora: ${upstreamMessage}`,
+        );
+        throw comandoRecusado(
+          'Não foi possível atualizar a âncora do veículo.',
         );
       }
 
@@ -452,7 +367,7 @@ export class RastreamentoM7
         baseOrigin,
       );
     } catch (error) {
-      if (error instanceof InternalServerErrorException) throw error;
+      if (ehErroJaClassificado(error)) throw error;
       const upstreamMessage = this.extractM7ErrorMessage(error);
 
       if (
@@ -460,8 +375,11 @@ export class RastreamentoM7
         error.response?.status === 404 &&
         upstreamMessage
       ) {
-        throw new BadRequestException(
-          `M7 rejeitou atualização da ignição: ${upstreamMessage}`,
+        this.logger.warn(
+          `[${baseOrigin}] M7 rejeitou atualização da ignição: ${upstreamMessage}`,
+        );
+        throw comandoRecusado(
+          'Não foi possível atualizar o alerta de ignição do veículo.',
         );
       }
 

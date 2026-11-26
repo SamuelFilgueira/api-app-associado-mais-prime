@@ -1,3 +1,5 @@
+> **Histórico.** Este documento registra a decisão de setembro de 2026. O estado vigente (camadas, tenant, filas, erros e régua de PR) está em `ARQUITETURA_2026-11.md`. A lista de god services da seção 6 e o roteiro da seção 7 retratam setembro; consulte o documento vigente para o estado atual.
+
 # Arquitetura do beneficios-api — Monólito Modular com Portas e Adaptadores simplificado (Set/2026)
 
 Documento de decisão e referência. Diz **qual padrão** o projeto segue, **como ficou** a estrutura após a implementação de 2026-09-09, **quais são os pontos focais** da aplicação e **o que ainda não foi feito de propósito**. Serve de régua para PRs.

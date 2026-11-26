@@ -33,8 +33,10 @@ import {
 } from '../helpers/historico-m7-utils.helper';
 import {
   amostrarPontosPorIntervalo,
-  sanitizarPontosGps,
+  sanitizarPontosGpsEmBlocos,
 } from '../helpers/m7-gps-sanitizer.helper';
+import { cederEventLoop } from 'src/rastreamento/helpers/ceder-event-loop';
+import { ErroDeAplicacao } from 'src/shared/erros/erros';
 import { ContestacaoV2PdfKitService } from '../pdf/contestacao-v2-pdfkit.service';
 import { HistoricoPdfM7Service } from '../pdf/historico-pdf-m7.service';
 import {
@@ -47,6 +49,9 @@ import { M7ViagensBuilderService } from './m7-viagens-builder.service';
 import { RastreamentoM7 } from './rastreamento-m7';
 
 const M7_REQUEST_TIMEOUT = 50_000;
+
+/** Linhas do PDF de contestação V2 escritas entre uma cessão do event loop e outra. */
+const LINHAS_PDF_POR_BLOCO = 100;
 
 /** Resultado da fase 1 do PDF de contestação V2 (antes de qualquer byte na resposta). */
 export interface ContestacaoV2Preparada {
@@ -105,7 +110,12 @@ export class HistoricoM7Service {
       );
       return data as M7ConsultaVeiculoResponse;
     } catch (error) {
-      if (error instanceof InternalServerErrorException) throw error;
+      if (
+        error instanceof InternalServerErrorException ||
+        error instanceof ErroDeAplicacao
+      ) {
+        throw error;
+      }
       const status = axios.isAxiosError(error) ? error.response?.status : 'N/A';
       const body = axios.isAxiosError(error)
         ? JSON.stringify(error.response?.data)
@@ -203,7 +213,12 @@ export class HistoricoM7Service {
         trajetos: trajetosFiltrados,
       };
     } catch (error) {
-      if (error instanceof InternalServerErrorException) throw error;
+      if (
+        error instanceof InternalServerErrorException ||
+        error instanceof ErroDeAplicacao
+      ) {
+        throw error;
+      }
       const status = axios.isAxiosError(error) ? error.response?.status : 'N/A';
       const body = axios.isAxiosError(error)
         ? JSON.stringify(error.response?.data)
@@ -265,7 +280,12 @@ export class HistoricoM7Service {
         historico: historicoFiltrado,
       };
     } catch (error) {
-      if (error instanceof InternalServerErrorException) throw error;
+      if (
+        error instanceof InternalServerErrorException ||
+        error instanceof ErroDeAplicacao
+      ) {
+        throw error;
+      }
       const status = axios.isAxiosError(error) ? error.response?.status : 'N/A';
       const body = axios.isAxiosError(error)
         ? JSON.stringify(error.response?.data)
@@ -485,7 +505,7 @@ export class HistoricoM7Service {
   //
   // 1) `prepararContestacaoV2`: tudo que pode falhar com status HTTP próprio
   //    (validação, M7) e a preparação dos pontos (amostragem, herança, Redis).
-  //    Nenhum byte foi enviado ainda; exceções seguem para o HttpExceptionFilter.
+  //    Nenhum byte foi enviado ainda; exceções seguem para o filtro global (AllExceptionsFilter).
   // 2) `escreverContestacaoV2`: o controller já enviou os headers; o PDF é
   //    escrito em chunks (geocode do chunk → linhas → bytes no socket), o que
   //    mantém a conexão do app ativa (read timeout de 60 s entre bytes).
@@ -601,13 +621,21 @@ export class HistoricoM7Service {
         msGeocode += Date.now() - t;
 
         t = Date.now();
-        writer.escreverLinhas(
-          this.reverseGeocodeService.montarLinhasContestacao(
-            fatia,
-            contexto.resolvidos,
-          ),
+        const linhas = this.reverseGeocodeService.montarLinhasContestacao(
+          fatia,
+          contexto.resolvidos,
         );
         msPdf += Date.now() - t;
+
+        // Escreve em blocos pequenos e devolve o event loop entre eles: com
+        // o geocode todo em cache nada aqui espera I/O, e dezenas de milhares
+        // de linhas seguravam o processo até o PDF acabar.
+        for (let j = 0; j < linhas.length; j += LINHAS_PDF_POR_BLOCO) {
+          t = Date.now();
+          writer.escreverLinhas(linhas.slice(j, j + LINHAS_PDF_POR_BLOCO));
+          msPdf += Date.now() - t;
+          await cederEventLoop();
+        }
       }
 
       const t = Date.now();
@@ -705,7 +733,8 @@ export class HistoricoM7Service {
     const pontosRaw = Array.isArray(historicoRaw?.historico)
       ? historicoRaw.historico
       : [];
-    const pontos = sanitizarPontosGps(pontosRaw);
+    // Em blocos: o período pode trazer dezenas de milhares de pontos.
+    const pontos = await sanitizarPontosGpsEmBlocos(pontosRaw);
 
     return {
       veiculo: { codigo, placa, chassi: chassiM7 },

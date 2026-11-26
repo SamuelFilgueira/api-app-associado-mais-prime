@@ -1,5 +1,4 @@
 import { HttpException, Logger } from '@nestjs/common';
-import { Queue } from 'bullmq';
 import { CartaoService } from 'src/cartao/services/cartao.service';
 import { PrismaService } from 'src/database/prisma.service';
 import { FuelSessionService } from 'src/fuel-session/services/fuel-session.service';
@@ -13,13 +12,10 @@ describe('CartaoService — gerarCartaoVirtual()', () => {
     userVehicle: { findFirst: jest.fn() },
     clubgasErroLog: { create: jest.fn() },
   };
-  const fuelSession = {
-    findPendingForUser: jest.fn(),
-    createPendingSession: jest.fn(),
-  };
+  const fuelSession = { abrirSessao: jest.fn() };
   const clubgasClient = { obterCartaoVirtual: jest.fn() };
-  const fila = { add: jest.fn() };
   let service: CartaoService;
+  let erroLogado: jest.SpyInstance;
 
   const capturar = async (): Promise<HttpException> => {
     const erro: unknown = await service
@@ -35,7 +31,9 @@ describe('CartaoService — gerarCartaoVirtual()', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
-    jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    erroLogado = jest
+      .spyOn(Logger.prototype, 'error')
+      .mockImplementation(() => undefined);
     prisma.user.findUnique.mockResolvedValue({
       id: 42,
       cpf: '123.456.789-09',
@@ -43,13 +41,15 @@ describe('CartaoService — gerarCartaoVirtual()', () => {
     });
     prisma.userVehicle.findFirst.mockResolvedValue({ plate: 'ABC1D23' });
     prisma.clubgasErroLog.create.mockResolvedValue({});
-    fuelSession.findPendingForUser.mockResolvedValue({ id: 'pendente' });
+    fuelSession.abrirSessao.mockResolvedValue({
+      situacao: 'ABERTA',
+      sessao: { id: 'sessao-1' },
+    });
     service = new CartaoService(
       prisma as unknown as PrismaService,
       fuelSession as unknown as FuelSessionService,
       clubgasClient as unknown as ClubgasClient,
       new ClubgasErroLogService(prisma as unknown as PrismaService),
-      fila as unknown as Queue,
     );
   });
 
@@ -68,6 +68,47 @@ describe('CartaoService — gerarCartaoVirtual()', () => {
       cpf: '12345678909',
     });
     expect(prisma.clubgasErroLog.create).not.toHaveBeenCalled();
+  });
+
+  it('com o cartão obtido, abre a verificação de economia do usuário na base dele', async () => {
+    clubgasClient.obterCartaoVirtual.mockResolvedValue({ codCartao: 'Q073' });
+
+    await service.gerarCartaoVirtual(42, 'CHASSI1', 'HERTZ');
+    // A abertura é em segundo plano (não bloqueia a resposta do cartão).
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(fuelSession.abrirSessao).toHaveBeenCalledTimes(1);
+    expect(fuelSession.abrirSessao).toHaveBeenCalledWith(42, 'HERTZ');
+  });
+
+  it('a resposta do cartão não espera a verificação de economia', async () => {
+    const cartao = { codCartao: 'Q073' };
+    clubgasClient.obterCartaoVirtual.mockResolvedValue(cartao);
+    // Nunca resolve: se a rota esperasse por ela, o teste estouraria o tempo.
+    fuelSession.abrirSessao.mockReturnValue(new Promise(() => undefined));
+
+    await expect(
+      service.gerarCartaoVirtual(42, 'CHASSI1', 'HERTZ'),
+    ).resolves.toBe(cartao);
+  });
+
+  it('falha ao abrir a verificação (Clubgas fora na leitura do total) não chega à resposta do cartão', async () => {
+    const cartao = { codCartao: 'Q073' };
+    clubgasClient.obterCartaoVirtual.mockResolvedValue(cartao);
+    fuelSession.abrirSessao.mockRejectedValue(
+      new HttpException({ statusCode: 502, code: 'CLUBGAS_ERRO_CLUBGAS' }, 502),
+    );
+
+    await expect(
+      service.gerarCartaoVirtual(42, 'CHASSI1', 'HERTZ'),
+    ).resolves.toBe(cartao);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(erroLogado).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'Verificação de economia não aberta para user 42',
+      ),
+    );
   });
 
   it('na recusa do Clubgas, grava o log do usuário e devolve 422 com a mensagem', async () => {
@@ -101,7 +142,7 @@ describe('CartaoService — gerarCartaoVirtual()', () => {
       mensagem: 'Dados inválidos.',
     });
     // Sem cartão não há abastecimento a verificar.
-    expect(fuelSession.findPendingForUser).not.toHaveBeenCalled();
+    expect(fuelSession.abrirSessao).not.toHaveBeenCalled();
   });
 
   it('sem veículo ativo com placa, grava o log e mantém o 404', async () => {

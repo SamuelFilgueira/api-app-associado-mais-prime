@@ -21,6 +21,9 @@ import { DirectPartnerRedemptionsService } from 'src/direct-partners/services/di
 import { DirectPartnersService } from 'src/direct-partners/services/direct-partners.service';
 import { BaseOrigin } from 'src/infra/decorators/base-origin.decorator';
 import { JwtAuthGuard } from 'src/infra/guards/jwt-auth.guard';
+import { SomenteAssociadoGuard } from 'src/infra/guards/somente-associado.guard';
+import { ChaveDeIdempotencia } from 'src/infra/idempotencia/chave-de-idempotencia.decorator';
+import { IdempotenciaService } from 'src/infra/idempotencia/idempotencia.service';
 
 type AppRequest = Request & { user?: { userId?: number | string } };
 
@@ -31,11 +34,12 @@ type AppRequest = Request & { user?: { userId?: number | string } };
 @ApiTags('Parceiros diretos')
 @ApiBearerAuth()
 @Controller('clube/parceiros-diretos')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, SomenteAssociadoGuard)
 export class DirectPartnersAppController {
   constructor(
     private readonly service: DirectPartnersService,
     private readonly redemptions: DirectPartnerRedemptionsService,
+    private readonly idempotencia: IdempotenciaService,
   ) {}
 
   @Get()
@@ -78,13 +82,27 @@ export class DirectPartnersAppController {
     @Param('cupomId', ParseIntPipe) cupomId: number,
     @BaseOrigin() baseOrigin: string,
     @Req() req: AppRequest,
+    @ChaveDeIdempotencia() chave?: string,
   ) {
-    return this.redemptions.resgatar({
-      partnerId: id,
-      couponId: cupomId,
-      userId: this.userId(req),
-      baseOrigin,
-    });
+    const userId = this.userId(req);
+    // Com `Idempotency-Key`, o reenvio da MESMA tentativa (resposta perdida)
+    // devolve o código de novo. Um novo toque, com outra chave, segue
+    // recebendo 409 `CUPOM_JA_UTILIZADO` no cupom de uso único.
+    return this.idempotencia.executar(
+      {
+        userId,
+        escopo: 'parceiros.cupom.resgatar',
+        chave,
+        corpo: { partnerId: id, couponId: cupomId },
+      },
+      () =>
+        this.redemptions.resgatar({
+          partnerId: id,
+          couponId: cupomId,
+          userId,
+          baseOrigin,
+        }),
+    );
   }
 
   private userId(req: AppRequest): number {

@@ -1,65 +1,63 @@
-import { Global, Module } from '@nestjs/common';
+import { Global, Module, Provider } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
+import { PapelDeProcesso, papelAtivo } from 'src/config/app.config';
+import { redisConnectionOptions } from 'src/config/redis.config';
+import { FilasAdminController } from 'src/queue/controllers/filas-admin.controller';
+import { FilaDeMortosService } from 'src/queue/fila-de-mortos.service';
+import { FILAS, FILA_DE_MORTOS, OPCOES_POR_FILA } from 'src/queue/filas';
+import { FilasMetricasService } from 'src/queue/filas-metricas.service';
+import { ProdutorDeFilas } from 'src/queue/produtor-de-filas.service';
 
-export const WEBHOOK_QUEUE = 'webhook-events';
-export const NOTIFICATION_QUEUE = 'notifications';
-export const FUEL_ECONOMY_QUEUE = 'fuel-economy';
-export const BOLETO_VERIFICACAO_QUEUE = 'boleto-verificacao';
-export const ANALYTICS_QUEUE = 'analytics-summaries';
-export const BOLETO_NOTIFICACAO_QUEUE = 'boleto-notificacao';
-/** Retry da criação do boleto de reativação após instabilidade do SGA. */
-export const BOLETO_REATIVACAO_RETRY_QUEUE = 'boleto-reativacao-retry';
-/** Disparos de push de marketing agendados (job atrasado até a data/hora). */
-export const MARKETING_AGENDADA_QUEUE = 'marketing-agendada';
-/** Job periódico do Associado da Sorte (apuração, encerramento, lembretes). */
-export const ASSOCIADO_SORTE_QUEUE = 'associado-sorte';
+// Os nomes das filas vivem em `filas.ts`; reexportados aqui porque é deste
+// módulo que o restante do código sempre os importou.
+export * from 'src/queue/filas';
 
 /**
- * Módulo global que configura o BullMQ com Redis.
+ * Devolve os providers só quando o processo exerce o papel informado.
  *
- * As variáveis de ambiente utilizadas:
- *  - REDIS_HOST (padrão: localhost)
- *  - REDIS_PORT (padrão: 6379)
+ * É assim que os processors e os agendadores ficam restritos ao papel
+ * `worker` (ou `pdf`): no papel `api`, o módulo de feature simplesmente não
+ * os registra, e a API só produz jobs.
  *
- * Em Docker, REDIS_HOST deve apontar para o nome do serviço do container Redis
- * (ex.: "redis"), nunca "localhost".
+ *   providers: [BoletoService, ...paraPapel('worker', [BoletoProcessor])]
  */
-/**
- * Retenção padrão de jobs no Redis (aprovada como pendência B9):
- * antes, 4 das 6 filas acumulavam jobs concluídos/falhos para sempre.
- * Opções passadas no `queue.add(...)` de cada call-site continuam prevalecendo.
- * Nenhum default de attempts/backoff aqui — mudaria o retry de quem não
- * configura (pendência B1).
- */
-const DEFAULT_JOB_RETENTION = {
-  removeOnComplete: { age: 3600, count: 500 },
-  removeOnFail: { age: 86_400 },
-};
+export function paraPapel(
+  papel: PapelDeProcesso,
+  providers: Provider[],
+): Provider[] {
+  return papelAtivo(papel) ? providers : [];
+}
 
+/**
+ * Módulo global das filas (BullMQ sobre Redis).
+ *
+ * A conexão vem de `src/config/redis.config.ts` (REDIS_HOST, REDIS_PORT,
+ * REDIS_PASSWORD, REDIS_USERNAME, REDIS_DB). Em Docker, REDIS_HOST deve
+ * apontar para o nome do serviço do container Redis (ex.: "redis"), nunca
+ * "localhost".
+ *
+ * As opções padrão de cada fila (retry e retenção) ficam em `filas.ts`.
+ */
 @Global()
 @Module({
   imports: [
-    BullModule.forRoot({
-      connection: {
-        host: process.env.REDIS_HOST || 'localhost',
-        port: Number(process.env.REDIS_PORT) || 6379,
-      },
-      defaultJobOptions: DEFAULT_JOB_RETENTION,
-    }),
+    BullModule.forRoot({ connection: redisConnectionOptions() }),
 
     // Registra as filas que serão injetadas pela aplicação
     BullModule.registerQueue(
-      { name: WEBHOOK_QUEUE },
-      { name: NOTIFICATION_QUEUE },
-      { name: FUEL_ECONOMY_QUEUE },
-      { name: BOLETO_VERIFICACAO_QUEUE },
-      { name: ANALYTICS_QUEUE },
-      { name: BOLETO_NOTIFICACAO_QUEUE },
-      { name: BOLETO_REATIVACAO_RETRY_QUEUE },
-      { name: ASSOCIADO_SORTE_QUEUE },
-      { name: MARKETING_AGENDADA_QUEUE },
+      ...FILAS.map((name) => ({
+        name,
+        defaultJobOptions: OPCOES_POR_FILA[name],
+      })),
+      // Jobs mortos ficam até alguém reprocessar ou descartar.
+      {
+        name: FILA_DE_MORTOS,
+        defaultJobOptions: { removeOnComplete: true, removeOnFail: false },
+      },
     ),
   ],
-  exports: [BullModule],
+  controllers: [FilasAdminController],
+  providers: [FilaDeMortosService, ProdutorDeFilas, FilasMetricasService],
+  exports: [BullModule, FilaDeMortosService, ProdutorDeFilas],
 })
 export class QueueModule {}

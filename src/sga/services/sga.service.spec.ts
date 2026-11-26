@@ -1,10 +1,20 @@
 import { NotFoundException } from '@nestjs/common';
-import { Queue } from 'bullmq';
+import { resetTenantConfigCache } from 'src/config/tenant.config';
 import { PrismaService } from 'src/database/prisma.service';
+import { CacheService } from 'src/infra/cache/cache.service';
+import { OutboxService } from 'src/infra/outbox/outbox.service';
+import { HinovaClient } from 'src/integrations/hinova/hinova.client';
 import { SgaAuthService } from 'src/integrations/hinova/sga-auth.service';
+import { PagamentoBoletoRepository } from 'src/sga/repositories/pagamento-boleto.repository';
 import { AssociadoSincronizacaoService } from 'src/sga/services/associado-sincronizacao.service';
+import { BoletoCriacaoService } from 'src/sga/services/boleto-criacao.service';
+import { SgaBoletoClient } from 'src/sga/services/sga-boleto.client';
+import { SgaConsultaService } from 'src/sga/services/sga-consulta.service';
+import { SgaVeiculoInfoService } from 'src/sga/services/sga-veiculo-info.service';
 import { SgaService } from 'src/sga/services/sga.service';
 import { SuriNotificacaoService } from 'src/sga/services/suri-notificacao.service';
+import { VeiculosSincronizacaoService } from 'src/sga/services/veiculos-sincronizacao.service';
+import { BaseNaoResolvidaError } from 'src/shared/tenant/tenant-context';
 
 /**
  * Caracterização das consultas ao associado: a resposta ao app não muda e a
@@ -12,12 +22,16 @@ import { SuriNotificacaoService } from 'src/sga/services/suri-notificacao.servic
  */
 describe('SgaService', () => {
   let service: SgaService;
+  /** Dono dos métodos de boleto que o `SgaService` só repassa. */
+  let boletoCriacao: BoletoCriacaoService;
+  let cache: { obter: jest.Mock; invalidar: jest.Mock };
   let prisma: {
-    user: { findUnique: jest.Mock };
+    user: { findUnique: jest.Mock; findFirst: jest.Mock };
     userVehicle: {
       upsert: jest.Mock;
       updateMany: jest.Mock;
       findUnique: jest.Mock;
+      findFirst: jest.Mock;
     };
   };
   let sgaAuth: { executeRequestWithAuth: jest.Mock };
@@ -43,22 +57,62 @@ describe('SgaService', () => {
 
   beforeEach(() => {
     prisma = {
-      user: { findUnique: jest.fn().mockResolvedValue(usuarioDb) },
+      user: {
+        findUnique: jest.fn().mockResolvedValue(usuarioDb),
+        findFirst: jest.fn().mockResolvedValue(null),
+      },
       userVehicle: {
         upsert: jest.fn().mockResolvedValue({}),
         updateMany: jest.fn().mockResolvedValue({ count: 0 }),
         findUnique: jest.fn(),
+        findFirst: jest.fn().mockResolvedValue(null),
       },
     };
     sgaAuth = { executeRequestWithAuth: jest.fn() };
     sincronizacao = { sincronizarEmSegundoPlano: jest.fn() };
 
-    service = new SgaService(
-      prisma as unknown as PrismaService,
+    // Cache "transparente": toda leitura vai à origem, como antes do cache.
+    cache = {
+      obter: jest.fn(async (opcoes: { carregar: () => Promise<unknown> }) => ({
+        valor: await opcoes.carregar(),
+        fonte: 'origem',
+        atualizadoEm: new Date(),
+      })),
+      invalidar: jest.fn().mockResolvedValue(undefined),
+    };
+    const hinova = new HinovaClient(
       sgaAuth as unknown as SgaAuthService,
+      cache as unknown as CacheService,
+    );
+    const boletoClient = new SgaBoletoClient(
+      sgaAuth as unknown as SgaAuthService,
+      hinova,
+    );
+    boletoCriacao = new BoletoCriacaoService(
+      boletoClient,
+      new PagamentoBoletoRepository(
+        prisma as unknown as PrismaService,
+        {} as OutboxService,
+      ),
       {} as unknown as SuriNotificacaoService,
-      {} as unknown as Queue,
-      sincronizacao as unknown as AssociadoSincronizacaoService,
+    );
+    const veiculosSincronizacao = new VeiculosSincronizacaoService(
+      prisma as unknown as PrismaService,
+    );
+    service = new SgaService(
+      new SgaConsultaService(
+        prisma as unknown as PrismaService,
+        hinova,
+        sincronizacao as unknown as AssociadoSincronizacaoService,
+        veiculosSincronizacao,
+      ),
+      new SgaVeiculoInfoService(
+        prisma as unknown as PrismaService,
+        sgaAuth as unknown as SgaAuthService,
+        veiculosSincronizacao,
+      ),
+      boletoCriacao,
+      boletoClient,
     );
   });
 
@@ -267,7 +321,50 @@ describe('SgaService', () => {
       expect(prisma.userVehicle.upsert).not.toHaveBeenCalled();
     });
   });
+  describe('consultarVeiculosAssociado — resposta 2xx inesperada', () => {
+    it.each([
+      ['corpo de erro sem `veiculos`', { mensagem: 'Erro', error: ['falha'] }],
+      ['página HTML do proxy', '<html>502 Bad Gateway</html>'],
+      ['corpo vazio', null],
+      ['`veiculos` que não é lista', { veiculos: 'indisponivel' }],
+    ])(
+      '%s: não desativa nenhum veículo nem sincroniza o cadastro',
+      async (_caso, corpo) => {
+        sgaAuth.executeRequestWithAuth.mockResolvedValue({
+          status: 200,
+          data: corpo,
+        });
+
+        const resultado = await service.consultarVeiculosAssociado(42);
+
+        expect(resultado).toEqual([]);
+        expect(prisma.userVehicle.updateMany).not.toHaveBeenCalled();
+        expect(prisma.userVehicle.upsert).not.toHaveBeenCalled();
+        expect(sincronizacao.sincronizarEmSegundoPlano).not.toHaveBeenCalled();
+      },
+    );
+
+    it('lista vazia de verdade (associado sem veículos) segue desativando os locais', async () => {
+      sgaAuth.executeRequestWithAuth.mockResolvedValue({
+        status: 200,
+        data: { ...associadoSga, veiculos: [] },
+      });
+
+      await service.consultarVeiculosAssociado(42);
+
+      expect(prisma.userVehicle.updateMany).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('criarBoletoReativacao — códigos do SGA pela regra da base', () => {
+    const tenantBasesOriginal = process.env.TENANT_BASES;
+
+    afterEach(() => {
+      if (tenantBasesOriginal === undefined) delete process.env.TENANT_BASES;
+      else process.env.TENANT_BASES = tenantBasesOriginal;
+      resetTenantConfigCache();
+    });
+
     /** Responde o SGA por rota e devolve o payload enviado ao boleto/cadastrar. */
     function prepararSga() {
       const chamadas: { url: string; data?: unknown }[] = [];
@@ -300,10 +397,10 @@ describe('SgaService', () => {
         },
       );
       jest
-        .spyOn(service, 'registrarPagamentoBoleto')
+        .spyOn(boletoCriacao, 'registrarPagamentoBoleto')
         .mockResolvedValue(undefined as never);
       jest
-        .spyOn(service, 'concluirBoletoReativacao')
+        .spyOn(boletoCriacao, 'concluirBoletoReativacao')
         .mockResolvedValue({ pollerAgendado: true, suriEnviada: true });
       return chamadas;
     }
@@ -344,6 +441,9 @@ describe('SgaService', () => {
     );
 
     it('HERTZ: conta 2, tipo 2 e não altera a situação do veículo', async () => {
+      // Como na VPS da Hertz: a base do associado é uma das bases do deploy.
+      process.env.TENANT_BASES = 'HERTZ';
+      resetTenantConfigCache();
       prisma.userVehicle.findUnique.mockResolvedValue({
         user: { cpf: '529.982.247-25', baseOrigin: 'HERTZ' },
       });
@@ -356,6 +456,121 @@ describe('SgaService', () => {
       );
       expect(alteracoesSituacao(chamadas)).toEqual([]);
       expect(criado.nossoNumero).toBe('123');
+    });
+  });
+
+  /**
+   * Sem base válida a consulta falha (`BaseNaoResolvidaError`) antes de
+   * falar com o SGA. Antes caía em silêncio na base padrão do deploy e a
+   * operação seguia com a credencial de outra base.
+   */
+  describe('base não resolvida — sem fallback para a base padrão', () => {
+    const semBase = { ...usuarioDb, baseOrigin: null };
+
+    it('consultarAssociado: usuário sem base → BaseNaoResolvidaError e nenhuma chamada ao SGA', async () => {
+      prisma.user.findUnique.mockResolvedValue(semBase);
+
+      await expect(service.consultarAssociado(42)).rejects.toBeInstanceOf(
+        BaseNaoResolvidaError,
+      );
+      expect(sgaAuth.executeRequestWithAuth).not.toHaveBeenCalled();
+      expect(sincronizacao.sincronizarEmSegundoPlano).not.toHaveBeenCalled();
+    });
+
+    it('consultarAssociado: sem base no usuário lido, vale a do relookup por CPF (lógica mantida)', async () => {
+      prisma.user.findUnique.mockResolvedValue(semBase);
+      prisma.user.findFirst.mockResolvedValue({ baseOrigin: 'MAIS_PRIME' });
+      sgaAuth.executeRequestWithAuth.mockResolvedValue({
+        status: 200,
+        data: associadoSga,
+      });
+
+      await service.consultarAssociado(42);
+
+      expect(prisma.user.findFirst).toHaveBeenCalledWith({
+        where: { cpf: '52998224725' },
+      });
+      expect(sgaAuth.executeRequestWithAuth).toHaveBeenCalledWith(
+        'MAIS_PRIME',
+        expect.anything(),
+      );
+    });
+
+    it('consultarAssociado: base do cadastro que não pertence ao deploy → BaseNaoResolvidaError', async () => {
+      prisma.user.findUnique.mockResolvedValue({
+        ...usuarioDb,
+        baseOrigin: 'OUTRA_EMPRESA',
+      });
+
+      await expect(service.consultarAssociado(42)).rejects.toBeInstanceOf(
+        BaseNaoResolvidaError,
+      );
+      expect(sgaAuth.executeRequestWithAuth).not.toHaveBeenCalled();
+    });
+
+    it('consultarVeiculosAssociado: usuário sem base → BaseNaoResolvidaError, sem SGA e sem tocar os veículos locais', async () => {
+      prisma.user.findUnique.mockResolvedValue(semBase);
+
+      await expect(
+        service.consultarVeiculosAssociado(42),
+      ).rejects.toBeInstanceOf(BaseNaoResolvidaError);
+      expect(sgaAuth.executeRequestWithAuth).not.toHaveBeenCalled();
+      expect(prisma.userVehicle.upsert).not.toHaveBeenCalled();
+      expect(prisma.userVehicle.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('consultarVeiculoInfo: veículo sem dono no cadastro e token sem base → BaseNaoResolvidaError e nenhuma chamada ao SGA', async () => {
+      prisma.userVehicle.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.consultarVeiculoInfo('9BWZZZ377VT004251', undefined),
+      ).rejects.toBeInstanceOf(BaseNaoResolvidaError);
+      expect(sgaAuth.executeRequestWithAuth).not.toHaveBeenCalled();
+    });
+
+    it('consultarVeiculoInfo: veículo sem dono no cadastro usa a base do JWT', async () => {
+      prisma.userVehicle.findFirst.mockResolvedValue(null);
+      sgaAuth.executeRequestWithAuth.mockResolvedValue({
+        status: 200,
+        data: { chassi: '9BWZZZ377VT004251', tipo: 'CARRO' },
+      });
+
+      await service.consultarVeiculoInfo('9BWZZZ377VT004251', 'MAIS_PRIME_RS');
+
+      expect(sgaAuth.executeRequestWithAuth).toHaveBeenCalledWith(
+        'MAIS_PRIME_RS',
+        expect.objectContaining({
+          url: expect.stringMatching(/\/veiculo\/buscar\/9BWZZZ377VT004251$/),
+        }),
+      );
+    });
+
+    it('consultarVeiculoInfo: a base do dono do veículo segue tendo prioridade (lógica mantida)', async () => {
+      prisma.userVehicle.findFirst.mockResolvedValue({
+        user: { baseOrigin: 'MAIS_PRIME' },
+      });
+      sgaAuth.executeRequestWithAuth.mockResolvedValue({
+        status: 200,
+        data: [],
+      });
+
+      await service.consultarVeiculoInfo('9BWZZZ377VT004251', 'MAIS_PRIME_RS');
+
+      expect(sgaAuth.executeRequestWithAuth).toHaveBeenCalledWith(
+        'MAIS_PRIME',
+        expect.anything(),
+      );
+    });
+
+    it('criarBoletoReativacao: dono do veículo sem base → BaseNaoResolvidaError e nenhum boleto no SGA', async () => {
+      prisma.userVehicle.findUnique.mockResolvedValue({
+        user: { cpf: '529.982.247-25', baseOrigin: null },
+      });
+
+      await expect(
+        service.criarBoletoReativacao(1, 'ABC1D23'),
+      ).rejects.toBeInstanceOf(BaseNaoResolvidaError);
+      expect(sgaAuth.executeRequestWithAuth).not.toHaveBeenCalled();
     });
   });
 });

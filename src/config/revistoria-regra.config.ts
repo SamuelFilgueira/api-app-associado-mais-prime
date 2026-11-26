@@ -1,4 +1,5 @@
-import { BaseOrigin, TENANT } from 'src/config/tenant.config';
+import { BaseOrigin } from 'src/config/tenant.config';
+import { exigirBase } from 'src/shared/tenant/tenant-context';
 
 /**
  * Regra de revistoria por base (tenant) — ponto único do que muda entre
@@ -38,6 +39,26 @@ export interface MapeamentoTipoTemplate {
   termos: string[];
 }
 
+/**
+ * Encargos por atraso somados ao valor do boleto de reativação. O atraso é
+ * contado a partir do vencimento do último boleto em aberto do veículo
+ * (ver `src/sga/domain/boleto-encargos.ts`).
+ */
+export interface RegraEncargosPorAtraso {
+  /**
+   * Multa em % do valor base, cobrada UMA vez quando há atraso. Nunca é
+   * multiplicada pelos dias.
+   */
+  multaPercentual: number;
+  /** Mora em % do valor base POR DIA de atraso. */
+  moraDiariaPercentual: number;
+  /**
+   * Depois de gerar o boleto novo, cancelar no SGA o boleto em aberto que
+   * serviu de base (ele foi substituído).
+   */
+  cancelarBoletoEmAberto: boolean;
+}
+
 /** Códigos do SGA usados no boleto de reativação após a revistoria aprovada. */
 export interface RegraBoletoReativacao {
   /** `codigo_conta` do `boleto/cadastrar` (conta bancária da empresa no SGA). */
@@ -54,6 +75,11 @@ export interface RegraBoletoReativacao {
   situacaoVeiculoAposPagamento: number;
   /** Situação aplicada ao associado quando o boleto é pago. */
   situacaoAssociadoAposPagamento: number;
+  /**
+   * Multa e mora por atraso no valor do boleto. `null` = o boleto sai pelo
+   * valor base (produtos ativos + taxa administrativa), sem encargos.
+   */
+  encargosPorAtraso: RegraEncargosPorAtraso | null;
 }
 
 export interface RegraRevistoria {
@@ -109,6 +135,7 @@ export const REGRA_PADRAO: RegraRevistoria = {
     situacaoVeiculoAposBoleto: 20,
     situacaoVeiculoAposPagamento: 1,
     situacaoAssociadoAposPagamento: 1,
+    encargosPorAtraso: null,
   },
 };
 
@@ -147,6 +174,15 @@ export const REGRA_HERTZ: RegraRevistoria = {
     // pagamento; o app da Hertz trata a revistoria APROVADA como
     // "aguardando pagamento".
     situacaoVeiculoAposBoleto: null,
+    // Regra da Hertz (nov/2026): depois do vencimento do último boleto em
+    // aberto, multa de 2% (uma vez, sobre o valor base) + mora de 0,5% ao
+    // dia (sobre o valor base). O boleto em aberto é cancelado: o de
+    // reativação o substitui.
+    encargosPorAtraso: {
+      multaPercentual: 2,
+      moraDiariaPercentual: 0.5,
+      cancelarBoletoEmAberto: true,
+    },
   },
 };
 
@@ -166,12 +202,24 @@ export function normalizarTextoRegra(valor: unknown): string {
     .trim();
 }
 
-/** Regra de revistoria da base; sem base informada, usa a base padrão do deploy. */
+/**
+ * Regra de revistoria da base.
+ *
+ * A base precisa ser uma das configuradas neste deploy: ausente ou
+ * desconhecida lança `BaseNaoResolvidaError` (422). Antes, sem base, a função
+ * devolvia a regra da base padrão do deploy — e a operação do associado
+ * seguia com a regra (situações, template, conta do boleto) de outra base
+ * sem ninguém perceber.
+ *
+ * Quem lista regras para o painel (`GET /reinspection/regras`, log do boot)
+ * percorre `TENANT.baseNames` e nunca passou base ausente, então não muda.
+ * Base configurada sem entrada em `REGRAS_POR_BASE` segue em `REGRA_PADRAO`.
+ */
 export function getRegraRevistoria(
   baseOrigin?: BaseOrigin | null,
 ): RegraRevistoria {
-  const base = normalizarTextoRegra(baseOrigin || TENANT.defaultBase);
-  return REGRAS_POR_BASE[base] ?? REGRA_PADRAO;
+  const base = exigirBase(baseOrigin, 'regra de revistoria');
+  return REGRAS_POR_BASE[normalizarTextoRegra(base)] ?? REGRA_PADRAO;
 }
 
 /** Indica se a situação do veículo no SGA obriga a revistoria nesta base. */

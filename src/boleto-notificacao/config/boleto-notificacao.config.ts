@@ -1,23 +1,15 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { TENANT } from 'src/config/tenant.config';
 import { SGA_BASE_URL } from 'src/integrations/hinova/hinova.constants';
+import {
+  TIPOS_MENSAGEM,
+  TipoMensagem,
+} from 'src/boleto-notificacao/domain/regua-tipos';
 
-/**
- * Etapas da régua de notificações (documento "Régua de notificações push —
- * vencimento do boleto mensal", versão 10/09/2026):
- *  DM5 = D-5 (boleto disponível) · D0 = vence hoje · D1 = D+1 (lembrete leve)
- *  D5 = D+5 (último dia com proteção) · D6 = D+6 (proteção suspensa)
- *  D20 = D+20 (último dia sem nova vistoria)
- */
-export type TipoMensagem = 'DM5' | 'D0' | 'D1' | 'D5' | 'D6' | 'D20';
-export const TIPOS_MENSAGEM: TipoMensagem[] = [
-  'DM5',
-  'D0',
-  'D1',
-  'D5',
-  'D6',
-  'D20',
-];
+// As etapas da régua são regra de domínio; reexportadas aqui porque é deste
+// arquivo que o módulo sempre as importou.
+export { TIPOS_MENSAGEM };
+export type { TipoMensagem };
 
 export interface MensagemConfig {
   titulo: string;

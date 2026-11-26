@@ -1,9 +1,10 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import { BaseOrigin, isTenantBase, TENANT } from 'src/config/tenant.config';
+import { TENANT } from 'src/config/tenant.config';
 import {
   descreverRegraRevistoria,
   getRegraRevistoria,
 } from 'src/config/revistoria-regra.config';
+import { exigirBase } from 'src/shared/tenant/tenant-context';
 
 /**
  * Expõe a regra de revistoria por base (situações que exigem revistoria e
@@ -27,10 +28,15 @@ export class RevistoriaRegraService implements OnModuleInit {
     }
   }
 
-  /** Regra da base do usuário; base ausente/desconhecida usa a padrão do deploy. */
-  getRegra(baseOrigin?: BaseOrigin | null) {
-    const base = isTenantBase(baseOrigin) ? baseOrigin : TENANT.defaultBase;
-    return descreverRegraRevistoria(base);
+  /**
+   * Regra da base do associado (`GET /reinspection/regra`). Sem base
+   * resolvida no token a rota falha (422 `BASE_NAO_RESOLVIDA`) — antes
+   * devolvia, em silêncio, a regra da base padrão do deploy.
+   */
+  getRegra(baseOrigin?: string | null) {
+    return descreverRegraRevistoria(
+      exigirBase(baseOrigin, 'regra de revistoria do associado'),
+    );
   }
 
   /** Regras de todas as bases deste deploy (painel). */

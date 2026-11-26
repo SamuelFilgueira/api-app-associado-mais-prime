@@ -14,7 +14,7 @@ describe('SorteInscricaoService', () => {
 
   const config = configDeTeste();
   const sga = { executeRequestWithAuth: jest.fn() };
-  const beneficios = { getBeneficiosVeiculo: jest.fn() };
+  const beneficios = { getBeneficiosVeiculoAtual: jest.fn() };
   const repository = {
     buscar: jest.fn((userId: number) =>
       Promise.resolve(tabela.get(userId) ?? null),
@@ -43,7 +43,7 @@ describe('SorteInscricaoService', () => {
       data: { veiculos: lista },
     });
   const produtosPorVeiculo = (mapa: Record<string, object[]>) =>
-    beneficios.getBeneficiosVeiculo.mockImplementation(
+    beneficios.getBeneficiosVeiculoAtual.mockImplementation(
       (_b: string, c: string) => Promise.resolve({ produtos: mapa[c] ?? [] }),
     );
 
@@ -101,7 +101,7 @@ describe('SorteInscricaoService', () => {
     veiculos([{ codigo_veiculo: '111', situacao: 'INATIVO' }]);
     produtosPorVeiculo({ '111': [produto()] });
     await expect(situacao()).resolves.toMatchObject({ inscrito: false });
-    expect(beneficios.getBeneficiosVeiculo).not.toHaveBeenCalled();
+    expect(beneficios.getBeneficiosVeiculoAtual).not.toHaveBeenCalled();
   });
 
   it('dois veículos inscritos = um participante (para no primeiro)', async () => {
@@ -112,8 +112,8 @@ describe('SorteInscricaoService', () => {
     produtosPorVeiculo({ '111': [produto()], '222': [produto()] });
     await situacao();
     await situacao(7, new Date(Date.now() + 7 * 3_600_000)); // cache vencido
-    expect(beneficios.getBeneficiosVeiculo).toHaveBeenCalledTimes(2);
-    expect(beneficios.getBeneficiosVeiculo).toHaveBeenNthCalledWith(
+    expect(beneficios.getBeneficiosVeiculoAtual).toHaveBeenCalledTimes(2);
+    expect(beneficios.getBeneficiosVeiculoAtual).toHaveBeenNthCalledWith(
       1,
       'MAIS_PRIME',
       '111',
@@ -173,7 +173,7 @@ describe('SorteInscricaoService', () => {
 
   it('falha nos produtos de um veículo sem nenhum inscrito conta como indisponível', async () => {
     veiculos([{ codigo_veiculo: '111', ...ATIVO }]);
-    beneficios.getBeneficiosVeiculo.mockRejectedValue(new Error('500'));
+    beneficios.getBeneficiosVeiculoAtual.mockRejectedValue(new Error('500'));
     await expect(situacao()).resolves.toMatchObject({
       motivo: 'VERIFICACAO_INDISPONIVEL',
     });

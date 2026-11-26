@@ -1,3 +1,4 @@
+import { Semaforo } from 'src/shared/semaforo';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import type Redis from 'ioredis';
 import { M7_GEOCODE_CONFIG } from 'src/config/m7-geocode.config';
@@ -61,6 +62,16 @@ export interface PreparoContestacao {
 }
 
 type OrigemEndereco = 'memoria' | 'banco' | 'fallback';
+
+/** A consulta não pôde ser feita (diferente de "não achou endereço"). */
+const FALHA_NO_BANCO = Symbol('falha-no-banco');
+
+/**
+ * Consultas ao Nominatim em curso no processo, somando todas as requisições.
+ * O limite por requisição (`concorrencia`) continua valendo; este é o teto
+ * que protege o pool de conexões compartilhado com o resto da API.
+ */
+const SEMAFORO_NOMINATIM = new Semaforo(M7_GEOCODE_CONFIG.consultasSimultaneas);
 
 type Ancora = {
   key: string;
@@ -454,24 +465,36 @@ export class M7ReverseGeocodeService {
 
     let origem: OrigemEndereco = 'banco';
     const promise = (async () => {
-      const enderecoNominatimMysql =
-        await this.buscarReverseGeocodeNominatimMysql(
+      // Teto global do processo: cada consulta ocupa até 3 conexões do pool.
+      const enderecoNominatimMysql = await SEMAFORO_NOMINATIM.executar(() =>
+        this.buscarReverseGeocodeNominatimMysql(
           latitude,
           longitude,
           baseOrigin,
           cidadeOverride,
-        );
-      if (enderecoNominatimMysql) {
+        ),
+      );
+      if (typeof enderecoNominatimMysql === 'string') {
         this.guardarMemoria(key, enderecoNominatimMysql);
         return enderecoNominatimMysql;
       }
 
       origem = 'fallback';
+      const fallback = `${latitude}, ${longitude}`;
+
+      if (enderecoNominatimMysql === FALHA_NO_BANCO) {
+        // O banco falhou (pool esgotado, conexão): não é "sem
+        // correspondência". O fallback atende este pedido, mas NÃO entra no
+        // cache — senão a coordenada ficaria sem endereço até o reinício.
+        this.logger.warn(
+          `${baseTag(baseOrigin)} reverse geocode indisponível para ${latitude},${longitude} (falha no banco); usando fallback de coordenadas sem guardar em cache`,
+        );
+        return fallback;
+      }
+
       this.logger.warn(
         `${baseTag(baseOrigin)} reverse geocode sem correspondência local para ${latitude},${longitude}; usando fallback de coordenadas`,
       );
-
-      const fallback = `${latitude}, ${longitude}`;
       this.guardarMemoria(key, fallback);
       return fallback;
     })().finally(() => {
@@ -629,8 +652,11 @@ export class M7ReverseGeocodeService {
     longitude: string,
     baseOrigin: BaseOrigin,
     cidadeOverride?: string,
-  ): Promise<string | null> {
+  ): Promise<string | null | typeof FALHA_NO_BANCO> {
     if (!M7_NOMINATIM_ENABLED) return null;
+
+    /** Alguma consulta não rodou por indisponibilidade do banco. */
+    let falhaNoBanco = false;
 
     const lat = Number(latitude);
     const lon = Number(longitude);
@@ -677,8 +703,9 @@ export class M7ReverseGeocodeService {
             lon + rLon,
           );
           if (Array.isArray(rows) && rows.length) return rows;
-        } catch {
+        } catch (erro) {
           // tenta sem prefixo de banco
+          if (bancoIndisponivel(erro)) falhaNoBanco = true;
         }
       }
 
@@ -826,6 +853,7 @@ export class M7ReverseGeocodeService {
         return endereco;
       }
     } catch (error) {
+      if (bancoIndisponivel(error)) falhaNoBanco = true;
       this.logger.warn(
         `[${baseOrigin}] falha consulta nominatim_rj para ${latitude},${longitude}: ${
           error instanceof Error ? error.message : 'erro desconhecido'
@@ -833,6 +861,27 @@ export class M7ReverseGeocodeService {
       );
     }
 
-    return null;
+    return falhaNoBanco ? FALHA_NO_BANCO : null;
   }
+}
+
+/**
+ * Erros do Prisma que significam "o banco não atendeu agora" (pool esgotado,
+ * conexão caída, timeout). Tabela ou banco do Nominatim inexistente NÃO entra
+ * aqui: é configuração, e o resultado ("sem correspondência") pode ser
+ * cacheado.
+ */
+const CODIGOS_BANCO_INDISPONIVEL = new Set([
+  'P1001',
+  'P1002',
+  'P1008',
+  'P1017',
+  'P2024',
+  'P2028',
+  'P2034',
+]);
+
+function bancoIndisponivel(erro: unknown): boolean {
+  const codigo = (erro as { code?: unknown } | null)?.code;
+  return typeof codigo === 'string' && CODIGOS_BANCO_INDISPONIVEL.has(codigo);
 }

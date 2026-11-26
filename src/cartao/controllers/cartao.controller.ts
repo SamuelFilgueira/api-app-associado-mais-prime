@@ -3,19 +3,14 @@ import { JwtAuthGuard } from 'src/infra/guards/jwt-auth.guard';
 import { CartaoService } from 'src/cartao/services/cartao.service';
 import { BaseOrigin } from 'src/infra/decorators/base-origin.decorator';
 import type { BaseOrigin as BaseOriginType } from 'src/config/tenant.config';
+import { SomenteAssociadoGuard } from 'src/infra/guards/somente-associado.guard';
 
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, SomenteAssociadoGuard)
 @Controller('cartao')
 export class CartaoController {
   private readonly logger = new Logger(CartaoController.name);
 
   constructor(private readonly cartaoService: CartaoService) {}
-
-  /** TODO: remover após testes — dispara verificação de economia sem delay */
-  // @Get('test-fuel-notification')
-  // async testFuelNotification(@Req() req) {
-  //   return this.cartaoService.testFuelEconomyCheck(req.user.userId);
-  // }
 
   @Get('virtual')
   async gerarCartao(

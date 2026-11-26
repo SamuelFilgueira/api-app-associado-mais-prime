@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import * as fs from 'fs';
 import * as path from 'path';
-import puppeteer from 'puppeteer';
+import { PdfRenderer } from 'src/infra/pdf/pdf-renderer';
 import { TENANT } from 'src/config/tenant.config';
 import { TrajetoPosicao, TrajetoResumo } from '../dto/trajeto.dto';
 
@@ -291,33 +291,15 @@ function gerarHtmlRelatorio(data: TrajetoPdfData): string {
 export class TrajetoPdfLogicaService {
   private readonly logger = new Logger(TrajetoPdfLogicaService.name);
 
+  constructor(private readonly pdf: PdfRenderer) {}
+
   async gerarPdf(data: TrajetoPdfData): Promise<Buffer> {
-    const browser = await puppeteer.launch({
-      headless: true,
-      ...(process.env.PUPPETEER_EXECUTABLE_PATH && {
-        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
-      }),
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-      ],
-    });
-
     try {
-      const page = await browser.newPage();
-      const html = gerarHtmlRelatorio(data);
-      await page.setContent(html, { waitUntil: 'networkidle0' });
-
-      const pdf = await page.pdf({
-        format: 'A4',
-        landscape: true,
-        printBackground: true,
-        margin: { top: '20px', right: '16px', bottom: '20px', left: '16px' },
+      return await this.pdf.renderizar({
+        html: gerarHtmlRelatorio(data),
+        modelo: 'trajetos_logica',
+        margem: { top: '20px', right: '16px', bottom: '20px', left: '16px' },
       });
-
-      return Buffer.from(pdf);
     } catch (error) {
       this.logger.error(
         `Erro ao gerar PDF de trajetos da Lógica: ${error instanceof Error ? error.message : JSON.stringify(error)}`,
@@ -325,8 +307,6 @@ export class TrajetoPdfLogicaService {
       throw new InternalServerErrorException(
         'Erro ao gerar PDF de trajetos da Lógica',
       );
-    } finally {
-      await browser.close();
     }
   }
 }

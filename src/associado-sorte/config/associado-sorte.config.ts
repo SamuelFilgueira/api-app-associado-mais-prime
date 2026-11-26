@@ -4,6 +4,11 @@
  * são configuradas pelo painel e gravadas em `SorteConfig` / `SorteRodada`.
  */
 
+import {
+  RedisConnectionOptions,
+  redisConnectionOptions,
+} from 'src/config/redis.config';
+
 /** Nome do job periódico e id do agendador na fila do módulo. */
 export const SORTE_CICLO_JOB = 'sorte-ciclo';
 export const SORTE_CICLO_SCHEDULER_ID = 'associado-sorte-ciclo';
@@ -62,7 +67,7 @@ export interface AssociadoSorteConfig {
   auditoriaLote: number;
   /** Teto de linhas do CSV do cronograma. */
   cronogramaMaxLinhas: number;
-  redis: { host: string; port: number };
+  redis: RedisConnectionOptions;
   /** Quantos ganhadores aparecem na lista pública do app. */
   ultimosGanhadoresLimite: number;
   /** Teto de rodadas devolvidas no resumo do app. */
@@ -101,10 +106,7 @@ export function associadoSorteConfig(): AssociadoSorteConfig {
         .replace(/\/$/, '') || null,
     auditoriaLote: 5_000,
     cronogramaMaxLinhas: 20_000,
-    redis: {
-      host: process.env.REDIS_HOST || 'localhost',
-      port: Number(process.env.REDIS_PORT) || 6379,
-    },
+    redis: redisConnectionOptions(),
     ultimosGanhadoresLimite: 10,
     rodadasResumoLimite: 30,
     encerradasRecentesHoras: 24,

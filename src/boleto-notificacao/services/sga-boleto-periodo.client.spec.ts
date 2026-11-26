@@ -1,4 +1,5 @@
 import { SgaBoletoPeriodoClient } from 'src/boleto-notificacao/services/sga-boleto-periodo.client';
+import { ehErroTransitorio, IntegrationError } from 'src/shared/erros/erros';
 
 function boleto(overrides: Record<string, unknown> = {}) {
   return {
@@ -216,6 +217,93 @@ describe('SgaBoletoPeriodoClient', () => {
       );
 
       expect(aguardar).not.toHaveBeenCalled();
+    });
+
+    describe('bloqueio de token por extração (403 da Hinova)', () => {
+      const BLOQUEIO = {
+        status: 403,
+        data: {
+          mensagem: 'Forbidden',
+          error: [
+            'Token BLOQUEADO temporariamente por excesso de extração de DADOS. Tente novamente mais tarde.',
+          ],
+        },
+      };
+
+      it('na primeira página: a consulta FALHA com erro transitório da base — nunca devolve "sem boletos"', async () => {
+        sgaAuth.executeRequestWithAuth.mockResolvedValueOnce(BLOQUEIO);
+
+        const erro = await client
+          .listarAbertosPorVencimento(
+            'MAIS_PRIME',
+            new Date(2026, 8, 10),
+            new Date(2026, 8, 10),
+          )
+          .catch((e: unknown) => e);
+
+        expect(erro).toBeInstanceOf(IntegrationError);
+        expect(erro).toMatchObject({
+          vendor: 'hinova',
+          tipo: 'indisponivel',
+          base: 'MAIS_PRIME',
+          statusVendor: 403,
+          transitoria: true,
+          detalhes: { bloqueioPorExtracao: true, pagina: 0 },
+        });
+        expect((erro as Error).message).toMatch(/HTTP 403 \(página 0\)/);
+        expect(ehErroTransitorio(erro)).toBe(true);
+      });
+
+      it('no meio da varredura: as páginas já lidas são descartadas (resultado parcial não vira régua) e o token reserva não é usado', async () => {
+        sgaAuth.executeRequestWithAuth
+          .mockResolvedValueOnce({
+            status: 200,
+            data: {
+              numero_paginas: 3,
+              total_registros: '6',
+              boletos: [
+                boleto({ nosso_numero: 1 }),
+                boleto({ nosso_numero: 2 }),
+              ],
+            },
+          })
+          .mockResolvedValueOnce(BLOQUEIO);
+
+        await expect(
+          client.listarAbertosPorVencimento(
+            'MAIS_PRIME',
+            new Date(2026, 8, 10),
+            new Date(2026, 8, 10),
+          ),
+        ).rejects.toMatchObject({
+          statusVendor: 403,
+          detalhes: { bloqueioPorExtracao: true, pagina: 1 },
+        });
+        // Parou na página bloqueada; toda página pede failover desligado.
+        expect(sgaAuth.executeRequestWithAuth).toHaveBeenCalledTimes(2);
+        for (const chamada of sgaAuth.executeRequestWithAuth.mock.calls) {
+          expect(chamada[1].failoverTokenBase).toBe(false);
+        }
+      });
+
+      it('403 que não é de extração continua como erro comum (e também derruba a consulta)', async () => {
+        sgaAuth.executeRequestWithAuth.mockResolvedValueOnce({
+          status: 403,
+          data: { mensagem: 'Forbidden' },
+        });
+
+        const erro = await client
+          .listarAbertosPorVencimento(
+            'MAIS_PRIME',
+            new Date(2026, 8, 10),
+            new Date(2026, 8, 10),
+          )
+          .catch((e: unknown) => e);
+
+        expect(erro).toBeInstanceOf(Error);
+        expect(erro).not.toBeInstanceOf(IntegrationError);
+        expect((erro as Error).message).toMatch(/HTTP 403/);
+      });
     });
 
     it('lança erro descritivo em HTTP != 200', async () => {

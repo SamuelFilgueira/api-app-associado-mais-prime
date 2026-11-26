@@ -1,4 +1,11 @@
-import { buildLogicaUrl, isLogicaTokenInvalidResponse, LOGICA_POSICAO_TIMEOUT, LOGICA_POSICAO_URL, LOGICA_REQUEST_TIMEOUT, LOGICA_TRAJETO_URL } from 'src/rastreamento/logica/constants/logica.constants';
+import {
+  buildLogicaUrl,
+  isLogicaTokenInvalidResponse,
+  LOGICA_POSICAO_TIMEOUT,
+  LOGICA_POSICAO_URL,
+  LOGICA_REQUEST_TIMEOUT,
+  LOGICA_TRAJETO_URL,
+} from 'src/rastreamento/logica/constants/logica.constants';
 import {
   Injectable,
   InternalServerErrorException,
@@ -14,7 +21,6 @@ import {
 } from '../dto/trajeto.dto';
 import { TrajetoPdfLogicaService } from '../pdf/trajeto-pdf-logica.service';
 import { LogicaAuthService } from './logica-auth.service';
-
 
 interface LogicaListaItemPayload {
   id?: number | string;
@@ -40,7 +46,8 @@ interface LogicaListaResponsePayload {
 
 // Converte data no formato BR "dd/MM/yyyy HH:mm:ss" em timestamp ordenável.
 // Datas inválidas vão para o fim da linha do tempo.
-// TODO(dedupe/B11): ver comentário em rastreamento.logica.ts — 3 parsers divergentes; não unificar sem decisão.
+// TODO(dedupe/B11): este parser (UTC, inválida → fim da linha do tempo) diverge do da posição unificada
+// (`timestampDaPosicao`, em `rastreamento/domain/posicao.ts`: fuso do processo, inválida → null); não unificar sem decisão.
 export function parseDataBrParaTimestamp(data: string): number {
   const match = String(data ?? '')
     .trim()
@@ -201,7 +208,7 @@ export class TrajetosService {
       );
     }
 
-    let usedToken = this.resolverTokenInicial(baseOrigin, token);
+    let usedToken = await this.resolverTokenInicial(baseOrigin, token);
 
     let listaData = await this.consultarListaVeiculo(
       normalizedChassi,
@@ -212,7 +219,7 @@ export class TrajetosService {
       this.logger.warn(
         `Token da Lógica inválido/expirado para baseOrigin=${baseOrigin ?? 'N/A'}. Tentando nova autenticação.`,
       );
-      usedToken = await this.autenticar(baseOrigin);
+      usedToken = await this.autenticar(baseOrigin, usedToken);
       listaData = await this.consultarListaVeiculo(normalizedChassi, usedToken);
     }
 
@@ -257,7 +264,7 @@ export class TrajetosService {
     baseOrigin?: string,
     token?: string,
   ): Promise<TrajetoResponse> {
-    let usedToken = this.resolverTokenInicial(baseOrigin, token);
+    let usedToken = await this.resolverTokenInicial(baseOrigin, token);
 
     const dataInicioFormatada = `${this.formatarDataIsoParaBr(dataInicial)} 00:00`;
     const dataFimFormatada = `${this.formatarDataIsoParaBr(dataFinal)} 23:59`;
@@ -270,7 +277,7 @@ export class TrajetosService {
     );
 
     if (this.isTokenInvalidResponse(trajetosData)) {
-      usedToken = await this.autenticar(baseOrigin);
+      usedToken = await this.autenticar(baseOrigin, usedToken);
       trajetosData = await this.consultarTrajeto(
         veiculoId,
         dataInicioFormatada,
@@ -300,7 +307,7 @@ export class TrajetosService {
     baseOrigin?: string,
     token?: string,
   ): Promise<TrajetoPosicao[]> {
-    let usedToken = this.resolverTokenInicial(baseOrigin, token);
+    let usedToken = await this.resolverTokenInicial(baseOrigin, token);
 
     const dataInicioFormatada = `${this.formatarDataIsoParaBr(dataInicial)} 00:00`;
     const dataFimFormatada = `${this.formatarDataIsoParaBr(dataFinal)} 23:59`;
@@ -313,7 +320,7 @@ export class TrajetosService {
     );
 
     if (this.isTokenInvalidResponse(posicaoData)) {
-      usedToken = await this.autenticar(baseOrigin);
+      usedToken = await this.autenticar(baseOrigin, usedToken);
       posicaoData = await this.consultarPosicao(
         veiculoId,
         dataInicioFormatada,
@@ -326,7 +333,10 @@ export class TrajetosService {
     return Array.isArray(relatorio) ? (relatorio as TrajetoPosicao[]) : [];
   }
 
-  private resolverTokenInicial(baseOrigin?: string, token?: string): string {
+  private resolverTokenInicial(
+    baseOrigin?: string,
+    token?: string,
+  ): Promise<string> {
     return this.logicaAuth.obterTokenInicial(baseOrigin, token);
   }
 
@@ -415,8 +425,11 @@ export class TrajetosService {
   }
 
   /** Renova o token via sessão compartilhada (dedupe + retry no LogicaAuthService) */
-  private autenticar(baseOrigin?: string): Promise<string> {
-    return this.logicaAuth.renovarToken(baseOrigin);
+  private autenticar(
+    baseOrigin?: string,
+    tokenRecusado?: string,
+  ): Promise<string> {
+    return this.logicaAuth.renovarToken(baseOrigin, tokenRecusado);
   }
 
   private buildUrl(path: string): string {

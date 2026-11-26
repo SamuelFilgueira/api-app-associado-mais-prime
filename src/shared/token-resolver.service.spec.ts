@@ -1,3 +1,5 @@
+import { IntegrationError } from 'src/shared/erros/erros';
+import { BaseNaoResolvidaError } from 'src/shared/tenant/tenant-context';
 import { TokenResolverService } from './token-resolver.service';
 
 describe('TokenResolverService.resolveSgaBaseTokens', () => {
@@ -37,10 +39,32 @@ describe('TokenResolverService.resolveSgaBaseTokens', () => {
     expect(r.resolveSgaBaseTokens('MAIS_PRIME')).toEqual(['tok-1', 'tok-3']);
   });
 
-  it('nenhum configurado → erro citando a variável', () => {
+  it('nenhum configurado → erro de integração não configurada, com a variável no detalhe', () => {
     const r = new TokenResolverService();
-    expect(() => r.resolveSgaBaseTokens('MAIS_PRIME')).toThrow(
-      'TOKEN_BASE_SGA_MAIS_PRIME',
+    let erro: unknown;
+    try {
+      r.resolveSgaBaseTokens('MAIS_PRIME');
+    } catch (e) {
+      erro = e;
+    }
+
+    expect(erro).toBeInstanceOf(IntegrationError);
+    expect(erro).toMatchObject({
+      vendor: 'hinova',
+      base: 'MAIS_PRIME',
+      tipo: 'nao_configurada',
+      code: 'INTEGRACAO_NAO_CONFIGURADA',
+      statusHttp: 503,
+      detalhes: { faltando: 'TOKEN_BASE_SGA_MAIS_PRIME' },
+    });
+    // O nome da variável fica no detalhe (log), não na mensagem ao cliente.
+    expect((erro as Error).message).not.toContain('TOKEN_BASE_SGA');
+  });
+
+  it('base que não pertence ao deploy → BASE_NAO_RESOLVIDA, sem cair em outra base', () => {
+    const r = new TokenResolverService();
+    expect(() => r.resolveSgaUser('OUTRA_EMPRESA')).toThrow(
+      BaseNaoResolvidaError,
     );
   });
 });

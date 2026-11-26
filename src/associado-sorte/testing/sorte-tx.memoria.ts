@@ -407,6 +407,10 @@ export class SorteTxMemoria {
     return Promise.resolve();
   }
 
+  async travarCampanhasDaBase(baseOrigin: string) {
+    await this.travar(`campanhas-da-base:${baseOrigin}`);
+  }
+
   contarCampanhasPublicadas(baseOrigin: string, excetoId: number) {
     return Promise.resolve(
       [...this.campanhas.values()].filter(
@@ -465,6 +469,28 @@ export class SorteTxMemoria {
       null,
     );
     return Promise.resolve({ total: doDia.length, ultimaEm });
+  }
+
+  ultimaRaspadaDoDia(userId: number, dia: string) {
+    const doDia = this.raspadas.filter(
+      (r) => r.userId === userId && r.dia === dia,
+    );
+    const ultima = doDia.reduce<any>(
+      (maior, r) => (!maior || r.id > maior.id ? r : maior),
+      null,
+    );
+    return Promise.resolve(
+      ultima
+        ? {
+            id: ultima.id,
+            resultado: ultima.resultado,
+            momentoId: ultima.momentoId ?? null,
+            creditos: ultima.creditos ?? 0,
+            bonus: ultima.bonus ?? 0,
+            createdAt: ultima.createdAt,
+          }
+        : null,
+    );
   }
 
   ultimoVoucherDesde(userId: number, desde: Date) {

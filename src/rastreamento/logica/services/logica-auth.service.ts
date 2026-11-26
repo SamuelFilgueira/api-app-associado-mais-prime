@@ -1,12 +1,26 @@
-import { buildLogicaUrl, LOGICA_REQUEST_TIMEOUT } from 'src/rastreamento/logica/constants/logica.constants';
+import {
+  buildLogicaUrl,
+  LOGICA_REQUEST_TIMEOUT,
+} from 'src/rastreamento/logica/constants/logica.constants';
 import {
   Injectable,
   InternalServerErrorException,
   Logger,
+  Optional,
 } from '@nestjs/common';
 import axios from 'axios';
+import { VendorSessionStore } from 'src/integrations/core/vendor-session.store';
 import { maskSecret } from 'src/shared/log.util';
+import { erroInternoDeRastreamento } from 'src/rastreamento/helpers/erro-de-rastreamento';
 
+const VENDOR = 'logica';
+
+/**
+ * Validade da sessão guardada no Redis. A Lógica não informa o prazo do
+ * token; antes disso, uma resposta de "token inválido" já provoca a
+ * renovação.
+ */
+const LOGICA_SESSAO_TTL_SEG = 12 * 60 * 60;
 
 /**
  * Backoff entre tentativas de login no /autentica. A Lógica recusa logins em
@@ -38,13 +52,30 @@ interface LogicaAuthResponse {
  * gerando logins redundantes em sequência, que é exatamente o que o
  * throttle do /autentica recusa. Centralizando aqui, um token renovado por
  * qualquer fluxo vale para todos.
+ *
+ * A sessão fica no Redis (`VendorSessionStore`), e o login roda sob trava
+ * entre processos: com mais de uma réplica, um processo autentica e os
+ * outros reaproveitam o token — em vez de cada um fazer o próprio login e
+ * derrubar a sessão dos demais.
  */
 @Injectable()
 export class LogicaAuthService {
   private readonly logger = new Logger(LogicaAuthService.name);
 
-  /** Token de sessão por base (em memória; renovado sob demanda) */
+  /**
+   * Token de sessão por base — cópia local do que está no Redis, para não ir
+   * a ele a cada chamada. A fonte da verdade entre processos é o store.
+   */
   private readonly tokenCache = new Map<string, string>();
+  private readonly store: VendorSessionStore;
+
+  constructor(
+    // Opcional para os specs que instanciam o service com `new`: sem o store
+    // do Nest, a sessão fica só na memória do processo.
+    @Optional() store?: VendorSessionStore,
+  ) {
+    this.store = store ?? VendorSessionStore.emMemoria();
+  }
 
   /**
    * Autenticações em voo por base (dedupe): chamadas paralelas que detectam
@@ -56,19 +87,29 @@ export class LogicaAuthService {
 
   /**
    * Token para a PRIMEIRA tentativa de uma chamada: o cacheado (renovado por
-   * qualquer fluxo), senão o informado pelo chamador, senão o LOGICA_TOKEN
-   * do env. Se a API recusar, o chamador deve pedir renovarToken().
+   * qualquer fluxo ou por outro processo), senão o informado pelo chamador,
+   * senão o LOGICA_TOKEN do env. Se a API recusar, o chamador deve pedir
+   * renovarToken() informando o token recusado.
    */
-  obterTokenInicial(baseOrigin?: string, tokenFallback?: string): string {
+  async obterTokenInicial(
+    baseOrigin?: string,
+    tokenFallback?: string,
+  ): Promise<string> {
     const cacheKey = baseOrigin ?? 'default';
-    const usedToken =
-      this.tokenCache.get(cacheKey) ?? tokenFallback ?? process.env.LOGICA_TOKEN;
+    let cacheado = this.tokenCache.get(cacheKey);
+    if (!cacheado) {
+      cacheado =
+        (await this.store.ler(VENDOR, `token:${cacheKey}`)) ?? undefined;
+      if (cacheado) this.tokenCache.set(cacheKey, cacheado);
+    }
+    const usedToken = cacheado ?? tokenFallback ?? process.env.LOGICA_TOKEN;
 
     if (!usedToken) {
-      this.logger.error('LOGICA token não fornecido nem presente em env');
-      throw new InternalServerErrorException(
-        'LOGICA_TOKEN não definido nas variáveis de ambiente',
+      // O nome da variável fica só no log; o app recebe mensagem neutra.
+      this.logger.error(
+        'LOGICA_TOKEN não definido: token não fornecido nem presente em env',
       );
+      throw erroInternoDeRastreamento('RASTREAMENTO_NAO_CONFIGURADO');
     }
 
     return usedToken;
@@ -78,8 +119,12 @@ export class LogicaAuthService {
    * Autentica na Lógica com dedupe em voo por base: se já existe um login em
    * andamento para a mesma base, aguarda o resultado dele em vez de disparar
    * outro. O login em si tem retry com backoff (ver autenticarComRetry).
+   *
+   * `tokenRecusado` é o token que a API acabou de rejeitar. Com ele, se outro
+   * processo já gravou um token diferente no Redis, esse é reaproveitado sem
+   * novo login.
    */
-  renovarToken(baseOrigin?: string): Promise<string> {
+  renovarToken(baseOrigin?: string, tokenRecusado?: string): Promise<string> {
     const cacheKey = baseOrigin ?? 'default';
 
     const emVoo = this.authEmVoo.get(cacheKey);
@@ -87,7 +132,27 @@ export class LogicaAuthService {
       return emVoo;
     }
 
-    const promessa = this.autenticarComRetry(baseOrigin)
+    const promessa = this.store
+      .comTrava(
+        VENDOR,
+        `login:${cacheKey}`,
+        async () => {
+          const guardado = await this.store.ler(VENDOR, `token:${cacheKey}`);
+          if (guardado && tokenRecusado && guardado !== tokenRecusado) {
+            return guardado;
+          }
+          const token = await this.autenticarComRetry(baseOrigin);
+          await this.store.gravar(
+            VENDOR,
+            `token:${cacheKey}`,
+            token,
+            LOGICA_SESSAO_TTL_SEG,
+          );
+          return token;
+        },
+        // O login pode levar o backoff inteiro (2 + 4 + 6 s) mais os timeouts.
+        { ttlMs: 90_000, esperaMs: 45_000 },
+      )
       .then((token) => {
         this.tokenCache.set(cacheKey, token);
         this.logger.log(
@@ -112,9 +177,11 @@ export class LogicaAuthService {
     // Erro de configuração não é transitório — falha antes de qualquer retry
     const apiNumber = process.env.LOGICA_API_NUMBER;
     if (!apiNumber) {
-      throw new InternalServerErrorException(
+      // O nome da variável fica só no log; o app recebe mensagem neutra.
+      this.logger.error(
         'LOGICA_API_NUMBER não definido nas variáveis de ambiente',
       );
+      throw erroInternoDeRastreamento('RASTREAMENTO_NAO_CONFIGURADO');
     }
 
     const totalTentativas = LOGICA_AUTH_BACKOFF_MS.length + 1;

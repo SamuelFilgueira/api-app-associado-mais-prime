@@ -1,7 +1,7 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from 'src/infra/guards/jwt-auth.guard';
 import { AdminRoleGuard } from 'src/infra/guards/admin-role.guard';
-import { AnalyticsService } from 'src/analytics/services/analytics.service';
+import { AnalyticsDashboardService } from 'src/analytics/services/analytics-dashboard.service';
 import { AnalyticsDashboardQueryDto } from 'src/analytics/dto/analytics-dashboard-query.dto';
 
 /**
@@ -11,36 +11,36 @@ import { AnalyticsDashboardQueryDto } from 'src/analytics/dto/analytics-dashboar
 @Controller('analytics/dashboard')
 @UseGuards(JwtAuthGuard, AdminRoleGuard)
 export class AnalyticsDashboardController {
-  constructor(private readonly analyticsService: AnalyticsService) {}
+  constructor(private readonly dashboards: AnalyticsDashboardService) {}
 
   /** Visão geral: totais de sessões, logins, ações principais e top telas. */
   @Get('overview')
   getOverview(@Query() query: AnalyticsDashboardQueryDto) {
-    return this.analyticsService.getDashboardOverview(query);
+    return this.dashboards.getDashboardOverview(query);
   }
 
   /** Ranking de telas por visualizações e tempo total/médio. */
   @Get('screens')
   getScreens(@Query() query: AnalyticsDashboardQueryDto) {
-    return this.analyticsService.getDashboardScreens(query);
+    return this.dashboards.getDashboardScreens(query);
   }
 
   /** Contadores de ações por tipo. */
   @Get('actions')
   getActions(@Query() query: AnalyticsDashboardQueryDto) {
-    return this.analyticsService.getDashboardActions(query);
+    return this.dashboards.getDashboardActions(query);
   }
 
   /** Métricas de formulários com taxas de sucesso/erro. */
   @Get('forms')
   getForms(@Query() query: AnalyticsDashboardQueryDto) {
-    return this.analyticsService.getDashboardForms(query);
+    return this.dashboards.getDashboardForms(query);
   }
 
   /** Série diária de sessões e instalações únicas. */
   @Get('sessions')
   getSessions(@Query() query: AnalyticsDashboardQueryDto) {
-    return this.analyticsService.getDashboardSessions(query);
+    return this.dashboards.getDashboardSessions(query);
   }
 
   /**
@@ -50,6 +50,6 @@ export class AnalyticsDashboardController {
    */
   @Get('audience')
   getAudience(@Query() query: AnalyticsDashboardQueryDto) {
-    return this.analyticsService.getDashboardAudience(query);
+    return this.dashboards.getDashboardAudience(query);
   }
 }

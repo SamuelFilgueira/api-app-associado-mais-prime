@@ -1,5 +1,18 @@
-# Exclui TUDO por padrão — só entra no build o que for explicitamente liberado abaixo.
-# Isso evita o bug do BuildKit no Windows que rejeita dotfiles e arquivos arbitrários.
+# ══════════════════════════════════════════════════════════════════
+# Contexto de build da imagem (Dockerfile).
+#
+# Exclui TUDO por padrão — só entra no build o que for explicitamente liberado
+# abaixo. Negar por padrão é o que garante que segredo novo (um .env.algo, uma
+# chave em keys/) nunca vá parar no contexto por esquecimento. Também evita o
+# bug do BuildKit no Windows que rejeita dotfiles e arquivos arbitrários.
+#
+# Ficam de fora por essa regra, entre outros:
+#   node_modules/ dist/ .git/ .github/ .claude/ .vscode/
+#   .env e variações (.env.example, .env.bak-*), keys/ certs/
+#   uploads/ updates/ webhook/ (dados de execução — vêm de volume)
+#   coverage/ docs/ test/ ops/ e todos os *.md (README, notas de trabalho)
+#   Dockerfile, docker-compose*.yml
+# ══════════════════════════════════════════════════════════════════
 *
 
 # Código-fonte e configurações de build
@@ -12,3 +25,25 @@
 !tsconfig.build.json
 !scripts/
 !assets/
+
+# ── Trava final ──────────────────────────────────────────────────
+# A última regra que casa é a que vale. Este bloco fica no fim para continuar
+# negando segredos e dados de execução mesmo que alguém acrescente uma
+# liberação ampla acima (ex.: `!.`) ou crie um desses arquivos dentro de uma
+# pasta liberada.
+**/node_modules
+**/dist
+**/coverage
+**/.git
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+keys
+certs
+uploads
+updates
+webhook
+docs
+test
+*.md

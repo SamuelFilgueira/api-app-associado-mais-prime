@@ -1,7 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import * as fs from 'fs';
 import * as path from 'path';
-import { SgaAuthService } from 'src/integrations/hinova/sga-auth.service';
+import {
+  ehBloqueioPorExtracao,
+  SgaAuthService,
+} from 'src/integrations/hinova/sga-auth.service';
+import { IntegrationError } from 'src/shared/erros/erros';
 import { BaseOrigin } from 'src/shared/token-resolver.service';
 import { baseTag } from 'src/shared/log.util';
 import { formatDateBR, parseDateSga } from 'src/shared/date.util';
@@ -217,9 +221,25 @@ export class SgaBoletoPeriodoClient {
           : typeof response.data === 'string'
             ? response.data
             : '';
-      throw new Error(
-        `SGA /listar/boleto-associado/periodo respondeu HTTP ${response.status} (página ${body.inicio_paginacao}): ${detalhe}`,
-      );
+      const mensagem = `SGA /listar/boleto-associado/periodo respondeu HTTP ${response.status} (página ${body.inicio_paginacao}): ${detalhe}`;
+
+      // Token de base bloqueado por extração no meio da varredura: a consulta
+      // da base FALHA (jamais "sem boletos") e a falha é transitória — a
+      // Hinova desbloqueia sozinha; o retry da fila tenta de novo mais tarde.
+      if (ehBloqueioPorExtracao(response.status, response.data)) {
+        throw new IntegrationError({
+          vendor: 'hinova',
+          tipo: 'indisponivel',
+          base: tenant,
+          statusVendor: response.status,
+          message: mensagem,
+          detalhes: {
+            bloqueioPorExtracao: true,
+            pagina: body.inicio_paginacao,
+          },
+        });
+      }
+      throw new Error(mensagem);
     }
 
     return this.parsePagina(response.data);

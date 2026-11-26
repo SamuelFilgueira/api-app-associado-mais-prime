@@ -12,6 +12,13 @@ import {
   M7TrajetoRaw,
 } from '../interfaces/m7-historico.interface';
 import { M7ReverseGeocodeService } from './m7-reverse-geocode.service';
+import {
+  cederEventLoop,
+  percorrerEmBlocos,
+} from 'src/rastreamento/helpers/ceder-event-loop';
+
+/** Ciclos de ignição tratados entre uma cessão do event loop e outra. */
+const CICLOS_POR_BLOCO = 50;
 
 @Injectable()
 export class M7ViagensBuilderService {
@@ -179,28 +186,30 @@ export class M7ViagensBuilderService {
       cidade: string;
     };
 
-    const pontos: Ponto[] = pontosRaw
-      .map((ponto) => {
-        const ts = this.parseDateTime(String(ponto.data_gps ?? ''));
-        if (!ts) return null;
+    // Normalização em blocos, cedendo o event loop: o período pode trazer
+    // dezenas de milhares de pontos. O resultado é o mesmo do map/filter.
+    const pontos: Ponto[] = [];
+    await percorrerEmBlocos(pontosRaw, (ponto) => {
+      const ts = this.parseDateTime(String(ponto.data_gps ?? ''));
+      if (!ts) return;
 
-        return {
-          ts,
-          dataGps: String(ponto.data_gps ?? ''),
-          codigoPosicao: Number(ponto.codigo_posicao ?? 0),
-          ignicao: this.parseBooleanIgnicao(ponto.ignicao),
-          velocidade: this.parseNumero(ponto.velocidade) ?? 0,
-          odometro: this.parseNumero(ponto.odometro),
-          lat: this.parseNumero(ponto.latitude),
-          cidade: String(ponto.cidade ?? ''),
-          lon: this.parseNumero(ponto.longitude),
-        };
-      })
-      .filter((ponto): ponto is Ponto => Boolean(ponto))
-      .sort((a, b) => {
-        const diff = a.ts.getTime() - b.ts.getTime();
-        return diff !== 0 ? diff : a.codigoPosicao - b.codigoPosicao;
+      pontos.push({
+        ts,
+        dataGps: String(ponto.data_gps ?? ''),
+        codigoPosicao: Number(ponto.codigo_posicao ?? 0),
+        ignicao: this.parseBooleanIgnicao(ponto.ignicao),
+        velocidade: this.parseNumero(ponto.velocidade) ?? 0,
+        odometro: this.parseNumero(ponto.odometro),
+        lat: this.parseNumero(ponto.latitude),
+        cidade: String(ponto.cidade ?? ''),
+        lon: this.parseNumero(ponto.longitude),
       });
+    });
+    pontos.sort((a, b) => {
+      const diff = a.ts.getTime() - b.ts.getTime();
+      return diff !== 0 ? diff : a.codigoPosicao - b.codigoPosicao;
+    });
+    await cederEventLoop();
 
     if (pontos.length > 0) {
       this.logger.debug(
@@ -249,6 +258,8 @@ export class M7ViagensBuilderService {
       i = j - 1;
     }
 
+    await cederEventLoop();
+
     const ciclos: Array<{ start: number; end: number }> = [];
     let inicioCiclo = -1;
 
@@ -295,7 +306,9 @@ export class M7ViagensBuilderService {
       tempoMovCurto: 0,
     };
 
+    let ciclosNoBloco = 0;
     for (const ciclo of ciclos) {
+      if (++ciclosNoBloco % CICLOS_POR_BLOCO === 0) await cederEventLoop();
       const seq = pontos.slice(ciclo.start, ciclo.end + 1);
       if (seq.length < 2) {
         descartes.seqCurta += 1;
@@ -504,7 +517,7 @@ export class M7ViagensBuilderService {
     lat2: number,
     lon2: number,
   ): number {
-    const toRad = (deg: number) => (deg * Math.PI) / 40;
+    const toRad = (deg: number) => (deg * Math.PI) / 180;
     const R = 6371;
     const dLat = toRad(lat2 - lat1);
     const dLon = toRad(lon2 - lon1);

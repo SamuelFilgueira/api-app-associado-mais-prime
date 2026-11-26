@@ -1,14 +1,29 @@
 import { Module } from '@nestjs/common';
-import { AlloyalApiService } from 'src/beneficios/services/alloyal-api.service';
 import { AlloyalApiController } from 'src/beneficios/controllers/alloyal-api.controller';
+import { AlloyalCashbackService } from 'src/beneficios/services/alloyal-cashback.service';
+import { AlloyalCatalogoService } from 'src/beneficios/services/alloyal-catalogo.service';
 import { AlloyalCategoriesCacheService } from 'src/beneficios/services/alloyal-categories-cache.service';
-import { alloyalRedisProvider } from 'src/beneficios/providers/alloyal-redis.provider';
+import { AlloyalCuponsService } from 'src/beneficios/services/alloyal-cupons.service';
+import { AlloyalSessaoService } from 'src/beneficios/services/alloyal-sessao.service';
+import { AlloyalUsuariosService } from 'src/beneficios/services/alloyal-usuarios.service';
+import { AlloyalModule } from 'src/integrations/alloyal/alloyal.module';
 
+/**
+ * Clube de vantagens (Alloyal).
+ *
+ * `AlloyalModule` traz a porta `AlloyalGateway` (client do vendor);
+ * `CacheService` vem do `CacheModule` global. Exporta só o
+ * `AlloyalCategoriesCacheService`, usado pelo painel de parceiros diretos.
+ */
 @Module({
+  imports: [AlloyalModule],
   controllers: [AlloyalApiController],
   providers: [
-    AlloyalApiService,
-    alloyalRedisProvider,
+    AlloyalSessaoService,
+    AlloyalCatalogoService,
+    AlloyalCashbackService,
+    AlloyalUsuariosService,
+    AlloyalCuponsService,
     AlloyalCategoriesCacheService,
   ],
   exports: [AlloyalCategoriesCacheService],

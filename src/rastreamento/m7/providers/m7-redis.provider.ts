@@ -1,4 +1,5 @@
 import Redis from 'ioredis';
+import { redisConnectionOptions } from 'src/config/redis.config';
 
 /**
  * Client Redis dedicado ao cache de reverse geocode da M7 (mesmo molde de
@@ -11,8 +12,7 @@ export const m7RedisProvider = {
   provide: M7_REDIS,
   useFactory: (): Redis => {
     return new Redis({
-      host: process.env.REDIS_HOST || 'localhost',
-      port: Number(process.env.REDIS_PORT) || 6379,
+      ...redisConnectionOptions(),
       lazyConnect: true,
       maxRetriesPerRequest: 2,
       enableReadyCheck: false,

@@ -64,7 +64,7 @@ Textos default = textos oficiais do PDF (em `DEFAULT_MENSAGENS`, `config/boleto-
 
 Config lida no boot — alterou env, reinicie a API. Removidas da v1: `DIAS_VENCIMENTO` e `FALLBACK_MES_CURTO` (dias fixos não existem mais; fevereiro é resolvido pelo próprio vencimento efetivo).
 
-**Bloqueio de token durante a varredura (desde 2026-10-06):** a consulta paginada chama o SGA com `failoverTokenBase: false`. Se a Hinova bloquear o token de base ativo no meio das páginas, a rotina **não** alterna para o token reserva (continuar a extração com ele só o bloquearia também, e é ele que mantém o app funcionando). A execução falha, fica registrada como `FALHA` e o BullMQ tenta uma vez mais após 5 min (`attempts: 2`); o próximo agendamento diário roda normalmente. Detalhes em `docs/HINOVA_BLOQUEIO_TOKEN_PROTECOES.md`.
+**Bloqueio de token durante a varredura (desde 2026-10-06):** a consulta paginada chama o SGA com `failoverTokenBase: false`. Se a Hinova bloquear o token de base ativo no meio das páginas, a rotina **não** alterna para o token reserva (continuar a extração com ele só o bloquearia também, e é ele que mantém o app funcionando). A execução falha, fica registrada como `FALHA` e o job é repetido em +10 e +20 min (`attempts: 3`, backoff exponencial de 10 min), varrendo de novo só as bases que falharam; o próximo agendamento diário roda normalmente. Detalhes em `docs/HINOVA_BLOQUEIO_TOKEN_PROTECOES.md`.
 
 ## 3. Endpoints admin e migration
 
@@ -88,3 +88,21 @@ Migration: `20260910120000_regua_boleto_notificacao_v2` (amplia o enum `tipoMens
 3. "Aguardando compensação" não existe como status no SGA — a régua só para quando a baixa é registrada.
 4. Critério de parada da paginação com >500 registros ainda não validado empiricamente no SGA real.
 5. Rate limit da Hinova (throttle não implementado).
+
+## Atualização (novembro de 2026)
+
+- **Uma execução por base e dia.** Trava no Redis por base e data de referência. Na rota manual
+  síncrona, base ocupada vem com `status: PULADA` e `motivoDoPulo: EXECUCAO_EM_CURSO`; se nenhuma base
+  pedida pôde rodar, a rota responde 409 `REGUA_EM_EXECUCAO`.
+- **Quem ficou no meio do caminho é reenviado.** Log `ENFILEIRADO` sem ticket há 5 minutos ou mais, e
+  `FALHA` de transporte (`expoErro` começando por `SEND_ERROR:`), voltam a ser elegíveis enquanto o
+  boleto estiver na faixa da etapa. `ENVIADO`, `ENTREGUE` e recusa do Expo são definitivos.
+  **Antes do primeiro deploy**, confira quantas linhas antigas se enquadram (a consulta está em
+  `docs/OPERACAO_E_DEPLOY.md`): elas serão reenviadas na primeira execução.
+- **Envio por lote**: reserva, envia e grava o desfecho de 100 em 100. Uma queda no meio deixa no
+  máximo um lote sem desfecho.
+- **O job falha quando uma base falha** (ou termina com pendentes) e é repetido; antes concluía com
+  sucesso e a falha só aparecia no retorno. As bases já concluídas não são varridas de novo no retry.
+- A resposta do `executar` síncrono ganhou `totalReenvios` e `totalPendentes`.
+- Métrica `boleto_regua_ultima_execucao_timestamp_seconds` por base; o alerta dispara se passar de
+  26 h sem conclusão.

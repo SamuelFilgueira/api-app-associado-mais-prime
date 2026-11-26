@@ -7,6 +7,7 @@ import {
   resolverTemplateRevistoria,
   situacaoExigeRevistoria,
 } from 'src/config/revistoria-regra.config';
+import { BaseNaoResolvidaError } from 'src/shared/tenant/tenant-context';
 
 /**
  * Cópia literal de `mapTipoToVehicleType` do app (services/revistoriaService.ts),
@@ -60,7 +61,6 @@ describe('revistoria-regra.config', () => {
     it('MAIS_PRIME e MAIS_PRIME_RS usam a regra padrão', () => {
       expect(getRegraRevistoria('MAIS_PRIME')).toBe(REGRA_PADRAO);
       expect(getRegraRevistoria('MAIS_PRIME_RS')).toBe(REGRA_PADRAO);
-      expect(getRegraRevistoria(undefined)).toBe(REGRA_PADRAO);
     });
 
     it('boleto vigente: conta 27, tipo 2, veículo → 20 após o boleto, reativa com 1', () => {
@@ -71,6 +71,8 @@ describe('revistoria-regra.config', () => {
           situacaoVeiculoAposBoleto: 20,
           situacaoVeiculoAposPagamento: 1,
           situacaoAssociadoAposPagamento: 1,
+          // Mais Prime: boleto pelo valor base, sem multa nem mora.
+          encargosPorAtraso: null,
         });
       }
     });
@@ -125,9 +127,8 @@ describe('revistoria-regra.config', () => {
       resetTenantConfigCache();
     });
 
-    it('HERTZ usa a regra própria, inclusive como base padrão do deploy', () => {
+    it('HERTZ usa a regra própria', () => {
       expect(getRegraRevistoria('HERTZ')).toBe(REGRA_HERTZ);
-      expect(getRegraRevistoria(undefined)).toBe(REGRA_HERTZ);
     });
 
     it('INADIMPLENTE exige revistoria; demais situações não', () => {
@@ -167,7 +168,28 @@ describe('revistoria-regra.config', () => {
         situacaoVeiculoAposBoleto: null,
         situacaoVeiculoAposPagamento: 1,
         situacaoAssociadoAposPagamento: 1,
+        encargosPorAtraso: {
+          multaPercentual: 2,
+          moraDiariaPercentual: 0.5,
+          cancelarBoletoEmAberto: true,
+        },
       });
+    });
+
+    it('encargos por atraso são SÓ da Hertz: nenhuma outra base os cobra', () => {
+      process.env.TENANT_BASES = 'MAIS_PRIME:,MAIS_PRIME_RS:_RS,HERTZ:_HERTZ';
+      resetTenantConfigCache();
+
+      expect(
+        getRegraRevistoria('HERTZ').boleto.encargosPorAtraso,
+      ).not.toBeNull();
+      expect(
+        getRegraRevistoria('MAIS_PRIME').boleto.encargosPorAtraso,
+      ).toBeNull();
+      expect(
+        getRegraRevistoria('MAIS_PRIME_RS').boleto.encargosPorAtraso,
+      ).toBeNull();
+      expect(REGRA_PADRAO.boleto.encargosPorAtraso).toBeNull();
     });
 
     it('descreve a regra para app e painel', () => {
@@ -187,6 +209,54 @@ describe('revistoria-regra.config', () => {
         },
         templatePadrao: 'VEICULOS_LEVES',
       });
+    });
+  });
+  describe('base ausente ou de outro deploy — falha em vez de usar a base padrão', () => {
+    beforeEach(() => {
+      // Deploy com duas regras diferentes: MAIS_PRIME (padrão) e HERTZ.
+      process.env.TENANT_BASES = 'MAIS_PRIME:,HERTZ:_HERTZ';
+      resetTenantConfigCache();
+    });
+
+    it.each([undefined, null, ''])(
+      'getRegraRevistoria(%p) lança BaseNaoResolvidaError',
+      (base) => {
+        expect(() => getRegraRevistoria(base)).toThrow(BaseNaoResolvidaError);
+      },
+    );
+
+    it('base que não pertence a este deploy também lança', () => {
+      expect(() => getRegraRevistoria('MAIS_PRIME_RS')).toThrow(
+        BaseNaoResolvidaError,
+      );
+      expect(() => getRegraRevistoria('hertz')).toThrow(BaseNaoResolvidaError);
+    });
+
+    it('sem base, a situação do veículo NÃO é avaliada pela regra da base padrão', () => {
+      // Na regra padrão (Mais Prime) INADIMPLENTE não exige revistoria; na
+      // da Hertz exige. Antes, um associado HERTZ sem base recebia `false`.
+      expect(situacaoExigeRevistoria('INADIMPLENTE', 'HERTZ')).toBe(true);
+      expect(situacaoExigeRevistoria('INADIMPLENTE', 'MAIS_PRIME')).toBe(false);
+      expect(() => situacaoExigeRevistoria('INADIMPLENTE', undefined)).toThrow(
+        BaseNaoResolvidaError,
+      );
+    });
+
+    it('sem base, o template não é resolvido pela regra da base padrão', () => {
+      expect(() =>
+        resolverTemplateRevistoria('MOTOCICLETA', undefined),
+      ).toThrow(BaseNaoResolvidaError);
+    });
+
+    it('base configurada sem regra própria segue na regra padrão', () => {
+      process.env.TENANT_BASES = 'MAIS_PRIME:,OUTRA_EMPRESA:_OUTRA';
+      resetTenantConfigCache();
+      expect(getRegraRevistoria('OUTRA_EMPRESA')).toBe(REGRA_PADRAO);
+    });
+
+    it('as bases configuradas continuam sendo descritas (painel e log de boot)', () => {
+      expect(descreverRegraRevistoria('MAIS_PRIME').perfil).toBe('PADRAO');
+      expect(descreverRegraRevistoria('HERTZ').perfil).toBe('HERTZ');
     });
   });
 });
